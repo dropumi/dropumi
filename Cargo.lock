@@ -331,6 +331,7 @@ dependencies = [
 name = "dropumi-cli"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clap",
  "dropumi-application",
  "dropumi-domain",
