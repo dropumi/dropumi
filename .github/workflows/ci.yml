@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# Dropumi CI. Policy (ADR-0010):
+# - read-only GITHUB_TOKEN, no secrets, no pull_request_target;
+# - every third-party action is pinned by full commit SHA with a version comment;
+# - every checkout sets persist-credentials: false;
+# - Rust is installed with plain rustup (no toolchain action).
+# Job display names are used as required status checks; do not rename them
+# without updating the "Protect Main Branch" ruleset.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+defaults:
+  run:
+    shell: bash
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Install Rust (stable + rustfmt)
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+          rustup default stable
+      - run: cargo fmt --all --check
+      - name: Check MPL-2.0 SPDX headers (first line of every .rs file)
+        run: |
+          bad=""
+          while IFS= read -r -d '' f; do
+            if [ "$(head -n 1 "$f")" != "// SPDX-License-Identifier: MPL-2.0" ]; then
+              bad="${bad}${f}"$'\n'
+            fi
+          done < <(git ls-files -z -- '*.rs')
+          if [ -n "$bad" ]; then
+            echo "::error::First line must be '// SPDX-License-Identifier: MPL-2.0' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+      - name: Check MPL-2.0 SPDX headers (TOML, YAML and shell files)
+        run: |
+          bad=""
+          while IFS= read -r -d '' f; do
+            first="$(head -n 1 "$f")"
+            case "$first" in
+              '#!'*) first="$(sed -n 2p "$f")" ;;
+            esac
+            if [ "$first" != "# SPDX-License-Identifier: MPL-2.0" ]; then
+              bad="${bad}${f}"$'\n'
+            fi
+          done < <(git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' ':!*pnpm-lock.yaml')
+          if [ -n "$bad" ]; then
+            echo "::error::First line (after any #! line) must be '# SPDX-License-Identifier: MPL-2.0' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Install Rust (stable + clippy)
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --no-default-features --locked -- -D warnings
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: { RUSTDOCFLAGS: -D warnings }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo doc --workspace --no-deps --all-features --locked
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo test --workspace --all-features --locked
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # The MSRV is read from [workspace.package] rust-version; there is no rust-toolchain.toml.
+      - id: msrv
+        run: |
+          msrv="$(cargo metadata --no-deps --format-version 1 | jq -r '[.packages[].rust_version | select(. != null)] | unique | if length == 1 then .[0] else error("expected one rust-version") end')"
+          echo "version=${msrv}" >> "$GITHUB_OUTPUT"
+      - env: { MSRV: "${{ steps.msrv.outputs.version }}" }
+        run: |
+          rustup toolchain install "$MSRV" --profile minimal --no-self-update
+          rustup default "$MSRV"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: msrv, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo check --workspace --all-targets --all-features --locked
+
+  architecture:
+    name: architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - run: bash scripts/ci/check-architecture.sh
+
+  # Core library crates only (the CLI is excluded). Result label: "Build verified only
+  # (core library crates; no app, not run)". Nothing is linked or executed on the target.
+  cross-build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-linux-android, os: ubuntu-latest }
+          - { target: aarch64-apple-ios, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env: { TARGET: "${{ matrix.target }}", ANDROID_API: "26" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --target "$TARGET" --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: "${{ matrix.target }}", save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - name: Build core library crates (no linking, not run)
+        run: |
+          if [ "$TARGET" = "aarch64-linux-android" ]; then   # blake3 compiles C NEON for the target
+            ndk="${ANDROID_NDK_HOME:?}"
+            echo "NDK $(grep -E '^Pkg.Revision' "$ndk/source.properties")"
+            ndk_bin="${ndk}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CC_aarch64_linux_android="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
+            export AR_aarch64_linux_android="${ndk_bin}/llvm-ar"
+            test -x "$CC_aarch64_linux_android" || { echo "::error::NDK clang missing: $CC_aarch64_linux_android"; exit 1; }
+          else
+            xcodebuild -version; xcrun --sdk iphoneos --show-sdk-version
+          fi
+          cargo build --workspace --exclude dropumi-cli --no-default-features --locked --target "$TARGET"
+
+  deny:
+    name: cargo-deny (${{ matrix.checks }})
+    strategy:
+      fail-fast: false
+      matrix: { checks: [advisories, "bans licenses sources"] }
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with: { tool: cargo-deny@0.20.2, fallback: none }
+      - env: { CHECKS: "${{ matrix.checks }}" }
+        run: |
+          read -r -a checks <<< "$CHECKS"
+          cargo deny --locked check "${checks[@]}"
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with: { tool: zizmor@1.30.1, fallback: none }
+      # github.token is the automatic read-only job token (not a repository secret);
+      # zizmor uses it only for its online audits (for example impostor-commit and
+      # known-vulnerable-actions).
+      - env: { GH_TOKEN: "${{ github.token }}" }
+        run: zizmor --format=github .
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # The image digest is not tracked by Dependabot; update it by hand (docs/development.md).
+      - run: |
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/repo" --workdir /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+
+  # Experimental and never a required check: multicast on hosted runners is UNVERIFIED.
+  mdns-e2e:
+    name: mdns-e2e (experimental)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    env: { DROPUMI_TEST_MDNS: "1" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_
