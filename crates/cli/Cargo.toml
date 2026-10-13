@@ -15,3 +15,28 @@ workspace = true
 [[bin]]
 name = "dropumi"
 path = "src/main.rs"
+
+[features]
+default = ["mdns"]
+mdns = ["dropumi-infra/mdns"]
+
+[dependencies]
+clap.workspace = true
+dropumi-application.workspace = true
+dropumi-domain.workspace = true
+dropumi-infra.workspace = true
+dropumi-protocol.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "signal", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# Discards pending terminal input before each prompt (tcflush).
+rustix = { workspace = true, features = ["termios"] }
+
+[dev-dependencies]
+proptest.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
