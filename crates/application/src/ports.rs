@@ -1,0 +1,277 @@
+// SPDX-License-Identifier: MPL-2.0
+//! Ports: the interfaces use cases need from the outside world.
+//!
+//! Each port has a real adapter in `dropumi-infra` and an in-memory double
+//! in the tests. Async methods return `impl Future + Send`; use cases are
+//! generic over ports (no `dyn`).
+
+use std::future::Future;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::time::Duration;
+
+use dropumi_domain::device::DeviceName;
+use dropumi_domain::discovery::DiscoveredPeer;
+use dropumi_domain::filename::SafeFileName;
+use dropumi_domain::identity::Fingerprint;
+use dropumi_domain::time::Timestamp;
+use dropumi_domain::transfer::{FileEntry, RejectReason, TransferId};
+use dropumi_domain::trust::TrustedDevice;
+use dropumi_protocol::sas::SasCode;
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::error::{DiscoveryError, SourceError, StorageError, StoreError, TransportError};
+use crate::events::PeerView;
+use crate::identity::LocalIdentity;
+
+/// Opens outgoing connections.
+pub trait Connector: Send + Sync {
+    /// Connection type.
+    type Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static;
+
+    /// Connects to `addr` within `timeout`.
+    fn connect(
+        &self,
+        addr: SocketAddr,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<Self::Stream, TransportError>> + Send;
+
+    /// Resolves a host name.
+    fn resolve(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> impl Future<Output = Result<Vec<SocketAddr>, TransportError>> + Send;
+}
+
+/// Accepts incoming connections.
+pub trait Listener: Send {
+    /// Connection type.
+    type Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static;
+
+    /// Waits for the next connection.
+    fn accept(
+        &mut self,
+    ) -> impl Future<Output = Result<(Self::Stream, SocketAddr), TransportError>> + Send;
+
+    /// Addresses the listener is bound to.
+    fn local_addrs(&self) -> Vec<SocketAddr>;
+}
+
+/// What a receiver advertises.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Advertisement {
+    /// Device name.
+    pub name: DeviceName,
+    /// 8-character fingerprint hint.
+    pub fp_hint: String,
+    /// TCP port.
+    pub port: u16,
+    /// Supported protocol versions.
+    pub versions: Vec<u16>,
+}
+
+/// A running advertisement.
+pub trait AdHandle: Send {
+    /// Stops advertising (sends goodbye packets where supported).
+    fn stop(self) -> impl Future<Output = ()> + Send;
+    /// Instance name.
+    fn instance(&self) -> &str;
+}
+
+/// Finds nearby devices and advertises this one.
+pub trait Discovery: Send + Sync {
+    /// Advertisement handle.
+    type Handle: AdHandle;
+
+    /// Starts advertising.
+    fn advertise(
+        &self,
+        ad: Advertisement,
+    ) -> impl Future<Output = Result<Self::Handle, DiscoveryError>> + Send;
+
+    /// Browses for `timeout` and returns what was seen.
+    fn browse(
+        &self,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<Vec<DiscoveredPeer>, DiscoveryError>> + Send;
+}
+
+/// Metadata of a file to send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceMeta {
+    /// Wire name derived from the local file name.
+    pub name: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// Modification time (Unix seconds), if available.
+    pub modified: Option<i64>,
+}
+
+/// Reads files to send.
+pub trait FileSource: Send + Sync {
+    /// Reader type.
+    type Reader: AsyncRead + Unpin + Send;
+
+    /// Inspects a path; regular files only.
+    fn meta(&self, path: &Path) -> impl Future<Output = Result<SourceMeta, SourceError>> + Send;
+
+    /// Opens a file whose metadata must still match.
+    fn open(
+        &self,
+        path: &Path,
+        meta: &SourceMeta,
+    ) -> impl Future<Output = Result<Self::Reader, SourceError>> + Send;
+
+    /// Whether the file still matches its metadata after sending.
+    fn unchanged(&self, path: &Path, meta: &SourceMeta) -> impl Future<Output = bool> + Send;
+}
+
+/// A received file that has been finalized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedFile {
+    /// Final file name inside the receive directory (never a path).
+    pub saved_as: String,
+}
+
+/// A file being received into a temporary location.
+pub trait IncomingFile: Send {
+    /// Appends bytes.
+    fn write(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Syncs and finalizes without overwriting anything.
+    fn commit(self) -> impl Future<Output = Result<SavedFile, StorageError>> + Send;
+
+    /// Deletes the temporary file. Must be called on every failure path;
+    /// dropping without it is only a best-effort fallback.
+    fn discard(self) -> impl Future<Output = ()> + Send;
+}
+
+/// Where received files go.
+pub trait FileSink: Send + Sync {
+    /// Incoming file type.
+    type File: IncomingFile;
+
+    /// Starts receiving a file.
+    fn begin(
+        &self,
+        name: &SafeFileName,
+        size: u64,
+    ) -> impl Future<Output = Result<Self::File, StorageError>> + Send;
+
+    /// Makes new directory entries durable.
+    fn sync_dir(&self) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
+
+/// Stores this device's identity.
+pub trait IdentityStore: Send + Sync {
+    /// Loads the identity, creating one on first use.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O, corruption or unsafe permissions.
+    fn load_or_create(&self) -> Result<LocalIdentity, StoreError>;
+
+    /// Replaces the key with a new one.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn reset(&self) -> Result<LocalIdentity, StoreError>;
+
+    /// Changes the device name.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn set_name(&self, name: &DeviceName) -> Result<LocalIdentity, StoreError>;
+}
+
+/// Stores trusted devices.
+pub trait TrustStore: Send + Sync {
+    /// Looks up a fingerprint.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O, corruption or unsafe permissions.
+    fn get(&self, fp: &Fingerprint) -> Result<Option<TrustedDevice>, StoreError>;
+
+    /// Lists every trusted device.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O, corruption or unsafe permissions.
+    fn list(&self) -> Result<Vec<TrustedDevice>, StoreError>;
+
+    /// Adds or replaces a trusted device.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn upsert(&self, device: TrustedDevice) -> Result<(), StoreError>;
+
+    /// Removes a device; returns whether it existed.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError>;
+
+    /// Records a completed session.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn touch(&self, fp: &Fingerprint, at: Timestamp) -> Result<(), StoreError>;
+}
+
+/// An offer awaiting the receiving user's decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingOffer {
+    /// Transfer id (lets an interface bind its answer to this offer).
+    pub transfer_id: TransferId,
+    /// The sender.
+    pub peer: PeerView,
+    /// Verification code (unverified senders only).
+    pub sas: Option<SasCode>,
+    /// Offered files.
+    pub files: Vec<FileEntry>,
+    /// Total bytes.
+    pub total_bytes: u64,
+}
+
+/// The receiving user's decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// Accept the offer.
+    Accept,
+    /// Reject the offer.
+    Reject(RejectReason),
+}
+
+/// A verification code awaiting confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SasPrompt {
+    /// The peer.
+    pub peer: PeerView,
+    /// The code both screens must show.
+    pub code: SasCode,
+    /// Why the code is shown.
+    pub purpose: SasPurpose,
+}
+
+/// Why a verification code is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SasPurpose {
+    /// Pairing devices.
+    Pairing,
+    /// Sending to an unverified receiver.
+    UnverifiedReceiver,
+}
+
+/// Asks the local user.
+pub trait Interaction: Send + Sync {
+    /// Accept or reject an offer.
+    fn decide_offer(&self, offer: &IncomingOffer) -> impl Future<Output = Decision> + Send;
+
+    /// Whether the user confirmed that both screens show the same code.
+    fn confirm_sas(&self, prompt: &SasPrompt) -> impl Future<Output = bool> + Send;
+}
+
+/// Wall-clock time.
+pub trait Clock: Send + Sync {
+    /// Now.
+    fn now(&self) -> Timestamp;
+}

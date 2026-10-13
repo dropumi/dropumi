@@ -11,3 +11,14 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+dropumi-domain.workspace = true
+dropumi-protocol.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time", "test-util"] }
