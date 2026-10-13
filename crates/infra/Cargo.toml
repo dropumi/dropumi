@@ -12,11 +12,17 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["mdns"]
+# mDNS / DNS-SD discovery (desktop). Mobile builds use native discovery.
+mdns = ["dep:mdns-sd"]
+
 [dependencies]
 dirs.workspace = true
 dropumi-application.workspace = true
 dropumi-domain.workspace = true
 dropumi-protocol.workspace = true
+mdns-sd = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

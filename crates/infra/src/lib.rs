@@ -3,10 +3,13 @@
 //!
 //! Real implementations of the application ports: TCP ([`net`]), the
 //! filesystem ([`fs`]), configuration stores ([`store`]), permissions
-//! ([`perms`]), the clock ([`clock`]) and DNS-SD TXT hints ([`txt`]).
+//! ([`perms`]), the clock ([`clock`]), DNS-SD TXT hints ([`txt`]) and,
+//! with the `mdns` feature, mDNS discovery (`mdns`).
 
 pub mod clock;
 pub mod fs;
+#[cfg(feature = "mdns")]
+pub mod mdns;
 pub mod net;
 pub mod paths;
 pub mod perms;
