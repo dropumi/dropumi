@@ -11,3 +11,23 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+dirs.workspace = true
+dropumi-application.workspace = true
+dropumi-domain.workspace = true
+dropumi-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "rt", "sync", "time"] }
+tracing.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
