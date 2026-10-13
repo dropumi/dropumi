@@ -1,0 +1,32 @@
+{
+  "brand": "dropumi",
+  "tagline": "Share files nearby. No internet needed.",
+  "brief": "Free, open-source, ultra-lightweight, cross-platform local file sharing. An AirDrop-style experience for every device, built in the open.",
+  "adjectives": ["open", "light", "friendly", "nearby"],
+  "criteria": "Success: reads as drop + proximity at a glance, works at 16 px and in one colour, distinct from generic water/wifi icons.",
+  "industry": "software",
+  "nav": ["Features", "Download", "GitHub"],
+  "brand_color": "#0E94A6",
+  "greyscale": false,
+  "designer": "dropumi",
+  "round": 3,
+  "concepts": [
+    {
+      "name": "Ripple Drop",
+      "symbol": "final/dropumi-symbol.svg",
+      "lockup": "final/dropumi-horizontal.svg",
+      "symbol_on_tile": "final/dropumi-symbol-reversed.svg",
+      "lockup_on_dark": "final/dropumi-horizontal-reversed.svg",
+      "tile_color": "#0B1F3A",
+      "idea": "A drop at the centre of open ripples: files land on nearby devices, no internet in between.",
+      "rationale": [
+        "Drop + concentric ripples = the name and the proximity idea in one shape",
+        "Rings are open at the top: open source, and the drop tip rises out",
+        "Two colours carry the name: navy 'drop', sea-teal 'umi' (umi = sea)",
+        "Dedicated small-size cut keeps it legible at 16 px"
+      ]
+    }
+  ],
+  "recommendation": "Ripple Drop is the final merged direction: the Ripple and Radiate concepts combined.",
+  "next_steps": ["Drop files from branding/final into the app and website", "Add favicon and web manifest from branding/final/web"]
+}
