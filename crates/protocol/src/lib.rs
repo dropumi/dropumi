@@ -9,6 +9,7 @@
 //! - [`codec`] and [`message`]: strict CBOR control messages;
 //! - [`identity`], [`handshake`], [`sas`], [`record`]: the static key, the
 //!   Noise XX handshake with a committed SAS, and transport records;
+//! - [`session`]: sans-IO sender and receiver transfer machines;
 //! - [`random`]: OS randomness.
 #![deny(
     clippy::indexing_slicing,
@@ -27,6 +28,7 @@ pub mod message;
 pub mod random;
 pub mod record;
 pub mod sas;
+pub mod session;
 pub mod version;
 
 pub use error::ProtocolError;
