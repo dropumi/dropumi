@@ -19,6 +19,11 @@ dropumi-protocol = { path = "crates/protocol" }
 dropumi-application = { path = "crates/application" }
 dropumi-infra = { path = "crates/infra", default-features = false }
 
+data-encoding = "2.11.1"
+proptest = "1.12.0"
+thiserror = "2.0.21"
+unicode-normalization = "0.1.25"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
