@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MPL-2.0
+[package]
+name = "dropumi-application"
+description = "Dropumi application layer: ports, secure channel driver and transfer/pairing use cases."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

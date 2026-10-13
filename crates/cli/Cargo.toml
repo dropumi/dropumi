@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MPL-2.0
+[package]
+name = "dropumi-cli"
+description = "Dropumi command-line interface (binary: dropumi)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dropumi"
+path = "src/main.rs"
