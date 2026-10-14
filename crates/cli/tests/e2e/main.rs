@@ -21,6 +21,8 @@ mod failure;
 // The app facade ships for Apple platforms and Android only.
 #[cfg(unix)]
 mod ffi_interop;
+// The apps against the CLI (opt-in: DROPUMI_TEST_APPLE=1).
+mod interop;
 mod pairing;
 mod policy;
 mod security;
