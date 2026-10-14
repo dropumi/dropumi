@@ -1,0 +1,4203 @@
+{
+  "version": "2.21",
+  "children": [
+    {
+      "type": "frame",
+      "id": "erzI2",
+      "x": 0,
+      "y": 0,
+      "name": "Landing Page",
+      "clip": true,
+      "width": 1440,
+      "fill": "$bg",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "CIOPh",
+          "name": "Nav",
+          "width": "fill_container",
+          "height": 80,
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "t8q2e",
+              "name": "Logo",
+              "width": 150,
+              "height": 38,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "frame",
+              "id": "M18N2K",
+              "name": "Links",
+              "gap": 36,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "f2JYp",
+                  "name": "How it works",
+                  "fill": "$text-secondary",
+                  "content": "How it works",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "mIpXn",
+                  "name": "Features",
+                  "fill": "$text-secondary",
+                  "content": "Features",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "A0jqUK",
+                  "name": "Download",
+                  "fill": "$text-secondary",
+                  "content": "Download",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "t11fFr",
+                  "name": "Open source",
+                  "fill": "$text-secondary",
+                  "content": "Open source",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Ns19b",
+              "name": "GitHub Button",
+              "height": 44,
+              "fill": "$surface",
+              "cornerRadius": 22,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "gap": 8,
+              "padding": [
+                0,
+                20
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "QUC2Q",
+                  "name": "GitHub Icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "github",
+                  "library": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "text",
+                  "id": "SwfIH",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "Star on GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "w1aGG",
+          "name": "Hero",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 56,
+          "padding": [
+            56,
+            80,
+            0,
+            80
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "s6Xq7",
+              "name": "Hero Text",
+              "width": 820,
+              "layout": "vertical",
+              "gap": 24,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "KbDrX",
+                  "name": "Badge",
+                  "height": 34,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 17,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "bxrVg",
+                      "name": "Dot",
+                      "fill": "#1E9E6A",
+                      "width": 8,
+                      "height": 8
+                    },
+                    {
+                      "type": "text",
+                      "id": "tJCK1",
+                      "name": "Badge Text",
+                      "fill": "$accent",
+                      "content": "Free and open source · No internet needed",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "ZBGfq",
+                  "name": "Headline",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": 820,
+                  "content": "Send anything to anyone nearby.",
+                  "lineHeight": 1.08,
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 68,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "W4oxV2",
+                  "name": "Subhead",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 620,
+                  "content": "dropumi is an AirDrop-style way to share files between phones and computers on the same Wi-Fi. No accounts, no cloud, no cables. Just drop.",
+                  "lineHeight": 1.55,
+                  "textAlign": "center",
+                  "fontFamily": "$font-body",
+                  "fontSize": 19,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "m70Z0Z",
+                  "name": "CTAs",
+                  "gap": 14,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "f0b6o",
+                      "name": "Download Button",
+                      "height": 56,
+                      "fill": "$accent",
+                      "cornerRadius": 28,
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        30
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "iYylR",
+                          "name": "Icon",
+                          "width": 20,
+                          "height": 20,
+                          "icon": "download",
+                          "library": "lucide",
+                          "fill": "$on-accent"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fu2Ea",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download dropumi",
+                          "fontFamily": "$font-body",
+                          "fontSize": 16,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "b29zLT",
+                      "name": "Source Button",
+                      "height": 56,
+                      "fill": "$surface",
+                      "cornerRadius": 28,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        28
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "UEWr3",
+                          "name": "Icon",
+                          "width": 20,
+                          "height": 20,
+                          "icon": "github",
+                          "library": "lucide",
+                          "fill": "$text-primary"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Kibiu",
+                          "name": "Label",
+                          "fill": "$text-primary",
+                          "content": "View source",
+                          "fontFamily": "$font-body",
+                          "fontSize": 16,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "zctRV",
+                  "name": "Platforms Note",
+                  "fill": "$text-secondary",
+                  "content": "macOS · Windows · Linux · iOS · Android",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ASIoB",
+              "name": "Hero Screenshot",
+              "width": 1000,
+              "height": 677,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-export/desktop/mac/light/1-nearby.png",
+                "mode": "contain"
+              }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Adlqs",
+          "name": "How it works",
+          "width": "fill_container",
+          "fill": "$navy",
+          "layout": "vertical",
+          "gap": 56,
+          "padding": [
+            110,
+            80
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Tv66T",
+              "name": "Section Header",
+              "width": 760,
+              "layout": "vertical",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "l7DUo",
+                  "name": "Eyebrow",
+                  "fill": "$light-teal",
+                  "content": "HOW IT WORKS",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.5
+                },
+                {
+                  "type": "text",
+                  "id": "ishFh",
+                  "name": "Title",
+                  "fill": "#F2F7FA",
+                  "textGrowth": "fixed-width",
+                  "width": 760,
+                  "content": "Three taps. No setup.",
+                  "lineHeight": 1.12,
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 44,
+                  "fontWeight": "800"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "mf4JD",
+              "name": "Steps",
+              "width": "fill_container",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "W1tGj",
+                  "name": "Step 1",
+                  "width": "fill_container",
+                  "fill": "#0F2238",
+                  "cornerRadius": 24,
+                  "stroke": "#1F3652",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 16,
+                  "padding": 32,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "eir5x",
+                      "name": "Number",
+                      "width": 44,
+                      "height": 44,
+                      "fill": "#123A4C",
+                      "cornerRadius": 22,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "q9Btdu",
+                          "name": "N",
+                          "fill": "$light-teal",
+                          "content": "1",
+                          "fontFamily": "$font-body",
+                          "fontSize": 18,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "Xsb57",
+                      "name": "Step Title",
+                      "fill": "#F2F7FA",
+                      "content": "Open dropumi",
+                      "fontFamily": "$font-display",
+                      "fontSize": 22,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "BiFbM",
+                      "name": "Step Body",
+                      "fill": "#9DB0C2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Both devices just need to be on the same Wi-Fi or hotspot. Nearby devices show up on the radar on their own.",
+                      "lineHeight": 1.6,
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PRN6P",
+                  "name": "Step 2",
+                  "width": "fill_container",
+                  "fill": "#0F2238",
+                  "cornerRadius": 24,
+                  "stroke": "#1F3652",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 16,
+                  "padding": 32,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "B777BR",
+                      "name": "Number",
+                      "width": 44,
+                      "height": 44,
+                      "fill": "#123A4C",
+                      "cornerRadius": 22,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "RB2YY",
+                          "name": "N",
+                          "fill": "$light-teal",
+                          "content": "2",
+                          "fontFamily": "$font-body",
+                          "fontSize": 18,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "optC9",
+                      "name": "Step Title",
+                      "fill": "#F2F7FA",
+                      "content": "Pick a file, tap a device",
+                      "fontFamily": "$font-display",
+                      "fontSize": 22,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "saf4N",
+                      "name": "Step Body",
+                      "fill": "#9DB0C2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Drop a file or photo onto the app, then tap the device you want to send it to.",
+                      "lineHeight": 1.6,
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SUuxK",
+                  "name": "Step 3",
+                  "width": "fill_container",
+                  "fill": "#0F2238",
+                  "cornerRadius": 24,
+                  "stroke": "#1F3652",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 16,
+                  "padding": 32,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Uo0g2",
+                      "name": "Number",
+                      "width": 44,
+                      "height": 44,
+                      "fill": "#123A4C",
+                      "cornerRadius": 22,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "eVHHH",
+                          "name": "N",
+                          "fill": "$light-teal",
+                          "content": "3",
+                          "fontFamily": "$font-body",
+                          "fontSize": 18,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "bpsu5",
+                      "name": "Step Title",
+                      "fill": "#F2F7FA",
+                      "content": "Accept and done",
+                      "fontFamily": "$font-display",
+                      "fontSize": 22,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "JmtNK",
+                      "name": "Step Body",
+                      "fill": "#9DB0C2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The other person gets a prompt and accepts. The file goes straight across your local network.",
+                      "lineHeight": 1.6,
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "iEorC",
+          "name": "Features",
+          "width": "fill_container",
+          "fill": "$bg",
+          "layout": "vertical",
+          "gap": 56,
+          "padding": [
+            110,
+            80
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "G63UE7",
+              "name": "Section Header",
+              "width": 760,
+              "layout": "vertical",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "KOdeb",
+                  "name": "Eyebrow",
+                  "fill": "$accent",
+                  "content": "WHY DROPUMI",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.5
+                },
+                {
+                  "type": "text",
+                  "id": "rfKcp",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": 760,
+                  "content": "Light on everything except what it can send.",
+                  "lineHeight": 1.12,
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 44,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "idZ1h",
+                  "name": "Sub",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 560,
+                  "content": "Built to be small, fast and out of your way.",
+                  "lineHeight": 1.55,
+                  "textAlign": "center",
+                  "fontFamily": "$font-body",
+                  "fontSize": 17,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "D0tAXU",
+              "name": "Feature Grid",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "j15txg",
+                  "name": "Row 1",
+                  "width": "fill_container",
+                  "gap": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "JmB9W",
+                      "name": "Works offline",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "YduTf",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "ffQzL",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "wifi-off",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "ikDod",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Works offline",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "csI65",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Everything stays on your local network. No internet, no account, no server in the middle.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KzLda",
+                      "name": "Ultra lightweight",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "GvhkU",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "X4uHc",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "feather",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "JjFM3",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Ultra lightweight",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "o8eyA",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "A tiny app that starts instantly and sips battery and memory.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "RZNre",
+                      "name": "Private by design",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Zkzb9",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "bXdfQ",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "shield-check",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "B1ofcL",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Private by design",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "l8Xtr",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Files go straight from device to device. Nothing is uploaded, stored or tracked.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uBQiC",
+                  "name": "Row 2",
+                  "width": "fill_container",
+                  "gap": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "QeMJ2",
+                      "name": "Cross-platform",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ukfqA",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "pDscu",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "layers",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "f1pX1",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Cross-platform",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "f78uHC",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "macOS, Windows, Linux, iOS and Android, all talking to each other.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "B4fyX",
+                      "name": "Fast on your Wi-Fi",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "G7TsZ",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "MdH1U",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "zap",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "ec8jM",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Fast on your Wi-Fi",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "O4n5Xe",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Large files move at local network speed, not at your internet speed.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "eQSnn",
+                      "name": "Free and open source",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 24,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 32,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "O9G3t",
+                          "name": "Icon Tile",
+                          "width": 52,
+                          "height": 52,
+                          "fill": "$accent-soft",
+                          "cornerRadius": 16,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "vCvWe",
+                              "name": "Icon",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "github",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "ucKlr",
+                          "name": "Title",
+                          "fill": "$text-primary",
+                          "content": "Free and open source",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "m0CCSO",
+                          "name": "Body",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Read the code, fork it, improve it. No ads, no paywall, ever.",
+                          "lineHeight": 1.6,
+                          "fontFamily": "$font-body",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "KS0Vt",
+          "name": "Mobile Showcase",
+          "width": "fill_container",
+          "fill": "$surface",
+          "gap": 80,
+          "padding": [
+            110,
+            80
+          ],
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "gjVZv",
+              "name": "Text",
+              "width": 480,
+              "layout": "vertical",
+              "gap": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "x94Fv2",
+                  "name": "Eyebrow",
+                  "fill": "$accent",
+                  "content": "ON YOUR PHONE",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.5
+                },
+                {
+                  "type": "text",
+                  "id": "N3TZ51",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Phone to laptop in a few seconds.",
+                  "lineHeight": 1.12,
+                  "fontFamily": "$font-display",
+                  "fontSize": 44,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "r9FNn",
+                  "name": "Body",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "See who is nearby, tap a device and send photos, videos and documents. Receiving is one tap, too. Light and dark themes follow your system.",
+                  "lineHeight": 1.6,
+                  "fontFamily": "$font-body",
+                  "fontSize": 17,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "f1eiAc",
+                  "name": "No account or sign-in",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "M8yek",
+                      "name": "Check",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "circle-check",
+                      "library": "lucide",
+                      "fill": "#1E9E6A"
+                    },
+                    {
+                      "type": "text",
+                      "id": "W69xW",
+                      "name": "Label",
+                      "fill": "$text-primary",
+                      "content": "No account or sign-in",
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "j9IZ9",
+                  "name": "Works with hotspots and shared Wi-Fi",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Z4BclY",
+                      "name": "Check",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "circle-check",
+                      "library": "lucide",
+                      "fill": "#1E9E6A"
+                    },
+                    {
+                      "type": "text",
+                      "id": "oJrdb",
+                      "name": "Label",
+                      "fill": "$text-primary",
+                      "content": "Works with hotspots and shared Wi-Fi",
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "A0N4b",
+                  "name": "Light and dark themes",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "c5cIK",
+                      "name": "Check",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "circle-check",
+                      "library": "lucide",
+                      "fill": "#1E9E6A"
+                    },
+                    {
+                      "type": "text",
+                      "id": "d9C3ZB",
+                      "name": "Label",
+                      "fill": "$text-primary",
+                      "content": "Light and dark themes",
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "tmi5M",
+              "name": "Phones",
+              "gap": 24,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "wOg0W",
+                  "name": "Phone 1",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "NaWCB",
+                      "name": "Screen",
+                      "clip": true,
+                      "width": 230,
+                      "height": 498,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "ui-export/light/1-nearby.png",
+                        "mode": "cover"
+                      },
+                      "cornerRadius": 32,
+                      "stroke": "$border",
+                      "strokeWidth": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ZROE6",
+                  "name": "Phone 2",
+                  "layout": "vertical",
+                  "padding": [
+                    40,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Zxv0B",
+                      "name": "Screen",
+                      "clip": true,
+                      "width": 230,
+                      "height": 498,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "ui-export/light/3-receive.png",
+                        "mode": "cover"
+                      },
+                      "cornerRadius": 32,
+                      "stroke": "$border",
+                      "strokeWidth": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nqjhs",
+                  "name": "Phone 3",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Dn66i",
+                      "name": "Screen",
+                      "clip": true,
+                      "width": 230,
+                      "height": 498,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "ui-export/dark/1-nearby.png",
+                        "mode": "cover"
+                      },
+                      "cornerRadius": 32,
+                      "stroke": "$border",
+                      "strokeWidth": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "nAfXm",
+          "name": "Download",
+          "width": "fill_container",
+          "fill": "$bg",
+          "layout": "vertical",
+          "gap": 48,
+          "padding": [
+            110,
+            80
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "SqZhv",
+              "name": "Section Header",
+              "width": 760,
+              "layout": "vertical",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "TudLV",
+                  "name": "Eyebrow",
+                  "fill": "$accent",
+                  "content": "DOWNLOAD",
+                  "fontFamily": "$font-body",
+                  "fontSize": 13,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.5
+                },
+                {
+                  "type": "text",
+                  "id": "ClnC4",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "textGrowth": "fixed-width",
+                  "width": 760,
+                  "content": "Get dropumi on every device.",
+                  "lineHeight": 1.12,
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 44,
+                  "fontWeight": "800"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "RDjmM",
+              "name": "Platforms",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "C7Xi9",
+                  "name": "macOS",
+                  "width": 200,
+                  "fill": "$surface",
+                  "cornerRadius": 20,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 24,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Zf9ra",
+                      "name": "Icon",
+                      "width": 30,
+                      "height": 30,
+                      "icon": "apple",
+                      "library": "lucide",
+                      "fill": "$text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "b0p6Fc",
+                      "name": "Name",
+                      "fill": "$text-primary",
+                      "content": "macOS",
+                      "fontFamily": "$font-body",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "aXDlg",
+                      "name": "Sub",
+                      "fill": "$text-secondary",
+                      "content": "Apple silicon and Intel",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QjJQQ",
+                      "name": "Button",
+                      "height": 38,
+                      "fill": "$accent",
+                      "cornerRadius": 19,
+                      "padding": [
+                        0,
+                        18
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "T3i5ZR",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "G3OeQc",
+                  "name": "Windows",
+                  "width": 200,
+                  "fill": "$surface",
+                  "cornerRadius": 20,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 24,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "gDUB8",
+                      "name": "Icon",
+                      "width": 30,
+                      "height": 30,
+                      "icon": "monitor",
+                      "library": "lucide",
+                      "fill": "$text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "cyDh5",
+                      "name": "Name",
+                      "fill": "$text-primary",
+                      "content": "Windows",
+                      "fontFamily": "$font-body",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "XNvot",
+                      "name": "Sub",
+                      "fill": "$text-secondary",
+                      "content": "Windows 10 and 11",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ywi0E",
+                      "name": "Button",
+                      "height": 38,
+                      "fill": "$accent",
+                      "cornerRadius": 19,
+                      "padding": [
+                        0,
+                        18
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ol9Fy",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "VEgo6",
+                  "name": "Linux",
+                  "width": 200,
+                  "fill": "$surface",
+                  "cornerRadius": 20,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 24,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "s3ps4",
+                      "name": "Icon",
+                      "width": 30,
+                      "height": 30,
+                      "icon": "terminal",
+                      "library": "lucide",
+                      "fill": "$text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "W60EMt",
+                      "name": "Name",
+                      "fill": "$text-primary",
+                      "content": "Linux",
+                      "fontFamily": "$font-body",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Y5rY9",
+                      "name": "Sub",
+                      "fill": "$text-secondary",
+                      "content": "AppImage and .deb",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uuCUA",
+                      "name": "Button",
+                      "height": 38,
+                      "fill": "$accent",
+                      "cornerRadius": 19,
+                      "padding": [
+                        0,
+                        18
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FBuuT",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "jZ5ro",
+                  "name": "iOS",
+                  "width": 200,
+                  "fill": "$surface",
+                  "cornerRadius": 20,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 24,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "hpMuP",
+                      "name": "Icon",
+                      "width": 30,
+                      "height": 30,
+                      "icon": "smartphone",
+                      "library": "lucide",
+                      "fill": "$text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Xjr7q",
+                      "name": "Name",
+                      "fill": "$text-primary",
+                      "content": "iOS",
+                      "fontFamily": "$font-body",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "NTdNB",
+                      "name": "Sub",
+                      "fill": "$text-secondary",
+                      "content": "iPhone and iPad",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "k3eIFD",
+                      "name": "Button",
+                      "height": 38,
+                      "fill": "$accent",
+                      "cornerRadius": 19,
+                      "padding": [
+                        0,
+                        18
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "IDzKn",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "CN3qv",
+                  "name": "Android",
+                  "width": 200,
+                  "fill": "$surface",
+                  "cornerRadius": 20,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 24,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "LG1sQ",
+                      "name": "Icon",
+                      "width": 30,
+                      "height": 30,
+                      "icon": "smartphone",
+                      "library": "lucide",
+                      "fill": "$text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "haLFI",
+                      "name": "Name",
+                      "fill": "$text-primary",
+                      "content": "Android",
+                      "fontFamily": "$font-body",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "q3jYuG",
+                      "name": "Sub",
+                      "fill": "$text-secondary",
+                      "content": "Android 8 and up",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "bcrMg",
+                      "name": "Button",
+                      "height": 38,
+                      "fill": "$accent",
+                      "cornerRadius": 19,
+                      "padding": [
+                        0,
+                        18
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "o1a6LP",
+                          "name": "Label",
+                          "fill": "$on-accent",
+                          "content": "Download",
+                          "fontFamily": "$font-body",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xPmV9",
+          "name": "Open Source",
+          "width": "fill_container",
+          "fill": "$navy",
+          "layout": "vertical",
+          "gap": 24,
+          "padding": [
+            110,
+            80
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "oZXUC",
+              "name": "Symbol",
+              "width": 72,
+              "height": 72,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/symbol-reversed.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "text",
+              "id": "bnNMa",
+              "name": "Title",
+              "fill": "#F2F7FA",
+              "textGrowth": "fixed-width",
+              "width": 760,
+              "content": "Built in the open. Yours to improve.",
+              "lineHeight": 1.12,
+              "textAlign": "center",
+              "fontFamily": "$font-display",
+              "fontSize": 44,
+              "fontWeight": "800"
+            },
+            {
+              "type": "text",
+              "id": "KUMEY",
+              "name": "Body",
+              "fill": "#9DB0C2",
+              "textGrowth": "fixed-width",
+              "width": 560,
+              "content": "dropumi is free software. Report a bug, suggest a feature, translate the app or send a pull request. Everyone is welcome.",
+              "lineHeight": 1.6,
+              "textAlign": "center",
+              "fontFamily": "$font-body",
+              "fontSize": 17,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "bTcZn",
+              "name": "CTAs",
+              "gap": 14,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "hZloV",
+                  "name": "Star Button",
+                  "height": 56,
+                  "fill": "$light-teal",
+                  "cornerRadius": 28,
+                  "gap": 10,
+                  "padding": [
+                    0,
+                    30
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "v883YG",
+                      "name": "Icon",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "github",
+                      "library": "lucide",
+                      "fill": "#06111F"
+                    },
+                    {
+                      "type": "text",
+                      "id": "GbCUN",
+                      "name": "Label",
+                      "fill": "#06111F",
+                      "content": "Star on GitHub",
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oPBB8",
+                  "name": "Contribute Button",
+                  "height": 56,
+                  "cornerRadius": 28,
+                  "stroke": "#3A5573",
+                  "strokeWidth": 1,
+                  "padding": [
+                    0,
+                    28
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uHdZw",
+                      "name": "Label",
+                      "fill": "#F2F7FA",
+                      "content": "How to contribute",
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CW1aG",
+          "name": "Footer",
+          "width": "fill_container",
+          "height": 96,
+          "fill": "#07121F",
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "LOrpk",
+              "name": "Logo",
+              "width": 140,
+              "height": 35,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal-white.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "text",
+              "id": "wqIyv",
+              "name": "Note",
+              "fill": "#9DB0C2",
+              "content": "Free and open source. Made for sharing.",
+              "fontFamily": "$font-body",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "XHkcY",
+              "name": "Links",
+              "gap": 28,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "A7Ebse",
+                  "name": "GitHub",
+                  "fill": "#9DB0C2",
+                  "content": "GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "n9tmV",
+                  "name": "Docs",
+                  "fill": "#9DB0C2",
+                  "content": "Docs",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "UBFbw",
+                  "name": "License",
+                  "fill": "#9DB0C2",
+                  "content": "License",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "cBWXJ",
+                  "name": "Privacy",
+                  "fill": "#9DB0C2",
+                  "content": "Privacy",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "JlqJ8",
+      "x": 3200,
+      "y": 0,
+      "name": "License",
+      "clip": true,
+      "width": 1440,
+      "fill": "$bg",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "rfSNN",
+          "name": "Nav",
+          "width": "fill_container",
+          "height": 80,
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "m9Iumh",
+              "name": "Logo",
+              "width": 150,
+              "height": 38,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "frame",
+              "id": "jUq8O",
+              "name": "Links",
+              "gap": 36,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "MYIVH",
+                  "name": "How it works",
+                  "fill": "$text-secondary",
+                  "content": "How it works",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "GpXVC",
+                  "name": "Features",
+                  "fill": "$text-secondary",
+                  "content": "Features",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "c7MG6",
+                  "name": "Download",
+                  "fill": "$text-secondary",
+                  "content": "Download",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "Q0SBKM",
+                  "name": "Open source",
+                  "fill": "$text-secondary",
+                  "content": "Open source",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Tp3vm",
+              "name": "GitHub Button",
+              "height": 44,
+              "fill": "$surface",
+              "cornerRadius": 22,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "gap": 8,
+              "padding": [
+                0,
+                20
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "FHAUc",
+                  "name": "GitHub Icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "github",
+                  "library": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "text",
+                  "id": "g6bWCV",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "Star on GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "zZu5c",
+          "name": "Header",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": [
+            64,
+            80,
+            48,
+            80
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "YVhEH",
+              "name": "Eyebrow",
+              "fill": "$accent",
+              "content": "LEGAL",
+              "fontFamily": "$font-body",
+              "fontSize": 13,
+              "fontWeight": "700",
+              "letterSpacing": 1.5
+            },
+            {
+              "type": "text",
+              "id": "SWETC",
+              "name": "Title",
+              "fill": "$text-primary",
+              "content": "License",
+              "fontFamily": "$font-display",
+              "fontSize": 56,
+              "fontWeight": "800"
+            },
+            {
+              "type": "text",
+              "id": "ABxwb",
+              "name": "Sub",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": 680,
+              "content": "dropumi is free and open-source software. You can use it, change it and share it.",
+              "lineHeight": 1.55,
+              "fontFamily": "$font-body",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "tifbb",
+          "name": "Body",
+          "width": "fill_container",
+          "gap": 80,
+          "padding": [
+            24,
+            80,
+            110,
+            80
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "O26kT0",
+              "name": "Sidebar",
+              "width": 240,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "YIY9m",
+                  "name": "Summary",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "QCpPj",
+                      "name": "Label",
+                      "fill": "$accent",
+                      "content": "Summary",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "W99acw",
+                  "name": "Permissions",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "U7GJ14",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Permissions",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nPKA6",
+                  "name": "Conditions",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EOP1B",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Conditions",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "WFluF",
+                  "name": "No warranty",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "p8hopR",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "No warranty",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "j2aCr",
+                  "name": "Brand assets",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "flxqE",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Brand assets",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cUEW0",
+                  "name": "Third-party",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "djNXq",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Third-party",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "FPULO",
+              "name": "Content",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 36,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "vVW8s",
+                  "name": "Summary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "BU9gx",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Summary",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UfnN4",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "dropumi is released under the Mozilla Public License 2.0 (MPL-2.0). You can use it for any purpose, including commercial use, and you can modify and redistribute it. If you change MPL-licensed files and share them, you share those changes under the same license.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B1EQTz",
+                  "name": "Permissions",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "m469j7",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Permissions",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "z5AKE",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Use, copy, modify and distribute the software, and combine it with code under other licenses, including closed-source code, in a larger work.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "h1wzf",
+                  "name": "Conditions",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "XwukT",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Conditions",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "mQIn4",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Keep the copyright and license notices. If you distribute modified versions of the licensed files, make the source of those files available under MPL-2.0.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "orxQ2",
+                  "name": "No warranty",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PHGL8",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "No warranty",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "K8QzCM",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The software is provided as is, without warranty of any kind. The authors are not liable for any claim, damages or other liability arising from its use.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pxSio",
+                  "name": "Brand assets",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ey5xU",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Brand assets",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "e60oSl",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The dropumi name and logo are not covered by the code license. You may use them to refer to the project, but please do not use them in a way that suggests your fork is the official app.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "P8RBrE",
+                  "name": "Third-party",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "bx8TV",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Third-party",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "alHNA",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Plus Jakarta Sans is used under the SIL Open Font License. Lucide icons are used under the ISC License.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "GOutT",
+          "name": "Footer",
+          "width": "fill_container",
+          "height": 96,
+          "fill": "#07121F",
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "eQFLq",
+              "name": "Logo",
+              "width": 140,
+              "height": 35,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal-white.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "text",
+              "id": "Rc2em",
+              "name": "Note",
+              "fill": "#9DB0C2",
+              "content": "Free and open source. Made for sharing.",
+              "fontFamily": "$font-body",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "R3gObG",
+              "name": "Links",
+              "gap": 28,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Yc2mg",
+                  "name": "GitHub",
+                  "fill": "#9DB0C2",
+                  "content": "GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "aTO3O",
+                  "name": "Docs",
+                  "fill": "#9DB0C2",
+                  "content": "Docs",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "H4akTb",
+                  "name": "License",
+                  "fill": "#9DB0C2",
+                  "content": "License",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "r6wkD",
+                  "name": "Privacy",
+                  "fill": "#9DB0C2",
+                  "content": "Privacy",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "lhkzn",
+      "x": 4800,
+      "y": 0,
+      "name": "Privacy",
+      "clip": true,
+      "width": 1440,
+      "fill": "$bg",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Sxz8o",
+          "name": "Nav",
+          "width": "fill_container",
+          "height": 80,
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "pmktG",
+              "name": "Logo",
+              "width": 150,
+              "height": 38,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "frame",
+              "id": "qfEbV",
+              "name": "Links",
+              "gap": 36,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "E0EYzS",
+                  "name": "How it works",
+                  "fill": "$text-secondary",
+                  "content": "How it works",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "OTatT",
+                  "name": "Features",
+                  "fill": "$text-secondary",
+                  "content": "Features",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "kH0uT",
+                  "name": "Download",
+                  "fill": "$text-secondary",
+                  "content": "Download",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "xwzkP",
+                  "name": "Open source",
+                  "fill": "$text-secondary",
+                  "content": "Open source",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "e25U90",
+              "name": "GitHub Button",
+              "height": 44,
+              "fill": "$surface",
+              "cornerRadius": 22,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "gap": 8,
+              "padding": [
+                0,
+                20
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "JZPmV",
+                  "name": "GitHub Icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "github",
+                  "library": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "text",
+                  "id": "sMq82",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "Star on GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "C4dTKT",
+          "name": "Header",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": [
+            64,
+            80,
+            48,
+            80
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "Za9Gk",
+              "name": "Eyebrow",
+              "fill": "$accent",
+              "content": "LEGAL",
+              "fontFamily": "$font-body",
+              "fontSize": 13,
+              "fontWeight": "700",
+              "letterSpacing": 1.5
+            },
+            {
+              "type": "text",
+              "id": "Wzomb",
+              "name": "Title",
+              "fill": "$text-primary",
+              "content": "Privacy",
+              "fontFamily": "$font-display",
+              "fontSize": 56,
+              "fontWeight": "800"
+            },
+            {
+              "type": "text",
+              "id": "NWIsn",
+              "name": "Sub",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": 680,
+              "content": "dropumi shares files directly between your devices. We do not run servers that see your files.",
+              "lineHeight": 1.55,
+              "fontFamily": "$font-body",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "y7OVAO",
+          "name": "Body",
+          "width": "fill_container",
+          "gap": 80,
+          "padding": [
+            24,
+            80,
+            110,
+            80
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "gU7id",
+              "name": "Sidebar",
+              "width": 240,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "YpvDh",
+                  "name": "Short version",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Fz2Fw",
+                      "name": "Label",
+                      "fill": "$accent",
+                      "content": "Short version",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "h19Bw",
+                  "name": "What stays on your device",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uaMSG",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "What stays on your device",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "OMjlv",
+                  "name": "What other people can see",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "e2aEM2",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "What other people can see",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SWVEi",
+                  "name": "Accounts and tracking",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "N9af5A",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Accounts and tracking",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "zBrJS",
+                  "name": "Website",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ujcz7",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Website",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "xeG5w",
+                  "name": "Changes and contact",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "zmOPx",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Changes and contact",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "MAxNJ",
+              "name": "Content",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 36,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "nipPE",
+                  "name": "Short version",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FujGA",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Short version",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "HeIWG",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Your files go straight from one device to another over your local network. They are not uploaded to us or to any cloud service, and we do not collect them.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kbpM4",
+                  "name": "What stays on your device",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "f6Bez",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "What stays on your device",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "T9m8bo",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "File names, file contents, device names and transfer history stay on your devices. You can clear the history at any time in Settings.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cTaLs",
+                  "name": "What other people can see",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dRzl5",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "What other people can see",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "b9mJC",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "While dropumi is visible, devices on the same network can see your device name. Turn visibility off in Settings to stop appearing in other people's lists.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "st1IB",
+                  "name": "Accounts and tracking",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "hFMYG",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Accounts and tracking",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "PprAV",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "There are no accounts. The app has no ads and no analytics, and it does not track you.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "EQIpQ",
+                  "name": "Website",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FrrNx",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Website",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "r1AfPD",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "This website does not use tracking cookies. If we add privacy-friendly analytics later, we will say so on this page.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hQZFX",
+                  "name": "Changes and contact",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": [
+                    36,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iXnZP",
+                      "name": "Heading",
+                      "fill": "$text-primary",
+                      "content": "Changes and contact",
+                      "fontFamily": "$font-display",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ESPKR",
+                      "name": "Text",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "If this policy changes, we will update this page and the date at the top. Questions can be sent by opening an issue on GitHub.",
+                      "lineHeight": 1.7,
+                      "fontFamily": "$font-body",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "IzQKm",
+          "name": "Footer",
+          "width": "fill_container",
+          "height": 96,
+          "fill": "#07121F",
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "A8b6Z",
+              "name": "Logo",
+              "width": 140,
+              "height": 35,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal-white.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "text",
+              "id": "KKzJn",
+              "name": "Note",
+              "fill": "#9DB0C2",
+              "content": "Free and open source. Made for sharing.",
+              "fontFamily": "$font-body",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "iR8Pe",
+              "name": "Links",
+              "gap": 28,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "B9GJ8E",
+                  "name": "GitHub",
+                  "fill": "#9DB0C2",
+                  "content": "GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "SnBY8",
+                  "name": "Docs",
+                  "fill": "#9DB0C2",
+                  "content": "Docs",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "lIfNM",
+                  "name": "License",
+                  "fill": "#9DB0C2",
+                  "content": "License",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "lpzVB",
+                  "name": "Privacy",
+                  "fill": "#9DB0C2",
+                  "content": "Privacy",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "WLIsK",
+      "x": 1600,
+      "y": 0,
+      "name": "Docs",
+      "clip": true,
+      "width": 1440,
+      "fill": "$bg",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "T6gIY",
+          "name": "Nav",
+          "width": "fill_container",
+          "height": 80,
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "zkynJ",
+              "name": "Logo",
+              "width": 150,
+              "height": 38,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "frame",
+              "id": "WlRXW",
+              "name": "Links",
+              "gap": 36,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Bm0sV",
+                  "name": "How it works",
+                  "fill": "$text-secondary",
+                  "content": "How it works",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "t2nT3j",
+                  "name": "Features",
+                  "fill": "$text-secondary",
+                  "content": "Features",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "N6MtLO",
+                  "name": "Download",
+                  "fill": "$text-secondary",
+                  "content": "Download",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "yHJrd",
+                  "name": "Open source",
+                  "fill": "$text-secondary",
+                  "content": "Open source",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cANq9",
+              "name": "GitHub Button",
+              "height": 44,
+              "fill": "$surface",
+              "cornerRadius": 22,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "gap": 8,
+              "padding": [
+                0,
+                20
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "Cz0k9",
+                  "name": "GitHub Icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "github",
+                  "library": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "text",
+                  "id": "qxmOM",
+                  "name": "Label",
+                  "fill": "$text-primary",
+                  "content": "Star on GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "GAoSG",
+          "name": "Header",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": [
+            64,
+            80,
+            40,
+            80
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "QKBHS",
+              "name": "Eyebrow",
+              "fill": "$accent",
+              "content": "DOCUMENTATION",
+              "fontFamily": "$font-body",
+              "fontSize": 13,
+              "fontWeight": "700",
+              "letterSpacing": 1.5
+            },
+            {
+              "type": "text",
+              "id": "Acwgr",
+              "name": "Title",
+              "fill": "$text-primary",
+              "content": "Get started with dropumi",
+              "fontFamily": "$font-display",
+              "fontSize": 56,
+              "fontWeight": "800"
+            },
+            {
+              "type": "text",
+              "id": "yDV2i",
+              "name": "Sub",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": 680,
+              "content": "Install the app, find a device and send your first file in a couple of minutes.",
+              "lineHeight": 1.55,
+              "fontFamily": "$font-body",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "lt5TK",
+              "name": "Search",
+              "width": 480,
+              "height": 52,
+              "fill": "$surface",
+              "cornerRadius": 26,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "gap": 12,
+              "padding": [
+                0,
+                18
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "nRWe2",
+                  "name": "Icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "search",
+                  "library": "lucide",
+                  "fill": "$text-secondary"
+                },
+                {
+                  "type": "text",
+                  "id": "tr9WX",
+                  "name": "Placeholder",
+                  "fill": "$text-secondary",
+                  "content": "Search the docs",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "dkZ6C",
+          "name": "Body",
+          "width": "fill_container",
+          "gap": 64,
+          "padding": [
+            24,
+            80,
+            110,
+            80
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "CfLUV",
+              "name": "Sidebar",
+              "width": 240,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Oa1ga",
+                  "name": "Group Getting started",
+                  "fill": "$text-secondary",
+                  "content": "GETTING STARTED",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.2
+                },
+                {
+                  "type": "frame",
+                  "id": "QmXpN",
+                  "name": "Introduction",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fkRqG",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Introduction",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uM7dg",
+                  "name": "Install",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Enri1",
+                      "name": "Label",
+                      "fill": "$accent",
+                      "content": "Install",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vR71l",
+                  "name": "Send a file",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ieHJZ",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Send a file",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "n6OcSZ",
+                  "name": "Receive a file",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "l5sJI",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Receive a file",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cRkzG",
+                  "name": "Spacer",
+                  "width": 1,
+                  "height": 14
+                },
+                {
+                  "type": "text",
+                  "id": "ccEMT",
+                  "name": "Group Using dropumi",
+                  "fill": "$text-secondary",
+                  "content": "USING DROPUMI",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.2
+                },
+                {
+                  "type": "frame",
+                  "id": "nOc0s",
+                  "name": "Visibility",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "hehyL",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Visibility",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "luv4N",
+                  "name": "Transfers",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "XdYcS",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Transfers",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D3HqP",
+                  "name": "Settings",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "HsgGP",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Settings",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IA7Su",
+                  "name": "Spacer",
+                  "width": 1,
+                  "height": 14
+                },
+                {
+                  "type": "text",
+                  "id": "pm7eo",
+                  "name": "Group Help",
+                  "fill": "$text-secondary",
+                  "content": "HELP",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.2
+                },
+                {
+                  "type": "frame",
+                  "id": "tYcEj",
+                  "name": "Troubleshooting",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Yxnuj",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Troubleshooting",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FiDtV",
+                  "name": "FAQ",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gChLG",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "FAQ",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d3feM",
+                  "name": "Contributing",
+                  "width": "fill_container",
+                  "height": 38,
+                  "fill": "#00000000",
+                  "cornerRadius": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pt0uL",
+                      "name": "Label",
+                      "fill": "$text-secondary",
+                      "content": "Contributing",
+                      "fontFamily": "$font-body",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qJU2Z",
+                  "name": "Spacer",
+                  "width": 1,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ePaDr",
+              "name": "Article",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "rBnLZ",
+                  "name": "Title",
+                  "fill": "$text-primary",
+                  "content": "Install",
+                  "fontFamily": "$font-display",
+                  "fontSize": 36,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "WtPiO",
+                  "name": "Intro",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "dropumi runs on macOS, Windows, Linux, iOS and Android. Install it on every device you want to share between. Both devices must be on the same Wi-Fi network or hotspot.",
+                  "lineHeight": 1.65,
+                  "fontFamily": "$font-body",
+                  "fontSize": 17,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "r7QWw",
+                  "name": "H Desktop",
+                  "fill": "$text-primary",
+                  "content": "Desktop",
+                  "fontFamily": "$font-display",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "J5tRNg",
+                  "name": "Desktop Text",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Download the installer for your system from the Download page, open it and follow the prompts. On macOS, drag dropumi into Applications.",
+                  "lineHeight": 1.7,
+                  "fontFamily": "$font-body",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "OcrDV",
+                  "name": "Code Block",
+                  "width": "fill_container",
+                  "fill": "$navy",
+                  "cornerRadius": 16,
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "alzYT",
+                      "name": "Caption",
+                      "fill": "#9DB0C2",
+                      "content": "BUILD FROM SOURCE",
+                      "fontFamily": "$font-body",
+                      "fontSize": 11,
+                      "fontWeight": "700",
+                      "letterSpacing": 1.2
+                    },
+                    {
+                      "type": "text",
+                      "id": "PJNIw",
+                      "name": "Line",
+                      "fill": "#F2F7FA",
+                      "content": "git clone https://github.com/santoadji21/dropumi.git",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "bCWbd",
+                      "name": "Line",
+                      "fill": "#F2F7FA",
+                      "content": "cd dropumi",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "s8pIy",
+                  "name": "H Mobile",
+                  "fill": "$text-primary",
+                  "content": "Phone and tablet",
+                  "fontFamily": "$font-display",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "iR5Vh",
+                  "name": "Mobile Text",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Get dropumi from the App Store or Google Play. The first time you open it, allow access to the local network so it can find nearby devices.",
+                  "lineHeight": 1.7,
+                  "fontFamily": "$font-body",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "PoFYi",
+                  "name": "Note",
+                  "width": "fill_container",
+                  "fill": "$accent-soft",
+                  "cornerRadius": 16,
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "BTahT",
+                      "name": "Icon",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "info",
+                      "library": "lucide",
+                      "fill": "$accent"
+                    },
+                    {
+                      "type": "text",
+                      "id": "RUylp",
+                      "name": "Note Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "If a device does not show up, check that both are on the same network and that guest-network isolation is off on your router.",
+                      "lineHeight": 1.6,
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PBXAG",
+                  "name": "Next",
+                  "width": "fill_container",
+                  "padding": [
+                    28,
+                    0,
+                    0,
+                    0
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Z7pMKg",
+                      "name": "Prev",
+                      "fill": "$text-secondary",
+                      "content": "← Introduction",
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UBnqT",
+                      "name": "Next Link",
+                      "fill": "$accent",
+                      "content": "Send a file →",
+                      "fontFamily": "$font-body",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "AYW9i",
+              "name": "On This Page",
+              "width": 200,
+              "layout": "vertical",
+              "gap": 10,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "sqyo8",
+                  "name": "Label",
+                  "fill": "$text-secondary",
+                  "content": "ON THIS PAGE",
+                  "fontFamily": "$font-body",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.2
+                },
+                {
+                  "type": "text",
+                  "id": "Y2JkG",
+                  "name": "Desktop",
+                  "fill": "$text-secondary",
+                  "content": "Desktop",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "PtUbk",
+                  "name": "Phone and tablet",
+                  "fill": "$text-secondary",
+                  "content": "Phone and tablet",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "YSvhX",
+          "name": "Footer",
+          "width": "fill_container",
+          "height": 96,
+          "fill": "#07121F",
+          "padding": [
+            0,
+            80
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "aFrGQ",
+              "name": "Logo",
+              "width": 140,
+              "height": 35,
+              "fill": {
+                "type": "image",
+                "enabled": true,
+                "url": "ui-assets/horizontal-white.png",
+                "mode": "contain"
+              }
+            },
+            {
+              "type": "text",
+              "id": "dw9VR",
+              "name": "Note",
+              "fill": "#9DB0C2",
+              "content": "Free and open source. Made for sharing.",
+              "fontFamily": "$font-body",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "DecmL",
+              "name": "Links",
+              "gap": 28,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "T2EC9s",
+                  "name": "GitHub",
+                  "fill": "#9DB0C2",
+                  "content": "GitHub",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "ZwAZF",
+                  "name": "Docs",
+                  "fill": "#9DB0C2",
+                  "content": "Docs",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "uhY8d",
+                  "name": "License",
+                  "fill": "#9DB0C2",
+                  "content": "License",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "Lfv51",
+                  "name": "Privacy",
+                  "fill": "#9DB0C2",
+                  "content": "Privacy",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "bg": {
+      "type": "color",
+      "value": "#F4F8FA"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "surface-2": {
+      "type": "color",
+      "value": "#E8F0F4"
+    },
+    "text-primary": {
+      "type": "color",
+      "value": "#0B1F3A"
+    },
+    "text-secondary": {
+      "type": "color",
+      "value": "#5B6B7D"
+    },
+    "border": {
+      "type": "color",
+      "value": "#DCE5EB"
+    },
+    "accent": {
+      "type": "color",
+      "value": "#0E8A9B"
+    },
+    "accent-soft": {
+      "type": "color",
+      "value": "#D6EEF2"
+    },
+    "on-accent": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "navy": {
+      "type": "color",
+      "value": "#0B1F3A"
+    },
+    "light-teal": {
+      "type": "color",
+      "value": "#3CC4D4"
+    },
+    "font-display": {
+      "type": "string",
+      "value": "Plus Jakarta Sans"
+    },
+    "font-body": {
+      "type": "string",
+      "value": "Plus Jakarta Sans"
+    }
+  },
+  "fileToken": "8f9e47a8-2211-4358-b293-64f49ea369c4"
+}

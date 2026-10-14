@@ -3,9 +3,9 @@
 Landing page, docs, license and privacy pages for [dropumi](https://github.com/dropumi/dropumi), built with [Astro](https://astro.build) and [Starlight](https://starlight.astro.build).
 
 ```sh
-npm install
-npm run dev       # http://localhost:4321
-npm run build     # output in dist/
+pnpm install
+pnpm dev          # http://localhost:4321
+pnpm build        # output in dist/
 ```
 
 - `src/pages/` landing page, license and privacy

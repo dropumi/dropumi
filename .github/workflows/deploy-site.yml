@@ -1,0 +1,52 @@
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    paths: ['website/**', '.github/workflows/deploy-site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: website
+      - run: pnpm build
+        working-directory: website
+        env:
+          # Served from github.com/dropumi/dropumi, so the site lives under /dropumi.
+          # Remove ASTRO_BASE if the site moves to a repo named dropumi.github.io.
+          ASTRO_SITE: https://dropumi.github.io
+          ASTRO_BASE: /dropumi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
