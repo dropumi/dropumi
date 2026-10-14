@@ -90,7 +90,9 @@ pub trait Discovery: Send + Sync {
         ad: Advertisement,
     ) -> impl Future<Output = Result<Self::Handle, DiscoveryError>> + Send;
 
-    /// Browses for `timeout` and returns what was seen.
+    /// Returns the peers seen during the last `timeout`. An adapter that
+    /// already watches the network may answer at once from what it has seen
+    /// for at least that long, instead of browsing again.
     fn browse(
         &self,
         timeout: Duration,
@@ -109,6 +111,11 @@ pub struct SourceMeta {
 }
 
 /// Reads files to send.
+///
+/// Use cases treat the `path` they are given as an opaque key: they never
+/// open, list or display it themselves, and only pass it back to the same
+/// source. An adapter may therefore key entries that are not files on disk
+/// (for example a document handed over by the operating system).
 pub trait FileSource: Send + Sync {
     /// Reader type.
     type Reader: AsyncRead + Unpin + Send;
