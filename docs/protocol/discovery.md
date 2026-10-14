@@ -36,7 +36,8 @@ implementation does.
 - Discovery is optional. Manual addressing (`--to IPv4:port`, `--to [IPv6]:port`, `--to host:port`) always works, and
   every required automated test uses it (with `--no-mdns`).
 - Discovery must stay cheap: no continuous scanning. Receivers only advertise; only commands that need a device list
-  browse, and only for a bounded time.
+  browse, and only for a bounded time. In the apps, browsing runs only while a device list is visible
+  ([§7](#7-advertising-and-browsing-behaviour)).
 
 ## 2. Build and runtime switches
 
@@ -96,6 +97,12 @@ affected hint is dropped.
 | `fp` | MUST be exactly 8 characters from `A`–`Z` and `2`–`7`, upper case. Any other value (including lower case) is discarded: the peer is listed without a hint. |
 
 *Reference:* browsing commands never advertise, so a browser does not see its own record; there is no self-filter.
+The app facade (`dropumi-ffi`) can advertise and browse at the same time, so it filters out its own instance names
+(the one it requested and the one the platform reports as registered).
+
+*Reference (apps):* the platform hands TXT values to the facade as raw bytes; a value that is not valid UTF-8 is
+treated as empty, as above. Android's NSD API returns the TXT record as a map, so key order and duplicates are lost
+before Dropumi sees them; how it treats key case is UNVERIFIED.
 
 ### 4.3 Size
 
@@ -147,6 +154,12 @@ affected hint is dropped.
 - If advertising cannot start (for example UDP 5353 cannot be bound), the receiver emits `discovery_unavailable` (with
   the reason) and keeps running; manual addressing still works. If browsing cannot start, `discover`, `send` and
   `pair --to` exit with code 2.
+- *Reference (apps):* `dropumi-ffi` advertises while its receiver or a pairing window runs, withdraws the advertisement
+  when the receiver stops accepting, and browses between `start_discovery` and `stop_discovery`, which the apps call
+  only while a device list is on screen. The platform (Bonjour, NSD) does the multicast; the facade builds the TXT
+  record, names the instance, parses what the platform resolves (IPv4 only; loopback dropped), and keeps at most
+  256 devices. A send to a listed device dials that device's addresses and pins the paired device's full key when its
+  `fp` hint matches exactly one trust entry ([§8](#8-resolving-targets-and-choosing-addresses)).
 - *Reference:* the adapter uses one lazily created `mdns-sd` daemon per process. A browse collects resolved and
   removed services until its timeout, keeps one entry per full instance name, and reports each discovered peer once,
   sorted by instance name, with its full instance name, sanitized name, `fp` hint, IPv4 addresses (sorted), port and
@@ -215,6 +228,11 @@ Advertising is a deliberate trade-off between convenience and privacy. Users sho
 
 **Not broadcast:** the OS host name, the user name, the full fingerprint and the public key.
 
+- *(informative)* The CLI publishes a random host name. A native adapter that lets the platform choose the SRV target
+  (for example `DNSServiceRegister` with no host, or Android NSD) may publish the OS host name instead, which can contain
+  the owner's name and would break the MUST in [§3](#3-service-type-and-naming). This is checked on each platform
+  before its app advertises (milestone 2); the result and any change to §3 will be recorded here.
+
 - *(informative)* The full public key is not secret in practice: anyone who can connect to a listening receiver can
   learn it from Noise msg2 ([`v1.md` §20](v1.md#20-security-considerations)). Hiding `fp` alone would therefore not
   stop an active observer from recognizing a receiver.
@@ -245,13 +263,14 @@ Status values use the project's labels. "UNVERIFIED" marks a statement that nobo
 | All | Discovery between two real devices on a LAN or Wi-Fi network. | Not tested |
 | macOS 27 arm64 (maintainer machine) | Opt-in two-process mDNS test on the loopback interface, run from a terminal. | Automated test passed (opt-in, loopback, local run on macOS 27) |
 | macOS | Local Network privacy applies on macOS 15 and later. Apple's TN3179 documents that command-line tools run from Terminal or SSH are exempt ([`feasibility.md`](../feasibility.md) §7); this has not been tested with the `dropumi` CLI on a real LAN. Whether loopback traffic is exempt is UNVERIFIED: TN3179 does not mention loopback. The local loopback run above shows only that this one configuration worked. | Requires investigation |
-| macOS | A future app bundle will need `NSLocalNetworkUsageDescription` and an `NSBonjourServices` entry for `_dropumi._tcp` (UNVERIFIED; no app exists yet). | Not applicable |
+| macOS | The app bundle (milestone 2, in progress) needs `NSLocalNetworkUsageDescription` and an `NSBonjourServices` entry for `_dropumi._tcp`. | Not tested (no app yet) |
 | macOS 26 arm64 (GitHub-hosted runner) | [actions/runner-images#10924](https://github.com/actions/runner-images/issues/10924) is an open request to grant Local Network permission on macOS 15 runner images. A comment dated 2026-09-30 reports an IPv4 mDNS send failure on a `macos-26` arm64 runner, without attributing it to Local Network privacy. Whether mDNS works on these runners is UNVERIFIED. | Not tested (no CI job: the experimental mDNS job runs on `ubuntu-latest` only) |
 | Linux | Coexistence with Avahi is untested. If Avahi is configured to refuse other mDNS stacks, binding may fail, in which case Dropumi reports `discovery_unavailable`. systemd-resolved with multicast DNS enabled is another competing stack. | Requires investigation |
 | Ubuntu 24.04 x64 (GitHub-hosted runner) | Whether multicast works on these runners is unknown; it is exercised only by the non-required `mdns-e2e (experimental)` job. | Not tested (pending CI, experimental job) |
 | Windows | Windows Defender Firewall may prompt for, or block, the first listening socket. Sharing UDP 5353 with the system DNS client service is untested. Windows also has native DNS-SD APIs (`DnsServiceRegister`, `DnsServiceBrowse`) that a future native adapter could use. | Requires investigation |
-| iOS / iPadOS | No app in this milestone. Raw multicast on iOS needs a restricted entitlement (according to the design research), so a future iOS app would use Bonjour through Apple's Network framework in the platform layer instead of `mdns-sd`. | Not applicable |
-| Android | No app in this milestone. A future Android app would use the platform's Network Service Discovery (NSD). | Not applicable |
+| iOS / iPadOS | Raw multicast on iOS needs a restricted entitlement (according to the design research), so the app (milestone 2, in progress) uses Bonjour (`NWBrowser`, `DNSService*`) behind `dropumi-ffi`'s `PlatformDiscovery` instead of `mdns-sd`. Which SRV host name Bonjour publishes is checked before the app advertises. | Not tested (no app yet) |
+| Android | The app (milestone 2, in progress) uses Network Service Discovery (`NsdManager`) behind `PlatformDiscovery`. NSD returns TXT as a map (order and duplicates lost); resolving is serial below API 34; the published host name is checked before the app advertises. | Not tested (no app yet) |
+| All app platforms | The facade's rules (TXT parsing, IPv4 only, self-filtering, 256-device cap, sending to a listed device) | Automated test passed (`dropumi-ffi` with an in-memory discovery adapter, loopback, local run on macOS 27) |
 
 Any future native discovery adapter (Bonjour, NSD, Windows DNS-SD) MUST publish the same service type and TXT keys
 and MUST follow the parsing and hint-only rules of this document, so that all implementations interoperate.
@@ -259,8 +278,8 @@ and MUST follow the parsing and hint-only rules of this document, so that all im
 ## 13. Test status
 
 Test names follow the convention of [`threat-model.md` §1](threat-model.md#1-scope-and-method). All tests listed below
-except the opt-in one ran in the local workspace run on macOS 27 arm64 (Rust 1.99.0), where all 224 non-ignored tests
-passed; CI has not run yet.
+except the opt-in one ran in the local workspace run on macOS 27 arm64 (Rust 1.99.0, 2026-10-14), where all 309
+non-ignored tests passed; CI has not run yet.
 
 | Layer | Tests | Status |
 |---|---|---|
@@ -269,6 +288,7 @@ passed; CI has not run yet.
 | Candidate ranking and dialing | `domain connection::tests::rank_candidates_order`, `application/failures connect_tries_candidates_in_rank_order`, `infra net::tests::connect_first_skips_dead_candidate`, `e2e failure::retry_skips_dead_candidate` | Automated test passed (local run on macOS 27) |
 | Default-port fallback | `infra net::tests::listener_falls_back_to_ephemeral_when_port_busy` | Automated test passed (local run on macOS 27) |
 | Name binding before msg3 (fake discovery) | `domain connection::tests::expectation_rules`, `application/channel name_target_binds_fp_hint`, `application/channel fp_prefix_unique_trust_pins_full_key` | Automated test passed (local run on macOS 27) |
+| Facade discovery rules (app adapters) | `ffi discovery::tests::browse_sink_parses_txt_with_infra_rules`, `ffi discovery::tests::invalid_utf8_txt_value_treated_as_empty`, `ffi discovery::tests::ipv6_and_loopback_filtered`, `ffi discovery::tests::peer_table_capped`, `ffi discovery::tests::own_advertisement_not_listed_and_lost_removes_peer`, `ffi discovery::tests::hint_alias_only_for_a_single_trust_match`, `ffi discovery::tests::advertise_uses_random_instance`; `ffi/discovery` (advertising and withdrawal, nearby sends, copied hints) | Automated test passed (in-memory adapter, loopback, local run on macOS 27) |
 | Real mDNS between two processes | `e2e discovery::mdns_discover_and_send_by_fingerprint`: ignored by default; runs with `DROPUMI_TEST_MDNS=1 cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_` and uses `--mdns-loopback` | Automated test passed (opt-in, loopback, local run on macOS 27); Not tested (pending CI, experimental job) on Ubuntu 24.04 x64 (`ubuntu-latest`); no CI job runs it on macOS or Windows runners |
 | Discovery between real devices on a LAN | none | Not tested |
 
@@ -282,6 +302,7 @@ passed; CI has not run yet.
 | 2026-10-13 | Initial draft for protocol v1 (milestone 1). |
 | 2026-10-13 | Reconciled with the reference implementation: lower-case `fp` hints are rejected rather than normalized; invalid `v` elements are skipped individually; keys are matched in lower case only; `pair --to` browses for a fixed 3 s; behaviour without the `mdns` feature and on browse failure corrected; removed the browse event queue that does not exist; platform caveats use the status labels; corrected the description of actions/runner-images#10924; real test names and local results. |
 | 2026-10-14 | Default names always contain a 0, 1, 8 or 9 (§4.1) and are never classified as fingerprint prefixes; the default-name note in the target rules updated; test status updated to the final local runs. |
+| 2026-10-14 | Milestone 2: native adapters through `dropumi-ffi` (self-filtering, raw TXT bytes, Android's map, bounded browsing while a list is visible, sending to a listed device), the open question about the host name native adapters publish, platform caveats for the apps. |
 
 [RFC 6762]: https://www.rfc-editor.org/rfc/rfc6762
 [RFC 6763]: https://www.rfc-editor.org/rfc/rfc6763
