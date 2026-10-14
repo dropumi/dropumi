@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+//
+// Copy to Signing.local.xcconfig (gitignored) and set your Apple team ID
+// (Xcode > Settings > Accounts). Never commit the copy.
+
+DEVELOPMENT_TEAM = YOURTEAMID

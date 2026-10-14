@@ -1,0 +1,191 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# The Dropumi apps for iPhone, iPad and Mac (ADR-0012), generated with
+# xcodegen 2.46.0. Dropumi.xcodeproj is generated and not committed:
+#
+#   bash scripts/ffi/build-apple.sh --profile dev   # the Rust core first
+#   (cd apps/apple && xcodegen generate)
+#
+# Targets: Dropumi-iOS (iPhone and iPad), Dropumi-iOS-ShareExtension (no
+# Rust core; it only hands files to the app) and Dropumi-macOS.
+name: Dropumi
+options:
+  bundleIdPrefix: io.github.dropumi
+  deploymentTarget:
+    iOS: "27.0"
+    macOS: "27.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+packages:
+  DropumiKit:
+    path: DropumiKit
+
+targets:
+  Dropumi-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Dropumi/Shared
+      - path: Dropumi/iOS
+      # The fake core for UI-test scenarios: Debug only (Release excludes
+      # it with UITestScenarios.swift, see Config/Release.xcconfig).
+      - path: DropumiKit/Sources/DropumiTestSupport/FakeCoreClient.swift
+    settings:
+      base:
+        PRODUCT_NAME: Dropumi
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.Dropumi
+        INFOPLIST_FILE: Dropumi/iOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Dropumi/iOS/Dropumi.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The core check reads the Rust sources to compare them with the
+        # stamp of the built XCFramework, so this target's script phase
+        # cannot run in the script sandbox.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    preBuildScripts:
+      - name: Check the Rust core
+        script: bash "${SRCROOT}/../../scripts/apple/check-core-artifacts.sh"
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - package: DropumiKit
+        product: DropumiBindings
+      - package: DropumiKit
+        product: DropumiCore
+      - package: DropumiKit
+        product: DropumiShare
+      - package: DropumiKit
+        product: DropumiAppState
+      - package: DropumiKit
+        product: DropumiDesign
+      - target: Dropumi-iOS-ShareExtension
+        embed: true
+    scheme:
+      testTargets:
+        - DropumiTests
+        - DropumiUITests
+      gatherCoverageData: false
+
+  Dropumi-iOS-ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+    settings:
+      base:
+        PRODUCT_NAME: DropumiShareExtension
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.Dropumi.share
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - package: DropumiKit
+        product: DropumiShare
+      - package: DropumiKit
+        product: DropumiDesign
+
+  Dropumi-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Dropumi/Shared
+      - path: Dropumi/macOS
+      - path: DropumiKit/Sources/DropumiTestSupport/FakeCoreClient.swift
+    settings:
+      base:
+        PRODUCT_NAME: Dropumi
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.Dropumi
+        INFOPLIST_FILE: Dropumi/macOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Dropumi/macOS/Dropumi.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        # Hardened runtime with no exceptions, for the app only (test
+        # runners load test bundles signed without a team).
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    preBuildScripts:
+      - name: Check the Rust core
+        script: bash "${SRCROOT}/../../scripts/apple/check-core-artifacts.sh"
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - package: DropumiKit
+        product: DropumiBindings
+      - package: DropumiKit
+        product: DropumiCore
+      - package: DropumiKit
+        product: DropumiAppState
+      - package: DropumiKit
+        product: DropumiDesign
+    scheme:
+      testTargets:
+        - DropumiMacTests
+        - DropumiMacUITests
+      gatherCoverageData: false
+
+  DropumiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/DropumiTests
+      # Interop with the real CLI (crates/cli/tests/e2e/interop/apple.rs).
+      - path: Tests/Interop
+    dependencies:
+      - target: Dropumi-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.DropumiTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Dropumi.app/Dropumi"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  DropumiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/DropumiUITests
+    dependencies:
+      - target: Dropumi-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.DropumiUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Dropumi-iOS
+        # XCTestCase overrides are nonisolated; test methods are @MainActor.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+
+  DropumiMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/DropumiMacTests
+      # Interop with the real CLI (crates/cli/tests/e2e/interop/apple.rs).
+      - path: Tests/Interop
+    dependencies:
+      - target: Dropumi-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.DropumiMacTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Dropumi.app/Contents/MacOS/Dropumi"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  DropumiMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/DropumiMacUITests
+    dependencies:
+      - target: Dropumi-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.dropumi.DropumiMacUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Dropumi-macOS
+        # XCTestCase overrides are nonisolated; test methods are @MainActor.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated

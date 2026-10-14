@@ -30,6 +30,12 @@ rustc-ice-*.txt
 /apps/apple/DropumiKit/Artifacts/
 /apps/apple/DropumiKit/.build/
 /apps/apple/DropumiKit/.swiftpm/
+# Apple apps: the generated Xcode project, build output and local signing
+/apps/apple/Dropumi.xcodeproj/
+/apps/apple/build/
+/apps/apple/Config/Signing.local.xcconfig
+*.xcresult
+xcuserdata/
 # Android app: Gradle state, build output and local SDK paths
 /apps/android/.gradle/
 /apps/android/.kotlin/
