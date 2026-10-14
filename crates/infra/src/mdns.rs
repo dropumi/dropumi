@@ -13,7 +13,6 @@ use std::time::Duration;
 use dropumi_application::error::DiscoveryError;
 use dropumi_application::ports::{AdHandle, Advertisement, Discovery};
 use dropumi_domain::discovery::DiscoveredPeer;
-use dropumi_protocol::random;
 use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::time::Instant;
 
@@ -74,12 +73,6 @@ impl Drop for MdnsDiscovery {
     }
 }
 
-fn random_label() -> String {
-    let mut b = [0u8; 4];
-    let _ = random::fill(&mut b);
-    format!("dropumi-{:02x}{:02x}{:02x}{:02x}", b[0], b[1], b[2], b[3])
-}
-
 /// A registered advertisement.
 pub struct MdnsAd {
     daemon: ServiceDaemon,
@@ -117,7 +110,7 @@ impl Discovery for MdnsDiscovery {
 
     async fn advertise(&self, ad: Advertisement) -> Result<MdnsAd, DiscoveryError> {
         let daemon = self.daemon()?.clone();
-        let label = random_label();
+        let label = txt::random_label();
         let host = format!("{label}.local.");
         let props: HashMap<String, String> = txt::build(&ad).into_iter().collect();
         let info = ServiceInfo::new(SERVICE_TYPE, &label, &host, (), ad.port, props)
