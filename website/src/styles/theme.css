@@ -1,0 +1,62 @@
+@import '@fontsource-variable/plus-jakarta-sans';
+
+:root {
+	--bg: #f4f8fa;
+	--surface: #ffffff;
+	--surface-2: #e8f0f4;
+	--text-primary: #0b1f3a;
+	--text-secondary: #5b6b7d;
+	--border: #dce5eb;
+	--accent: #0e8a9b;
+	--accent-soft: #d6eef2;
+	--on-accent: #ffffff;
+	--success: #1e9e6a;
+	--navy: #0b1f3a;
+	--light-teal: #3cc4d4;
+	--font: 'Plus Jakarta Sans Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+	--sl-font: var(--font);
+	--sl-color-accent: #0e8a9b;
+	--sl-color-accent-high: #0b1f3a;
+	--sl-color-accent-low: #d6eef2;
+	--sl-color-bg: #f4f8fa;
+	--sl-color-bg-nav: #ffffff;
+	--sl-color-bg-sidebar: #f4f8fa;
+	--sl-color-text: #5b6b7d;
+	--sl-color-text-accent: #0e8a9b;
+	--sl-color-white: #0b1f3a;
+	--sl-color-hairline: #dce5eb;
+	--sl-color-hairline-light: #dce5eb;
+	--sl-color-purple: #0e8a9b;
+	--sl-color-purple-low: #d6eef2;
+	--sl-color-purple-high: #0b1f3a;
+}
+
+:root[data-theme='dark'] {
+	--bg: #07121f;
+	--surface: #0f2238;
+	--surface-2: #162c45;
+	--text-primary: #f2f7fa;
+	--text-secondary: #9db0c2;
+	--border: #1f3652;
+	--accent: #3cc4d4;
+	--accent-soft: #123a4c;
+	--on-accent: #06111f;
+
+	--sl-color-accent: #3cc4d4;
+	--sl-color-accent-high: #f2f7fa;
+	--sl-color-accent-low: #123a4c;
+	--sl-color-bg: #07121f;
+	--sl-color-bg-nav: #0f2238;
+	--sl-color-bg-sidebar: #07121f;
+	--sl-color-text: #9db0c2;
+	--sl-color-text-accent: #3cc4d4;
+	--sl-color-white: #f2f7fa;
+	--sl-color-hairline: #1f3652;
+	--sl-color-hairline-light: #1f3652;
+	--sl-color-purple: #3cc4d4;
+	--sl-color-purple-low: #123a4c;
+	--sl-color-purple-high: #f2f7fa;
+}
+
+.site-title img { height: 28px; width: auto; }
