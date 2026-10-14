@@ -35,7 +35,7 @@ impl EventListener for Recorder {
         self.gate.wait_open();
         if take_one(&self.fail) {
             return Err(CallbackError::Failed {
-                message: "listener failure".into(),
+                detail: "listener failure".into(),
             });
         }
         let tx = self.tx.lock().unwrap();
@@ -289,7 +289,7 @@ impl ForeignFile for MemDoc {
         Some(1)
     }
 
-    fn open(&self) -> Result<Arc<dyn ForeignReader>, CallbackError> {
+    fn open_reader(&self) -> Result<Arc<dyn ForeignReader>, CallbackError> {
         Ok(Arc::new(MemReader {
             data: self.data.clone(),
             pos: Mutex::new(0),
@@ -327,7 +327,7 @@ impl ForeignReader for MemReader {
         Ok(chunk)
     }
 
-    fn close(&self) {
+    fn close_document(&self) {
         self.closed.store(true, Ordering::SeqCst);
     }
 }

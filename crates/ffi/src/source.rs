@@ -40,11 +40,12 @@ pub trait ForeignFile: Send + Sync {
     fn size(&self) -> Option<u64>;
     /// Modification time (Unix seconds), if known.
     fn modified(&self) -> Option<i64>;
-    /// Opens the document for reading.
+    /// Opens the document for reading. (Not named `open`: UniFFI's Swift
+    /// generator escapes that keyword inside the C header too.)
     ///
     /// # Errors
     /// The document cannot be opened.
-    fn open(&self) -> Result<Arc<dyn ForeignReader>, CallbackError>;
+    fn open_reader(&self) -> Result<Arc<dyn ForeignReader>, CallbackError>;
 }
 
 /// An open document.
@@ -55,8 +56,9 @@ pub trait ForeignReader: Send + Sync {
     /// # Errors
     /// Reading failed.
     fn read(&self, max_len: u32) -> Result<Vec<u8>, CallbackError>;
-    /// Closes the document.
-    fn close(&self);
+    /// Closes the document. (Not named `close`: generated Kotlin objects
+    /// already have `close()` from `AutoCloseable`.)
+    fn close_document(&self);
 }
 
 /// Something to send.
@@ -219,7 +221,7 @@ fn read_document(
     changed: &AtomicBool,
     tx: &mpsc::Sender<io::Result<Vec<u8>>>,
 ) {
-    let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| file.open()));
+    let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| file.open_reader()));
     let reader = match opened {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
@@ -264,7 +266,7 @@ fn read_document(
             break;
         }
     }
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.close()));
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.close_document()));
 }
 
 impl FileSource for CompositeSource {

@@ -369,7 +369,7 @@ impl DropumiNode {
         self.engine.check_open()?;
         let Some(platform) = self.engine.platform.clone() else {
             return Err(DropumiError::DiscoveryUnavailable {
-                message: "no discovery adapter".into(),
+                detail: "no discovery adapter".into(),
             });
         };
         if lock(&self.engine.state).browsing {
@@ -378,7 +378,7 @@ impl DropumiNode {
         let sink = self.engine.peers.sink();
         app_call(move || platform.start_browse(sink))?.map_err(|e| {
             DropumiError::DiscoveryUnavailable {
-                message: e.to_string(),
+                detail: e.to_string(),
             }
         })?;
         lock(&self.engine.state).browsing = true;
@@ -930,7 +930,7 @@ impl Engine {
                     .peers
                     .get(instance)
                     .ok_or_else(|| DropumiError::NotFound {
-                        message: "that device is no longer nearby".into(),
+                        detail: "that device is no longer nearby".into(),
                     })?;
                 let targets: Vec<Target> = peer
                     .addrs
@@ -1342,7 +1342,7 @@ impl Engine {
         let identity = self.identity.load_or_create()?;
         let sink = ReceiveDir::open(&dir).map_err(|e| DropumiError::Transfer {
             code: ErrorCode::Storage,
-            message: e.to_string(),
+            detail: e.to_string(),
         })?;
         let removed = remove_stale_parts(sink.path(), STALE_AFTER);
         if removed > 0 {
@@ -1378,7 +1378,7 @@ impl Engine {
                 self.release_slot(generation);
                 return Err(DropumiError::Transfer {
                     code: ErrorCode::Internal,
-                    message: e.to_string(),
+                    detail: e.to_string(),
                 });
             }
             Err(e) => {

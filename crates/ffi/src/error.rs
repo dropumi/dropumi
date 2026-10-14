@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Errors returned to the apps, and errors thrown by app code.
 //!
-//! A `message` is for local display only. It may name local files, so apps
-//! never log it, persist it or send it anywhere.
+//! A `detail` is for local display only. It may name local files, so apps
+//! never log it, persist it or send it anywhere. (Fields are not called
+//! `message`: that would clash with `Throwable.message` in Kotlin.)
 
 use dropumi_application::error::StoreError;
 use dropumi_application::usecases::UseCaseError;
@@ -97,42 +98,42 @@ pub enum ConfigProblem {
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum DropumiError {
     /// The input is not valid.
-    #[error("invalid input: {message}")]
+    #[error("invalid input: {detail}")]
     InvalidInput {
         /// What is wrong (local display only).
-        message: String,
+        detail: String,
     },
     /// Nothing matches.
-    #[error("not found: {message}")]
+    #[error("not found: {detail}")]
     NotFound {
         /// What is missing (local display only).
-        message: String,
+        detail: String,
     },
     /// The node is doing something that prevents this call now.
-    #[error("busy: {message}")]
+    #[error("busy: {detail}")]
     Busy {
         /// Why (local display only).
-        message: String,
+        detail: String,
     },
     /// The call does not fit the current state.
-    #[error("invalid state: {message}")]
+    #[error("invalid state: {detail}")]
     InvalidState {
         /// Why (local display only).
-        message: String,
+        detail: String,
     },
     /// No discovery adapter is available; manual addresses still work.
-    #[error("discovery unavailable: {message}")]
+    #[error("discovery unavailable: {detail}")]
     DiscoveryUnavailable {
         /// Why (local display only).
-        message: String,
+        detail: String,
     },
     /// The local configuration cannot be used.
-    #[error("configuration problem: {message}")]
+    #[error("configuration problem: {detail}")]
     Config {
         /// The kind of problem.
         problem: ConfigProblem,
         /// Details, which may name a local file (local display only).
-        message: String,
+        detail: String,
     },
     /// No prompt with this id is waiting (answered, expired or never shown).
     #[error("no such prompt")]
@@ -144,43 +145,43 @@ pub enum DropumiError {
     #[error("the node is shut down")]
     ShutDown,
     /// A transfer-level failure.
-    #[error("transfer error: {message}")]
+    #[error("transfer error: {detail}")]
     Transfer {
         /// Stable code.
         code: ErrorCode,
         /// Details (local display only).
-        message: String,
+        detail: String,
     },
     /// An internal failure.
-    #[error("internal error: {message}")]
+    #[error("internal error: {detail}")]
     Internal {
         /// Details (local display only).
-        message: String,
+        detail: String,
     },
 }
 
 impl DropumiError {
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self::InvalidInput {
-            message: message.into(),
+            detail: message.into(),
         }
     }
 
     pub(crate) fn busy(message: impl Into<String>) -> Self {
         Self::Busy {
-            message: message.into(),
+            detail: message.into(),
         }
     }
 
     pub(crate) fn state(message: impl Into<String>) -> Self {
         Self::InvalidState {
-            message: message.into(),
+            detail: message.into(),
         }
     }
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
-            message: message.into(),
+            detail: message.into(),
         }
     }
 }
@@ -194,7 +195,7 @@ impl From<StoreError> for DropumiError {
         };
         Self::Config {
             problem,
-            message: e.to_string(),
+            detail: e.to_string(),
         }
     }
 }
@@ -203,7 +204,7 @@ impl From<TransferError> for DropumiError {
     fn from(e: TransferError) -> Self {
         Self::Transfer {
             code: ErrorCode::of(&e),
-            message: e.to_string(),
+            detail: e.to_string(),
         }
     }
 }
@@ -211,11 +212,11 @@ impl From<TransferError> for DropumiError {
 impl From<UseCaseError> for DropumiError {
     fn from(e: UseCaseError) -> Self {
         match e {
-            UseCaseError::Usage(m) => Self::InvalidInput { message: m },
+            UseCaseError::Usage(m) => Self::InvalidInput { detail: m },
             UseCaseError::Resolve(r) => Self::NotFound {
-                message: r.to_string(),
+                detail: r.to_string(),
             },
-            UseCaseError::DiscoveryUnavailable(m) => Self::DiscoveryUnavailable { message: m },
+            UseCaseError::DiscoveryUnavailable(m) => Self::DiscoveryUnavailable { detail: m },
             UseCaseError::Store(s) => s.into(),
             UseCaseError::Transfer(t) => t.into(),
             other => Self::internal(other.to_string()),
@@ -227,16 +228,16 @@ impl From<UseCaseError> for DropumiError {
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CallbackError {
     /// The app reported a failure.
-    #[error("{message}")]
+    #[error("{detail}")]
     Failed {
         /// What failed.
-        message: String,
+        detail: String,
     },
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for CallbackError {
     fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::Failed { message: e.reason }
+        Self::Failed { detail: e.reason }
     }
 }
 

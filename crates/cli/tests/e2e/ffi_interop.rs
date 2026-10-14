@@ -239,7 +239,7 @@ impl ForeignFile for Held {
     fn modified(&self) -> Option<i64> {
         None
     }
-    fn open(&self) -> Result<Arc<dyn ForeignReader>, CallbackError> {
+    fn open_reader(&self) -> Result<Arc<dyn ForeignReader>, CallbackError> {
         Ok(Arc::new(HeldReader {
             data: self.data.clone(),
             pos: Mutex::new(0),
@@ -268,7 +268,7 @@ impl ForeignReader for HeldReader {
         *pos = end;
         Ok(chunk)
     }
-    fn close(&self) {}
+    fn close_document(&self) {}
 }
 
 #[test]
