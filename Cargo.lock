@@ -437,6 +437,7 @@ dependencies = [
  "clap",
  "dropumi-application",
  "dropumi-domain",
+ "dropumi-ffi",
  "dropumi-infra",
  "dropumi-protocol",
  "proptest",

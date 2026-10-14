@@ -18,6 +18,7 @@ mod support;
 
 mod discovery;
 mod failure;
+mod ffi_interop;
 mod pairing;
 mod policy;
 mod security;

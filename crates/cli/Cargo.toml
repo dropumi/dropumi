@@ -38,6 +38,8 @@ rustix = { workspace = true, features = ["termios"] }
 
 [dev-dependencies]
 blake3.workspace = true
+# The app facade, only to test it against the CLI (crates/cli/tests/e2e/ffi_interop.rs).
+dropumi-ffi.workspace = true
 proptest.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
