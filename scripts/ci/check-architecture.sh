@@ -5,6 +5,9 @@
 #
 # Dependencies must point inward:
 #   dropumi-domain <- dropumi-protocol <- dropumi-application <- dropumi-infra <- dropumi-cli
+#                                                                             <- dropumi-ffi
+# dropumi-cli and dropumi-ffi are both composition roots; neither depends on
+# the other (the CLI's interop tests use dropumi-ffi as a dev-dependency only).
 #
 # For each inner crate this script lists its resolved normal (non-dev, non-build)
 # dependency graph for every target platform with all features enabled, and fails
@@ -28,9 +31,16 @@ nl=$'\n'
 violations=0
 
 # Deny-lists: a space-separated list of crate names per package.
-deny_domain="tokio tokio-util snow sha2 getrandom minicbor blake3 mdns-sd tempfile serde serde_json dirs clap tracing tracing-subscriber rustix dropumi-protocol dropumi-application dropumi-infra dropumi-cli"
-deny_protocol="tokio tokio-util mdns-sd tempfile serde serde_json dirs clap tracing tracing-subscriber dropumi-application dropumi-infra dropumi-cli"
-deny_application="mdns-sd tempfile dirs serde serde_json clap tracing-subscriber rustix dropumi-infra dropumi-cli"
+# UniFFI and the FFI crate stay out of everything below the composition roots.
+ffi_crates="uniffi uniffi_core uniffi_macros uniffi_bindgen uniffi_pipeline dropumi-ffi"
+deny_domain="tokio tokio-util snow sha2 getrandom minicbor blake3 mdns-sd tempfile serde serde_json dirs clap tracing tracing-subscriber rustix dropumi-protocol dropumi-application dropumi-infra dropumi-cli ${ffi_crates}"
+deny_protocol="tokio tokio-util mdns-sd tempfile serde serde_json dirs clap tracing tracing-subscriber dropumi-application dropumi-infra dropumi-cli ${ffi_crates}"
+deny_application="mdns-sd tempfile dirs serde serde_json clap tracing-subscriber rustix dropumi-infra dropumi-cli ${ffi_crates}"
+deny_infra="dropumi-cli ${ffi_crates}"
+deny_cli="${ffi_crates}"
+# The app library never carries mDNS (apps use Bonjour or NSD), the CLI, a
+# log subscriber or the bindings generator.
+deny_ffi="mdns-sd clap tracing-subscriber dropumi-cli uniffi_bindgen cargo_metadata"
 
 report() {
   violations=$((violations + 1))
@@ -97,6 +107,19 @@ check_package() {
 check_package dropumi-domain "${deny_domain}"
 check_package dropumi-protocol "${deny_protocol}"
 check_package dropumi-application "${deny_application}"
+check_package dropumi-infra "${deny_infra}"
+check_package dropumi-cli "${deny_cli}"
+check_package dropumi-ffi "${deny_ffi}"
+
+# UniFFI turns panics into errors with catch_unwind, which needs unwinding;
+# temporary-file cleanup also relies on Drop (ADR-0009).
+manifests="$(find . -name Cargo.toml -not -path './target/*' -not -path './website/*' | sort)"
+# Word splitting of the manifest list is intended (no spaces in these paths).
+# shellcheck disable=SC2086
+if grep -nE '^[[:space:]]*panic[[:space:]]*=[[:space:]]*"abort"' ${manifests}; then
+  report "a profile sets panic = \"abort\"; dropumi-ffi needs unwinding (ADR-0009)"
+fi
+printf 'checked profiles for panic = "abort"\n'
 
 if ! workspace_names="$(crate_names --workspace)"; then
   die "cargo tree failed for the workspace"
