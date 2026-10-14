@@ -26,6 +26,11 @@ const features = [
 	['Fast on your Wi-Fi', Zap, 'Large files move at local network speed, not at your internet speed.'],
 	['Free and open source', CodeXml, 'Read the code, fork it, improve it. No ads, no paywall, ever.'],
 ];
+const shareSteps = [
+	['share-1-select.png', 'Tap Share', 'Pick a photo, video or any file. Your nearby devices and dropumi appear in the share sheet.', 'The iOS share sheet with nearby devices and dropumi'],
+	['share-2-choose.png', 'Choose a device', 'dropumi finds who is close. Tap a device to send, no internet needed.', 'The dropumi sheet showing nearby devices'],
+	['share-3-sending.png', 'Watch it land', 'The file goes straight across your Wi-Fi, and you see progress as it sends.', 'A file sending to Maya\'s iPhone with a progress bar'],
+];
 const platforms = [
 	['macOS', Apple, 'Apple silicon and Intel'],
 	['Windows', Monitor, 'Windows 10 and 11'],
@@ -82,6 +87,20 @@ const platforms = [
 				<img src={`${base}/images/app-mobile-light.png`} alt="dropumi on a phone, light theme" />
 				<img class="mid" src={`${base}/images/app-mobile-receive.png`} alt="Receiving a file" />
 				<img src={`${base}/images/app-mobile-dark.png`} alt="dropumi on a phone, dark theme" />
+			</div>
+		</section>
+
+		<section id="share" class="dark">
+			<p class="eyebrow light">SHARE FROM ANY APP</p>
+			<h2>Select a file. Share it with dropumi.</h2>
+			<p class="sub dim">dropumi shows up in the share sheet of your phone, next to the apps you already use.</p>
+			<div class="steps3">
+				{shareSteps.map(([img, t, d, alt], i) => (
+					<figure>
+						<img src={`${base}/images/${img}`} alt={alt} loading="lazy" />
+						<figcaption><span class="num">{i + 1}</span><strong>{t}</strong><p>{d}</p></figcaption>
+					</figure>
+				))}
 			</div>
 		</section>
 
@@ -147,6 +166,13 @@ const platforms = [
 	.phones { display: flex; gap: 24px; align-items: center; }
 	.phones img { width: 200px; height: auto; border-radius: 32px; border: 1px solid var(--border); }
 	.phones .mid { margin-top: 40px; }
+	.steps3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 48px; width: 100%; max-width: 1080px; margin-top: 24px; }
+	.steps3 figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 24px; }
+	.steps3 img { width: 100%; max-width: 280px; height: auto; border-radius: 36px; border: 1px solid #1f3652; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); }
+	.steps3 figcaption { display: grid; justify-items: center; gap: 8px; max-width: 280px; }
+	.steps3 strong { color: #f2f7fa; font-size: 20px; font-weight: 700; }
+	.steps3 figcaption p { margin: 0; color: #9db0c2; font-size: 15px; }
+	@media (max-width: 900px) { .steps3 { grid-template-columns: 1fr; } }
 	.platforms { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
 	.plat { width: 200px; min-height: 228px; align-items: center; text-align: center; gap: 8px; border-radius: 20px; padding: 24px; }
 	.plat .btn { margin-top: auto; }
