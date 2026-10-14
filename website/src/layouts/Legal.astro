@@ -1,0 +1,40 @@
+---
+import Page from './Page.astro';
+interface Props { title: string; sub: string; sections: [string, string][]; updated: string }
+const { title, sub, sections, updated } = Astro.props;
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+---
+<Page title={title} description={sub}>
+	<main>
+		<header>
+			<p class="eyebrow">LEGAL</p>
+			<h1>{title}</h1>
+			<p class="sub">{sub}</p>
+			<small>Last updated {updated}</small>
+		</header>
+		<div class="body">
+			<aside>{sections.map(([t]) => <a href={`#${slug(t)}`}>{t}</a>)}</aside>
+			<div class="content">
+				{sections.map(([t, b]) => <section id={slug(t)}><h2>{t}</h2><p>{b}</p></section>)}
+			</div>
+		</div>
+	</main>
+</Page>
+
+<style>
+	main { padding: 0 var(--gutter) 110px; }
+	header { padding: 64px 0 48px; display: grid; gap: 14px; }
+	.eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); }
+	h1 { font-size: clamp(40px, 5vw, 56px); font-weight: 800; }
+	.sub { max-width: 680px; font-size: 18px; margin: 0; }
+	.body { display: flex; gap: 80px; align-items: flex-start; }
+	aside { width: 240px; display: grid; gap: 4px; position: sticky; top: 24px; flex: none; }
+	aside a { padding: 8px 12px; border-radius: 10px; font-size: 14px; font-weight: 500; }
+	aside a:hover { background: var(--accent-soft); color: var(--accent); }
+	.content { flex: 1; max-width: 760px; display: grid; gap: 36px; }
+	section { display: grid; gap: 12px; scroll-margin-top: 24px; }
+	section + section { padding-top: 36px; }
+	h2 { font-size: 26px; font-weight: 700; }
+	section p { margin: 0; font-size: 16px; line-height: 1.7; }
+	@media (max-width: 860px) { aside { display: none; } }
+</style>

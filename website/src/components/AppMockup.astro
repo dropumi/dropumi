@@ -1,0 +1,171 @@
+---
+import Smartphone from '@lucide/astro/icons/smartphone';
+import Monitor from '@lucide/astro/icons/monitor';
+import Laptop from '@lucide/astro/icons/laptop';
+import Upload from '@lucide/astro/icons/upload';
+import Radar from '@lucide/astro/icons/radar';
+import ArrowLeftRight from '@lucide/astro/icons/arrow-left-right';
+import Settings from '@lucide/astro/icons/settings';
+import FileText from '@lucide/astro/icons/file-text';
+import Check from '@lucide/astro/icons/check';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const devices = [
+	{ name: "Maya's iPhone", meta: 'iPhone · 2 m away', Icon: Smartphone, cls: 'maya' },
+	{ name: 'Pixel 8', meta: 'Android · 4 m away', Icon: Smartphone, cls: 'pixel' },
+	{ name: 'Living-room PC', meta: 'Windows · Direct link', Icon: Monitor, cls: 'pc' },
+];
+---
+<div class="mock" role="img" aria-label="The dropumi desktop app finding nearby devices and sending a file to Maya's iPhone">
+	<div class="stage" aria-hidden="true">
+		<div class="win">
+			<aside>
+				<div class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+				<img class="logo" src={`${base}/images/logo.svg`} alt="" />
+				<div class="item on"><Radar size={20} />Nearby</div>
+				<div class="item"><ArrowLeftRight size={20} />Transfers<b>1</b></div>
+				<div class="item"><Settings size={20} />Settings</div>
+				<div class="me"><span class="av"><Laptop size={20} /></span><div><strong>Santo's MacBook</strong><small><u></u>Visible to everyone</small></div></div>
+			</aside>
+			<main>
+				<h3>Nearby</h3>
+				<p class="sub">3 devices found · works without internet</p>
+
+				<div class="radar">
+					<div class="ring r3"></div><div class="ring r2"></div><div class="ring r1"></div>
+					<div class="ping p1"></div><div class="ping p2"></div>
+					<div class="me-disc"><img src={`${base}/images/symbol-reversed.svg`} alt="" /></div>
+					{devices.map(({ name, Icon, cls }) => (
+						<div class={`dev ${cls}`}><span class="av"><Icon size={24} /></span><em>{name}</em><span class="burst"></span></div>
+					))}
+				</div>
+
+				<div class="drop"><span class="up"><Upload size={22} /></span><strong>Drop files here to send</strong><small>or <u>browse files</u> · <u>choose a folder</u></small></div>
+				<h4>Send to</h4>
+				<ul>
+					{devices.map(({ name, meta, Icon, cls }, i) => (
+						<li class={`row row${i}`}>
+							<span class="av"><Icon size={20} /></span>
+							<div><strong>{name}</strong><small>{meta}</small></div>
+							<div class="slot">
+								<span class="pill send">Send</span>
+								{cls === 'maya' && <>
+									<span class="pill prog"><i></i><b>Sending</b></span>
+									<span class="pill done"><Check size={14} />Sent</span>
+								</>}
+							</div>
+						</li>
+					))}
+				</ul>
+			</main>
+			<div class="chip"><FileText size={16} />photo.heic</div>
+		</div>
+	</div>
+</div>
+
+<style>
+	.mock { position: relative; width: 100%; max-width: 1000px; aspect-ratio: 1120 / 720; margin-inline: auto; --s: 0.89; }
+	.stage { position: absolute; inset: 0; overflow: visible; }
+	.win { position: absolute; left: 0; top: 0; width: 1120px; height: 720px; transform: scale(var(--s)); transform-origin: top left; background: var(--bg); border-radius: 14px; box-shadow: 0 24px 60px rgba(11, 31, 58, 0.16), 0 0 0 1px rgba(11, 31, 58, 0.06); overflow: hidden; display: flex; text-align: left; color: var(--text-primary); }
+	aside { width: 232px; background: var(--surface-2); padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; position: relative; flex: none; }
+	.dots { display: flex; gap: 8px; padding-left: 4px; margin-bottom: 16px; }
+	.dots i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+	.logo { height: 34px; width: auto; align-self: flex-start; margin: 0 0 20px 4px; }
+	.item { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 10px; font-size: 15px; font-weight: 500; color: var(--text-primary); }
+	.item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+	.item b { margin-left: auto; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center; }
+	.me { margin-top: auto; display: flex; gap: 10px; align-items: center; padding: 0 4px; }
+	.me strong { display: block; font-size: 13px; font-weight: 600; }
+	.me small { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+	.me u { width: 7px; height: 7px; border-radius: 50%; background: var(--success); display: block; text-decoration: none; }
+	.av { width: 42px; height: 42px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
+	main { position: relative; flex: 1; }
+	h3 { position: absolute; left: 40px; top: 40px; font-size: 32px; font-weight: 700; line-height: 1.2; margin: 0; letter-spacing: -0.02em; }
+	.sub { position: absolute; left: 40px; top: 84px; margin: 0; font-size: 14px; color: var(--text-secondary); }
+
+	.radar { position: absolute; left: 40px; top: 118px; width: 400px; height: 460px; }
+	.ring, .ping { position: absolute; left: 50%; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); border: 1px solid rgba(14, 148, 166, 0.3); }
+	.ring.r1 { width: 182px; height: 182px; background: rgba(14, 148, 166, 0.06); }
+	.ring.r2 { width: 292px; height: 292px; background: rgba(14, 148, 166, 0.04); }
+	.ring.r3 { width: 400px; height: 400px; }
+	.ping { width: 96px; height: 96px; opacity: 0; border: 2px solid rgba(14, 148, 166, 0.45); }
+	.me-disc { position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; margin: -48px 0 0 -48px; border-radius: 50%; background: var(--navy); display: grid; place-items: center; box-shadow: 0 10px 30px rgba(11, 31, 58, 0.3); }
+	.me-disc img { width: 58px; height: 58px; }
+	.dev { position: absolute; width: 50px; height: 50px; margin: -25px 0 0 -25px; display: grid; place-items: center; }
+	.dev .av { width: 50px; height: 50px; background: #fff; box-shadow: 0 4px 14px rgba(11, 31, 58, 0.12); }
+	.dev em { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-style: normal; font-size: 12px; font-weight: 500; }
+	.dev .burst { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; }
+	.dev.maya { left: 72px; top: 144px; }
+	.dev.pixel { left: 360px; top: 119px; }
+	.dev.pc { left: 275px; top: 360px; }
+
+	.drop { position: absolute; left: 489px; top: 128px; width: 361px; height: 190px; border-radius: 24px; background: var(--accent-soft); border: 2px solid rgba(14, 148, 166, 0.3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+	.up { width: 56px; height: 56px; border-radius: 50%; background: #fff; display: grid; place-items: center; color: var(--accent); margin-bottom: 8px; }
+	.drop strong { font-size: 18px; font-weight: 600; }
+	.drop small { font-size: 13px; color: var(--text-secondary); }
+	.drop u { color: var(--accent); font-weight: 600; text-decoration: none; }
+	h4 { position: absolute; left: 489px; top: 338px; margin: 0; font-size: 18px; font-weight: 600; }
+	ul { position: absolute; left: 489px; top: 382px; width: 361px; margin: 0; padding: 0; list-style: none; }
+	.row { display: flex; align-items: center; gap: 12px; height: 64px; border-bottom: 1px solid var(--border); }
+	.row strong { display: block; font-size: 15px; font-weight: 600; }
+	.row small { font-size: 12px; color: var(--text-secondary); }
+	.slot { margin-left: auto; position: relative; width: 88px; height: 32px; }
+	.pill { position: absolute; inset: 0; border-radius: 16px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px; overflow: hidden; }
+	.pill.prog, .pill.done { opacity: 0; }
+	.pill.prog i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(14, 148, 166, 0.28); }
+	.pill.prog b { position: relative; font-weight: 600; }
+	.pill.done { background: var(--success); color: #fff; }
+
+	.chip { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 17px; background: var(--navy); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; opacity: 0; box-shadow: 0 8px 20px rgba(11, 31, 58, 0.3); z-index: 3; }
+
+	.play .ring.r1 { animation: breathe 4s ease-in-out infinite; }
+	.play .ping { animation: ping 3.6s ease-out infinite; }
+	.play .ping.p2 { animation-delay: 1.8s; }
+	.play .dev { animation: pop 0.6s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+	.play .dev.maya { animation-delay: 0.3s; }
+	.play .dev.pixel { animation-delay: 0.8s; }
+	.play .dev.pc { animation-delay: 1.3s; }
+	.play .row { animation: rise 0.5s ease-out both; }
+	.play .row0 { animation-delay: 0.5s; }
+	.play .row1 { animation-delay: 1s; }
+	.play .row2 { animation-delay: 1.5s; }
+	.play .drop { animation: glow 12s ease-in-out infinite; }
+	.play .chip { animation: fly 12s ease-in-out infinite; }
+	.play .maya .burst { animation: burst 12s ease-out infinite; }
+	.play .row0 .send { animation: sendLabel 12s infinite; }
+	.play .row0 .prog { animation: progShow 12s infinite; }
+	.play .row0 .prog i { animation: fill 12s linear infinite; }
+	.play .row0 .done { animation: doneShow 12s infinite; }
+
+	@keyframes breathe { 50% { transform: translate(-50%, -50%) scale(1.04); } }
+	@keyframes ping { 0% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; } 100% { transform: translate(-50%, -50%) scale(4.1); opacity: 0; } }
+	@keyframes pop { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+	@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+	@keyframes glow { 0%, 22%, 100% { box-shadow: none; } 12% { box-shadow: 0 0 0 8px rgba(14, 148, 166, 0.15); } }
+	@keyframes fly {
+		0%, 24% { opacity: 0; transform: translate(851px, 206px) scale(0.8); }
+		27% { opacity: 1; transform: translate(851px, 206px) scale(1); }
+		40% { opacity: 1; transform: translate(294px, 245px) scale(1); }
+		43%, 100% { opacity: 0; transform: translate(294px, 245px) scale(0.5); }
+	}
+	@keyframes burst { 0%, 38% { opacity: 0; transform: scale(1); } 40% { opacity: 0.9; transform: scale(1); } 52%, 100% { opacity: 0; transform: scale(1.9); } }
+	@keyframes sendLabel { 0%, 40% { opacity: 1; } 42%, 93% { opacity: 0; } 96%, 100% { opacity: 1; } }
+	@keyframes progShow { 0%, 40% { opacity: 0; } 42%, 62% { opacity: 1; } 64%, 100% { opacity: 0; } }
+	@keyframes fill { 0%, 41% { width: 0; } 62%, 100% { width: 100%; } }
+	@keyframes doneShow { 0%, 63% { opacity: 0; } 65%, 91% { opacity: 1; } 93%, 100% { opacity: 0; } }
+
+	@media (prefers-reduced-motion: reduce) {
+		.play .ring, .play .ping, .play .dev, .play .row, .play .drop, .play .chip, .play .burst, .play .pill, .play .pill i { animation: none !important; }
+		.ping { display: none; }
+	}
+</style>
+
+<script>
+	document.querySelectorAll<HTMLElement>('.mock').forEach((el) => {
+		const win = el.querySelector<HTMLElement>('.win');
+		const fit = () => el.style.setProperty('--s', String(el.clientWidth / 1120));
+		fit();
+		new ResizeObserver(fit).observe(el);
+		new IntersectionObserver(([e]) => win?.classList.toggle('play', e.isIntersecting)).observe(el);
+	});
+</script>
