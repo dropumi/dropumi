@@ -234,7 +234,8 @@ where
     /// first session that delivered an offer ends).
     ///
     /// # Errors
-    /// [`UseCaseError::Transfer`] if accepting connections fails.
+    /// [`UseCaseError::Transfer`] if accepting connections fails
+    /// repeatedly (8 times in a row, with a growing pause between tries).
     pub async fn run(
         mut self,
         cfg: ReceiveConfig,
@@ -252,8 +253,15 @@ where
             .await;
         let mut policy = cfg.policy;
         let mut summary = ReceiveSummary::Stopped;
+        // Accept errors are retried with a growing pause; a listener that
+        // keeps failing (an invalidated socket, no file descriptors left)
+        // ends the receiver instead of spinning.
+        let mut accept_failures: u32 = 0;
+        let mut accept_paused_until: Option<tokio::time::Instant> = None;
+        let mut listener_failed: Option<TransferError> = None;
         loop {
             let expiry = everyone_expiry(&policy, self.deps.clock.now().as_secs());
+            let resume = accept_paused_until.unwrap_or_else(tokio::time::Instant::now);
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
@@ -272,11 +280,26 @@ where
                     policy = TransferPolicy { mode: PolicyMode::TrustedOnly, ..policy };
                     self.deps.events.emit(AppEvent::PolicyChanged { policy }).await;
                 }
-                accepted = self.listener.accept() => {
+                () = tokio::time::sleep_until(resume), if accept_paused_until.is_some() => {
+                    accept_paused_until = None;
+                }
+                accepted = self.listener.accept(), if accept_paused_until.is_none() => {
                     let (stream, addr) = match accepted {
-                        Ok(a) => a,
+                        Ok(a) => {
+                            accept_failures = 0;
+                            a
+                        }
                         Err(e) => {
-                            tracing::warn!(error = %e, "accept failed");
+                            accept_failures = accept_failures.saturating_add(1);
+                            tracing::warn!(error = %e, failures = accept_failures, "accept failed");
+                            if accept_failures >= MAX_ACCEPT_FAILURES {
+                                listener_failed = Some(TransferError::Internal(format!(
+                                    "accepting connections failed {accept_failures} times in a row: {e}"
+                                )));
+                                break;
+                            }
+                            accept_paused_until =
+                                Some(tokio::time::Instant::now() + accept_backoff(accept_failures));
                             continue;
                         }
                     };
@@ -305,8 +328,23 @@ where
         })
         .await;
         sessions.abort_all();
-        Ok(summary)
+        match listener_failed {
+            Some(e) => Err(UseCaseError::Transfer(e)),
+            None => Ok(summary),
+        }
     }
+}
+
+/// Consecutive accept errors after which the receiver stops.
+const MAX_ACCEPT_FAILURES: u32 = 8;
+
+/// Pause after the `failures`-th consecutive accept error: 10 ms, doubling,
+/// at most 1 s.
+fn accept_backoff(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(7);
+    Duration::from_millis(10)
+        .saturating_mul(1 << doublings)
+        .min(Duration::from_secs(1))
 }
 
 /// Time until an Everyone window expires.

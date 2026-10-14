@@ -400,3 +400,64 @@ async fn concurrent_duplicate_offers_admit_one() {
     rx.cancel.cancel();
     let _ = finish(rx).await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn receiver_stops_after_repeated_accept_failures() {
+    let net = Net::new();
+    let mut setup = ReceiverSetup::new(identity(2, "Bob"), MemTrust::default());
+    setup.once = false;
+    // An invalidated listening socket: every accept fails at once.
+    setup.listener_failures = usize::MAX;
+    let rx = setup.start(&net, addr(9605));
+    let attempts = Arc::clone(&rx.accept_attempts);
+    let (summary, _, _) = tokio::time::timeout(Duration::from_secs(60), finish(rx))
+        .await
+        .expect("the receiver gives up instead of spinning");
+    assert!(
+        matches!(summary, Err(UseCaseError::Transfer(_))),
+        "{summary:?}"
+    );
+    assert_eq!(attempts.load(Ordering::SeqCst), 8);
+}
+
+#[tokio::test(start_paused = true)]
+async fn accept_failures_back_off() {
+    let net = Net::new();
+    let mut setup = ReceiverSetup::new(identity(2, "Bob"), MemTrust::default());
+    setup.once = false;
+    setup.listener_failures = usize::MAX;
+    let rx = setup.start(&net, addr(9606));
+    let attempts = Arc::clone(&rx.accept_attempts);
+    let started = tokio::time::Instant::now();
+    let _ = finish(rx).await;
+    // 10 + 20 + 40 + 80 + 160 + 320 + 640 ms between the eight attempts.
+    assert_eq!(attempts.load(Ordering::SeqCst), 8);
+    assert!(started.elapsed() >= Duration::from_millis(1_270));
+}
+
+#[tokio::test(start_paused = true)]
+async fn single_accept_error_is_retried() {
+    let net = Net::new();
+    let (alice, bob) = (identity(1, "Alice"), identity(2, "Bob"));
+    let mut setup = ReceiverSetup::new(bob.clone(), MemTrust::with(&[(&alice, "Alice")]));
+    setup.listener_failures = 1;
+    let rx = setup.start(&net, addr(9607));
+    let source = MemSource::default();
+    let p = source.add("/small.txt", b"hello".to_vec());
+    let tx = SenderSetup::new(alice, MemTrust::with(&[(&bob, "Bob")]), source);
+    let (out, _) = tx
+        .send(
+            &net,
+            to(9607),
+            vec![p],
+            false,
+            None,
+            CancellationToken::new(),
+        )
+        .await;
+    assert!(matches!(out.unwrap(), TransferOutcome::Completed { .. }));
+    let attempts = Arc::clone(&rx.accept_attempts);
+    let (summary, _, _) = finish(rx).await;
+    assert!(summary.is_ok());
+    assert!(attempts.load(Ordering::SeqCst) >= 2);
+}
