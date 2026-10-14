@@ -15,13 +15,14 @@ This directory records the significant architecture, security, protocol and gove
 | [0005](0005-wire-protocol-v1.md) | Wire protocol v1 | Accepted (draft protocol) | `crates/protocol/src/`, `crates/application/src/config.rs` |
 | [0006](0006-integrity-and-receiver-filesystem-safety.md) | Integrity and receiver filesystem safety | Accepted | `crates/domain/src/{filename,text}.rs`, `crates/infra/src/fs/` |
 | [0007](0007-lan-discovery-mdns.md) | LAN discovery via mDNS | Accepted | `crates/infra/src/{mdns,txt}.rs` (feature `mdns`) |
-| [0008](0008-ui-framework-strategy.md) | UI framework strategy | Accepted (provisional) | Not implemented (no UI in milestone 1) |
+| [0008](0008-ui-framework-strategy.md) | UI framework strategy | Superseded by ADR-0012 | Mobile: native (ADR-0012); desktop beyond the Mac: not implemented |
 | [0009](0009-ffi-bindings-strategy.md) | FFI and bindings strategy | Accepted | `crates/ffi/`, `crates/ffi-bindgen/`, `scripts/ffi/`, `apps/apple/DropumiKit/`, `apps/android/core-bindings/` |
 | [0010](0010-dependency-license-and-ci-supply-chain-policy.md) | Dependency, license and CI supply-chain policy | Accepted | `deny.toml`, `.github/workflows/`, `.github/dependabot.yml` |
 | [0011](0011-browser-companion.md) | Browser companion | Proposed | `poc/web/` (research prototype, part 1) |
+| [0012](0012-apple-apps.md) | Apple apps (iPhone, iPad, Mac) in SwiftUI | Accepted | `apps/apple/`, `scripts/apple/`, `crates/cli/tests/e2e/interop/apple.rs` |
 | [0014](0014-interim-key-storage-on-app-platforms.md) | Interim key storage on the app platforms | Accepted | `crates/ffi/src/node.rs` (configuration directory from the app); platform settings in the apps |
 
-ADR-0001 to ADR-0010 are dated 2026-10-13; ADR-0009 was accepted, and ADR-0011 and ADR-0014 were written, on 2026-10-14 (milestone 2). Numbers 0012 (Apple apps) and 0013 (Android app) are reserved for milestone 2's app records.
+ADR-0001 to ADR-0010 are dated 2026-10-13; ADR-0009 was accepted, and ADR-0011 and ADR-0014 were written, on 2026-10-14 (milestone 2). ADR-0012 (Apple apps) was written on 2026-10-15 and supersedes ADR-0008. Number 0013 (Android app) is reserved for milestone 2's Android record.
 
 Related normative and supporting documents:
 

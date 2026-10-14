@@ -1,6 +1,6 @@
 # ADR-0008: UI framework strategy
 
-- **Status:** Accepted (provisional)
+- **Status:** Superseded by [ADR-0012](0012-apple-apps.md) (2026-10-15: the Mac app is SwiftUI, shared with iPhone and iPad; Windows and Linux stay undecided under this record's gates G1 and G2)
 - **Date:** 2026-10-13 (platform facts reconciled with `feasibility.md` on 2026-10-13; measured receiver baseline updated on 2026-10-14)
 - **Related:** ADR-0001, ADR-0009, ADR-0010, [`../feasibility.md`](../feasibility.md)
 

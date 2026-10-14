@@ -19,7 +19,7 @@ For milestone 2, the apps keep the ADR-0003 key file, unchanged, in app-private 
 | Platform | Configuration directory | Exclusion and protection |
 |---|---|---|
 | iOS, iPadOS | `Library/Application Support/Dropumi` inside the app container (never the App Group) | `isExcludedFromBackup` on the directory; data protection class `completeUntilFirstUserAuthentication` |
-| macOS | `Application Support/Dropumi` inside the app's sandbox container | The sandbox; Time Machine backs it up, as it backs up the CLI's directory today |
+| macOS | `Application Support/Dropumi` inside the app's sandbox container | The sandbox; `isExcludedFromBackup` on the directory, which Time Machine honours (reconciled 2026-10-15 with the app's code; the CLI's directory is still backed up) |
 | Android | `noBackupFilesDir/dropumi` (never `filesDir` itself, whose mode is 0771) | `android:allowBackup="false"` and `dataExtractionRules` that exclude every domain from both cloud backup and device transfer |
 
 - The node creates the directory with mode 0700 and runs the ADR-0003 owner and mode checks unchanged, on every platform.
@@ -30,7 +30,8 @@ For milestone 2, the apps keep the ADR-0003 key file, unchanged, in app-private 
 
 - `dropumi-ffi` takes the configuration directory from the app (`NodeConfig::config_dir`, absolute) and opens `FileIdentityStore` and `TrustFile` there; it never calls `paths::config_dir(None)`.
 - The platform settings in the table (backup exclusion, data protection, manifest attributes) are set by the apps in milestones 2b and 2c and recorded in ADR-0012 and ADR-0013 with their tests.
-- Status: Not tested on a device (the apps do not exist yet). The key-file code and checks are the CLI's: Automated test passed (macOS 27.0.1 arm64, local run).
+- Apple apps (2b): `AppPaths.protectConfig` sets `isExcludedFromBackup` on the directory on iOS and macOS (so on the Mac, Time Machine skips it too) and the data protection class on iOS. `TestHostTests configFolderIsExcludedFromBackups` checks the flag and mode 0700: Automated test passed (iOS 27.0 simulator and macOS 27.0.1 arm64, local run). On devices: Not tested.
+- Status: the key-file code and checks are the CLI's: Automated test passed (macOS 27.0.1 arm64, local run). Android: Not tested (milestone 2c).
 
 ## Consequences
 
@@ -43,7 +44,7 @@ For milestone 2, the apps keep the ADR-0003 key file, unchanged, in app-private 
 ### Negative
 
 - The key is a file readable by any code running as the app's user ID, and by root.
-- On macOS, Time Machine includes the key, as it does for the CLI.
+- On macOS, Time Machine still includes the CLI's key; the app's key is excluded.
 - Backup exclusion depends on each OS honouring the flags; whether iOS device-to-device migration honours `isExcludedFromBackup` is UNVERIFIED.
 - A later move to the Keychain or Keystore needs a migration step.
 
