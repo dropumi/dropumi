@@ -499,6 +499,17 @@ impl TrustStore for MemTrust {
         }
         Ok(())
     }
+
+    fn rename(&self, fp: &Fingerprint, alias: DeviceName) -> Result<bool, StoreError> {
+        let mut v = self.devices.lock().unwrap();
+        match v.iter_mut().find(|d| &d.fingerprint == fp) {
+            Some(d) => {
+                d.alias = Some(alias);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
 }
 
 pub struct MemIdentity(pub LocalIdentity);

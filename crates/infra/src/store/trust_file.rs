@@ -160,6 +160,17 @@ impl TrustStore for TrustFile {
             }
         })
     }
+
+    fn rename(&self, fp: &Fingerprint, alias: DeviceName) -> Result<bool, StoreError> {
+        let _lock = ConfigLock::acquire(&self.dir)?;
+        let mut devices = self.read()?;
+        let Some(device) = devices.iter_mut().find(|d| &d.fingerprint == fp) else {
+            return Ok(false);
+        };
+        device.alias = Some(alias);
+        self.write(&devices)?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +251,72 @@ mod tests {
             t.list(),
             Err(StoreError::InsecurePermissions { .. })
         ));
+    }
+
+    #[test]
+    fn rename_keeps_fingerprint_and_method() {
+        let d = tempfile::tempdir().unwrap();
+        let t = TrustFile::open(d.path()).unwrap();
+        let fp = Fingerprint::from_digest([1; 32]);
+        t.upsert(device(1, "One")).unwrap();
+        t.touch(&fp, Timestamp(42)).unwrap();
+        assert!(t.rename(&fp, DeviceName::sanitize("Studio Mac")).unwrap());
+        let renamed = t.get(&fp).unwrap().unwrap();
+        assert_eq!(renamed.alias.unwrap().as_str(), "Studio Mac");
+        assert_eq!(renamed.fingerprint, fp);
+        assert_eq!(renamed.public_key, Some(PublicKey::from_bytes([1; 32])));
+        assert_eq!(renamed.method, PairingMethod::Sas);
+        assert_eq!(renamed.added_at, Timestamp(10));
+        assert_eq!(renamed.last_seen, Some(Timestamp(42)));
+    }
+
+    #[test]
+    fn rename_unknown_returns_false_and_writes_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let t = TrustFile::open(d.path()).unwrap();
+        let fp = Fingerprint::from_digest([3; 32]);
+        assert!(!t.rename(&fp, DeviceName::sanitize("Ghost")).unwrap());
+        assert!(!d.path().join(TRUST_FILE).exists());
+        t.upsert(device(1, "One")).unwrap();
+        assert!(!t.rename(&fp, DeviceName::sanitize("Ghost")).unwrap());
+        assert_eq!(t.list().unwrap().len(), 1);
+        assert!(t.get(&fp).unwrap().is_none());
+    }
+
+    #[test]
+    fn rename_racing_remove_never_resurrects() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_path_buf();
+        let fp = Fingerprint::from_digest([1; 32]);
+        for round in 0..40 {
+            let t = TrustFile::open(&dir).unwrap();
+            t.upsert(device(1, "One")).unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let renamer = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    for _ in 0..5 {
+                        t.rename(&fp, DeviceName::sanitize("Renamed")).unwrap();
+                    }
+                })
+            };
+            let remover = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    assert!(t.remove(&fp).unwrap());
+                })
+            };
+            renamer.join().unwrap();
+            remover.join().unwrap();
+            assert!(
+                t.get(&fp).unwrap().is_none(),
+                "round {round}: a rename brought back a removed device"
+            );
+        }
     }
 
     #[test]

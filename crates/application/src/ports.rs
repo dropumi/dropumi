@@ -222,6 +222,15 @@ pub trait TrustStore: Send + Sync {
     /// # Errors
     /// [`StoreError`] for I/O failures.
     fn touch(&self, fp: &Fingerprint, at: Timestamp) -> Result<(), StoreError>;
+
+    /// Changes the local alias of a trusted device in one locked step and
+    /// returns whether the device is trusted. A device that is not trusted
+    /// is never added, so a rename that races a removal cannot bring the
+    /// device back. The fingerprint, key, method and dates are unchanged.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O failures.
+    fn rename(&self, fp: &Fingerprint, alias: DeviceName) -> Result<bool, StoreError>;
 }
 
 /// An offer awaiting the receiving user's decision.

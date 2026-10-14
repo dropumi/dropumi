@@ -51,3 +51,16 @@ pub fn add_manual<T: TrustStore, K: Clock>(
 pub fn remove<T: TrustStore>(trust: &T, fingerprint: &Fingerprint) -> Result<bool, StoreError> {
     trust.remove(fingerprint)
 }
+
+/// Renames a trusted device (its local alias); returns whether it was
+/// trusted. Never adds a device.
+///
+/// # Errors
+/// [`StoreError`] from the trust store.
+pub fn rename<T: TrustStore>(
+    trust: &T,
+    fingerprint: &Fingerprint,
+    alias: DeviceName,
+) -> Result<bool, StoreError> {
+    trust.rename(fingerprint, alias)
+}
