@@ -7,6 +7,7 @@
 //! without overwriting anything; `CompleteAck` follows the directory sync.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,7 @@ use dropumi_protocol::ProtocolError;
 use dropumi_protocol::message::{AckStatus, ErrorCode, Message};
 use dropumi_protocol::session::{ReceiverEvent, ReceiverMachine};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
@@ -36,6 +38,7 @@ use crate::channel::{
     respond,
 };
 use crate::config::{AdmissionLimits, ReceiveConfig, Timeouts};
+use crate::error::TransportError;
 use crate::events::{AppEvent, EventSink, PeerView, TransferOutcome};
 use crate::identity::LocalIdentity;
 use crate::ports::{
@@ -190,12 +193,47 @@ struct SessionResult {
     outcome: Option<TransferOutcome>,
 }
 
+/// Changes a running receiver: the policy for new sessions, or whether it
+/// still accepts connections at all.
+#[derive(Debug, Clone)]
+pub struct ReceiverControl {
+    policy: Arc<watch::Sender<Option<TransferPolicy>>>,
+    stop_accepting: CancellationToken,
+}
+
+impl ReceiverControl {
+    fn new() -> (Self, watch::Receiver<Option<TransferPolicy>>) {
+        let (tx, rx) = watch::channel(None);
+        let control = Self {
+            policy: Arc::new(tx),
+            stop_accepting: CancellationToken::new(),
+        };
+        (control, rx)
+    }
+
+    /// Replaces the policy (mode and accept mode) for sessions that connect
+    /// from now on. Running sessions keep the authorization and consent
+    /// mode they started with. The receiver reports `PolicyChanged`.
+    pub fn set_policy(&self, policy: TransferPolicy) {
+        self.policy.send_replace(Some(policy));
+    }
+
+    /// Stops accepting connections: the listener is closed at once, the
+    /// running sessions finish normally (nothing is cancelled), and then the
+    /// receiver returns [`ReceiveSummary::Stopped`].
+    pub fn stop_accepting(&self) {
+        self.stop_accepting.cancel();
+    }
+}
+
 /// The receive use case.
 #[derive(Debug)]
 pub struct ReceiveFiles<L, S, T, I, K> {
     listener: L,
     deps: Arc<ReceiveDeps<S, T, I, K>>,
     canceller: TransferCanceller,
+    control: ReceiverControl,
+    policy_updates: watch::Receiver<Option<TransferPolicy>>,
 }
 
 impl<L, S, T, I, K> ReceiveFiles<L, S, T, I, K>
@@ -209,10 +247,13 @@ where
     /// Builds the use case.
     #[must_use]
     pub fn new(listener: L, deps: ReceiveDeps<S, T, I, K>) -> Self {
+        let (control, policy_updates) = ReceiverControl::new();
         Self {
             listener,
             deps: Arc::new(deps),
             canceller: TransferCanceller::default(),
+            control,
+            policy_updates,
         }
     }
 
@@ -230,6 +271,12 @@ where
         self.canceller.clone()
     }
 
+    /// A handle that changes the policy or stops accepting connections.
+    #[must_use]
+    pub fn control(&self) -> ReceiverControl {
+        self.control.clone()
+    }
+
     /// Serves sessions until `cancel` fires (or, with `once`, until the
     /// first session that delivered an offer ends).
     ///
@@ -237,20 +284,29 @@ where
     /// [`UseCaseError::Transfer`] if accepting connections fails
     /// repeatedly (8 times in a row, with a growing pause between tries).
     pub async fn run(
-        mut self,
+        self,
         cfg: ReceiveConfig,
         cancel: CancellationToken,
     ) -> Result<ReceiveSummary, UseCaseError> {
-        let admission = Admission::new(self.deps.limits);
+        let Self {
+            listener,
+            deps,
+            canceller,
+            control,
+            mut policy_updates,
+        } = self;
+        let admission = Admission::new(deps.limits);
         let sessions_cancel = cancel.child_token();
         let mut sessions: JoinSet<SessionResult> = JoinSet::new();
-        self.deps
-            .events
+        deps.events
             .emit(AppEvent::Listening {
-                addrs: self.listener.local_addrs(),
+                addrs: listener.local_addrs(),
                 policy: cfg.policy,
             })
             .await;
+        // `None` once the receiver stopped accepting.
+        let mut listener = Some(listener);
+        let mut updates_open = true;
         let mut policy = cfg.policy;
         let mut summary = ReceiveSummary::Stopped;
         // Accept errors are retried with a growing pause; a listener that
@@ -260,11 +316,29 @@ where
         let mut accept_paused_until: Option<tokio::time::Instant> = None;
         let mut listener_failed: Option<TransferError> = None;
         loop {
-            let expiry = everyone_expiry(&policy, self.deps.clock.now().as_secs());
+            if listener.is_none() && sessions.is_empty() {
+                break;
+            }
+            let expiry = everyone_expiry(&policy, deps.clock.now().as_secs());
             let resume = accept_paused_until.unwrap_or_else(tokio::time::Instant::now);
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
+                () = control.stop_accepting.cancelled(), if listener.is_some() => {
+                    // Dropping the listener closes the socket.
+                    listener = None;
+                }
+                changed = policy_updates.changed(), if updates_open => {
+                    if changed.is_err() {
+                        updates_open = false;
+                        continue;
+                    }
+                    let update = *policy_updates.borrow_and_update();
+                    if let Some(p) = update {
+                        policy = p;
+                        deps.events.emit(AppEvent::PolicyChanged { policy }).await;
+                    }
+                }
                 Some(joined) = sessions.join_next(), if !sessions.is_empty() => {
                     if let Ok(result) = joined
                         && cfg.once
@@ -278,12 +352,13 @@ where
                 }
                 () = tokio::time::sleep(expiry.unwrap_or(Duration::from_secs(3600))), if expiry.is_some() => {
                     policy = TransferPolicy { mode: PolicyMode::TrustedOnly, ..policy };
-                    self.deps.events.emit(AppEvent::PolicyChanged { policy }).await;
+                    deps.events.emit(AppEvent::PolicyChanged { policy }).await;
                 }
                 () = tokio::time::sleep_until(resume), if accept_paused_until.is_some() => {
                     accept_paused_until = None;
                 }
-                accepted = self.listener.accept(), if accept_paused_until.is_none() => {
+                accepted = accept_next(listener.as_mut()),
+                    if listener.is_some() && accept_paused_until.is_none() => {
                     let (stream, addr) = match accepted {
                         Ok(a) => {
                             accept_failures = 0;
@@ -307,14 +382,14 @@ where
                         tracing::debug!(%addr, "admission limit reached; dropping connection");
                         continue;
                     };
-                    let deps = Arc::clone(&self.deps);
+                    let deps = Arc::clone(&deps);
                     let admission = admission.clone();
                     let token = SessionCancel {
                         stop: sessions_cancel.clone(),
-                        transfer: self.canceller.current(),
+                        transfer: canceller.current(),
                         this: None,
                     };
-                    let canceller = self.canceller.clone();
+                    let canceller = canceller.clone();
                     sessions.spawn(async move {
                         serve(stream, deps, policy, permit, admission, token, canceller).await
                     });
@@ -322,7 +397,7 @@ where
             }
         }
         sessions_cancel.cancel();
-        let drain = self.deps.timeouts.drain.saturating_mul(2);
+        let drain = deps.timeouts.drain.saturating_mul(2);
         let _ = timeout(drain, async {
             while sessions.join_next().await.is_some() {}
         })
@@ -332,6 +407,16 @@ where
             Some(e) => Err(UseCaseError::Transfer(e)),
             None => Ok(summary),
         }
+    }
+}
+
+/// The next connection, or never once the listener is closed.
+async fn accept_next<L: Listener>(
+    listener: Option<&mut L>,
+) -> Result<(L::Stream, SocketAddr), TransportError> {
+    match listener {
+        Some(l) => l.accept().await,
+        None => std::future::pending().await,
     }
 }
 

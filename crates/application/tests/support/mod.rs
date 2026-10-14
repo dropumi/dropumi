@@ -602,7 +602,7 @@ use dropumi_application::config::{AdmissionLimits, ReceiveConfig, SendRequest, T
 use dropumi_application::events::TransferOutcome;
 use dropumi_application::usecases::UseCaseError;
 use dropumi_application::usecases::receive::{
-    ReceiveDeps, ReceiveFiles, ReceiveSummary, TransferCanceller,
+    ReceiveDeps, ReceiveFiles, ReceiveSummary, ReceiverControl, TransferCanceller,
 };
 use dropumi_application::usecases::send::{SendDeps, SendFiles};
 use dropumi_domain::discovery::Target;
@@ -620,6 +620,8 @@ pub struct ReceiverHandle {
     pub interaction: Scripted,
     /// Cancels transfers by id, or all of them.
     pub canceller: TransferCanceller,
+    /// Changes the policy or stops accepting.
+    pub control: ReceiverControl,
     /// Number of `accept` calls the listener saw.
     pub accept_attempts: Arc<AtomicUsize>,
 }
@@ -675,6 +677,7 @@ impl ReceiverSetup {
         };
         let use_case = ReceiveFiles::new(listener, deps);
         let canceller = use_case.canceller();
+        let control = use_case.control();
         let cfg = ReceiveConfig {
             policy: self.policy,
             once: self.once,
@@ -689,6 +692,7 @@ impl ReceiverSetup {
             trust: self.trust,
             interaction: self.interaction,
             canceller,
+            control,
             accept_attempts,
         }
     }

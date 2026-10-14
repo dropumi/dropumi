@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Controlling a running receiver: cancelling one transfer by id and
-//! rejecting a second offer that reuses an active transfer id.
+//! Controlling a running receiver: cancelling one transfer by id,
+//! rejecting a second offer that reuses an active transfer id, surviving
+//! accept errors, changing the policy and stopping to accept.
 
 #![allow(
     clippy::unwrap_used,
@@ -23,12 +24,13 @@ use dropumi_application::events::{AppEvent, TransferOutcome};
 use dropumi_application::identity::LocalIdentity;
 use dropumi_application::ports::Connector;
 use dropumi_application::usecases::UseCaseError;
-use dropumi_application::usecases::receive::TransferCanceller;
+use dropumi_application::usecases::receive::{ReceiveSummary, TransferCanceller};
 use dropumi_domain::connection::PeerExpectation;
 use dropumi_domain::error::{Phase, TransferError};
 use dropumi_domain::identity::Fingerprint;
 use dropumi_domain::peer::Intent;
-use dropumi_domain::policy::AcceptMode;
+use dropumi_domain::policy::{AcceptMode, PolicyMode, TransferPolicy};
+use dropumi_domain::time::Timestamp;
 use dropumi_domain::transfer::{
     CancelReason, FileEntry, Party, RejectReason, TransferId, TransferRequest,
 };
@@ -460,4 +462,254 @@ async fn single_accept_error_is_retried() {
     let (summary, _, _) = finish(rx).await;
     assert!(summary.is_ok());
     assert!(attempts.load(Ordering::SeqCst) >= 2);
+}
+
+fn everyone(until: u64) -> TransferPolicy {
+    TransferPolicy {
+        mode: PolicyMode::Everyone {
+            until: Timestamp(until),
+        },
+        accept: AcceptMode::Prompt,
+    }
+}
+
+fn trusted_only() -> TransferPolicy {
+    TransferPolicy {
+        mode: PolicyMode::TrustedOnly,
+        accept: AcceptMode::Prompt,
+    }
+}
+
+/// An unverified sender (it confirms the code itself).
+fn unverified_sender(me: &LocalIdentity, name: &str, data: Vec<u8>) -> (SenderSetup, PathBuf) {
+    let source = MemSource::default();
+    let p = source.add(name, data);
+    (SenderSetup::new(me.clone(), MemTrust::default(), source), p)
+}
+
+async fn wait_for(h: &mut ReceiverHandle, pred: impl Fn(&AppEvent) -> bool) -> AppEvent {
+    wait_within(h, WAIT, pred).await
+}
+
+async fn wait_within(
+    h: &mut ReceiverHandle,
+    limit: Duration,
+    pred: impl Fn(&AppEvent) -> bool,
+) -> AppEvent {
+    loop {
+        let e = tokio::time::timeout(limit, h.events.recv())
+            .await
+            .expect("event within the deadline")
+            .expect("receiver still running");
+        if pred(&e) {
+            return e;
+        }
+    }
+}
+
+#[tokio::test]
+async fn policy_change_applies_to_new_sessions() {
+    let net = Net::new();
+    let (bob, carol) = (identity(2, "Bob"), identity(3, "Carol"));
+    let mut setup = ReceiverSetup::new(bob, MemTrust::default());
+    setup.once = false;
+    setup.policy = trusted_only();
+    let mut rx = setup.start(&net, addr(9608));
+    let (tx, p) = unverified_sender(&carol, "/c.txt", b"carol".to_vec());
+
+    let (out, _) = tx
+        .send(
+            &net,
+            to(9608),
+            vec![p.clone()],
+            true,
+            None,
+            CancellationToken::new(),
+        )
+        .await;
+    assert!(matches!(
+        out.unwrap(),
+        TransferOutcome::Failed {
+            error: TransferError::NotAuthorized,
+            ..
+        }
+    ));
+
+    rx.control.set_policy(everyone(1_000 + 600));
+    let changed = wait_for(&mut rx, |e| matches!(e, AppEvent::PolicyChanged { .. })).await;
+    assert!(matches!(
+        changed,
+        AppEvent::PolicyChanged { policy } if matches!(policy.mode, PolicyMode::Everyone { .. })
+    ));
+    let (out, _) = tx
+        .send(
+            &net,
+            to(9608),
+            vec![p],
+            true,
+            None,
+            CancellationToken::new(),
+        )
+        .await;
+    assert!(out.unwrap().is_success());
+    rx.cancel.cancel();
+    let (_, _, sink) = finish(rx).await;
+    assert_eq!(sink.stored().len(), 1);
+}
+
+#[tokio::test]
+async fn policy_change_keeps_running_sessions() {
+    let net = Net::new();
+    let (bob, carol) = (identity(2, "Bob"), identity(3, "Carol"));
+    let mut setup = ReceiverSetup::new(bob, MemTrust::default());
+    setup.once = false;
+    setup.policy = everyone(1_000 + 600);
+    let mut rx = setup.start(&net, addr(9609));
+
+    // A transfer admitted under Everyone stays active mid-file.
+    let (stalled, p) = unverified_sender(&carol, "/big.bin", bytes(300_000));
+    stalled.source.stall_after(&p, 100_000);
+    let running = {
+        let net = Arc::clone(&net);
+        tokio::spawn(async move {
+            stalled
+                .send(
+                    &net,
+                    to(9609),
+                    vec![p],
+                    true,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(WAIT, rx.sink.wait_written(100_000))
+        .await
+        .unwrap();
+
+    rx.control.set_policy(trusted_only());
+    let _ = wait_for(&mut rx, |e| matches!(e, AppEvent::PolicyChanged { .. })).await;
+    // A new unverified session is now denied …
+    let (tx, q) = unverified_sender(&carol, "/c.txt", b"carol".to_vec());
+    let (out, _) = tx
+        .send(
+            &net,
+            to(9609),
+            vec![q],
+            true,
+            None,
+            CancellationToken::new(),
+        )
+        .await;
+    assert!(matches!(
+        out.unwrap(),
+        TransferOutcome::Failed {
+            error: TransferError::NotAuthorized,
+            ..
+        }
+    ));
+    // … while the one admitted earlier keeps its authorization.
+    assert!(!running.is_finished());
+    rx.cancel.cancel();
+    let o = outcome(running).await;
+    assert!(
+        !matches!(
+            o,
+            TransferOutcome::Failed {
+                error: TransferError::NotAuthorized,
+                ..
+            }
+        ),
+        "{o:?}"
+    );
+    let _ = finish(rx).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_everyone_window_expires() {
+    let net = Net::new();
+    let mut setup = ReceiverSetup::new(identity(2, "Bob"), MemTrust::default());
+    setup.once = false;
+    setup.policy = trusted_only();
+    let mut rx = setup.start(&net, addr(9610));
+    rx.control.set_policy(everyone(1_000 + 10));
+    let first = wait_for(&mut rx, |e| matches!(e, AppEvent::PolicyChanged { .. })).await;
+    assert!(matches!(
+        first,
+        AppEvent::PolicyChanged { policy } if matches!(policy.mode, PolicyMode::Everyone { .. })
+    ));
+    // The receiver's own timer reverts the window after 10 s (paused time
+    // advances by itself).
+    let second = wait_within(&mut rx, Duration::from_secs(60), |e| {
+        matches!(e, AppEvent::PolicyChanged { .. })
+    })
+    .await;
+    assert!(matches!(
+        second,
+        AppEvent::PolicyChanged { policy } if policy.mode == PolicyMode::TrustedOnly
+    ));
+    rx.cancel.cancel();
+    let _ = finish(rx).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_accepting_lets_active_transfer_finish() {
+    let net = Net::new();
+    let (alice, bob) = (identity(1, "Alice"), identity(2, "Bob"));
+    let mut setup = ReceiverSetup::new(bob.clone(), MemTrust::with(&[(&alice, "Alice")]));
+    setup.once = false;
+    // Committing takes a while, so the transfer is still running when the
+    // receiver stops accepting.
+    setup.sink.commit_delay = Some(Duration::from_secs(2));
+    let mut rx = setup.start(&net, addr(9611));
+    let source = MemSource::default();
+    let p = source.add("/a.txt", b"hello".to_vec());
+    let tx = SenderSetup::new(alice, MemTrust::with(&[(&bob, "Bob")]), source);
+    let send = {
+        let net = Arc::clone(&net);
+        tokio::spawn(async move {
+            tx.send(
+                &net,
+                to(9611),
+                vec![p],
+                false,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+        })
+    };
+    let _ = wait_for(&mut rx, |e| matches!(e, AppEvent::Accepted { .. })).await;
+
+    rx.control.stop_accepting();
+    assert!(matches!(
+        outcome(send).await,
+        TransferOutcome::Completed { .. }
+    ));
+    // The receiver ends by itself once its last session is done.
+    let (summary, _, sink) = tokio::time::timeout(Duration::from_secs(60), finish(rx))
+        .await
+        .unwrap();
+    assert_eq!(summary.unwrap(), ReceiveSummary::Stopped);
+    assert_eq!(sink.stored().len(), 1);
+}
+
+#[tokio::test]
+async fn stop_accepting_refuses_new_connections() {
+    let net = Net::new();
+    let mut setup = ReceiverSetup::new(identity(2, "Bob"), MemTrust::default());
+    setup.once = false;
+    let rx = setup.start(&net, addr(9612));
+    rx.control.stop_accepting();
+    let (summary, _, _) = tokio::time::timeout(WAIT, finish(rx)).await.unwrap();
+    assert_eq!(summary.unwrap(), ReceiveSummary::Stopped);
+    let refused = net
+        .connector()
+        .connect(addr(9612), Duration::from_secs(1))
+        .await;
+    assert!(matches!(
+        refused,
+        Err(dropumi_application::error::TransportError::Refused)
+    ));
 }
