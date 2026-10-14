@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Thread safety: many threads calling the node while transfers run must
 //! neither crash, deadlock nor lose an answer (ADR-0009 spike S8).
+//!
+//! Unix only: the facade ships for Apple platforms and Android.
 
+#![cfg(unix)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

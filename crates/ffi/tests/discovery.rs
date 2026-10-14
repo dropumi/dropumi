@@ -2,7 +2,10 @@
 //! Discovery through an app adapter: advertising, the nearby list, and
 //! sending to a nearby device. A shared in-memory "LAN" resolves every
 //! advertisement at 127.0.0.1.
+//!
+//! Unix only: the facade ships for Apple platforms and Android.
 
+#![cfg(unix)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

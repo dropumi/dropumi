@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Two real nodes over loopback (127.0.0.1, ephemeral ports): transfers,
 //! codes, pairing, cancelling and the facade's security guards.
+//!
+//! Unix only: the facade ships for Apple platforms and Android.
 
+#![cfg(unix)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

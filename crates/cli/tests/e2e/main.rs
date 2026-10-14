@@ -18,6 +18,8 @@ mod support;
 
 mod discovery;
 mod failure;
+// The app facade ships for Apple platforms and Android only.
+#[cfg(unix)]
 mod ffi_interop;
 mod pairing;
 mod policy;
