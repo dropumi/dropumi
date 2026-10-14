@@ -96,6 +96,10 @@ The `mdns` cargo feature (mDNS discovery) is on by default; `--no-default-featur
      | `infra` | `crates/infra`: TCP, filesystem, stores, permissions |
      | `discovery` | mDNS advertisement and browsing |
      | `cli` | `crates/cli`: the `dropumi` binary and its end-to-end tests |
+     | `ffi` | `crates/ffi`, `crates/ffi-bindgen`, `scripts/ffi/` and the binding packages: the app facade and its bindings |
+     | `apple` | `apps/apple`: the iOS, iPadOS and macOS app |
+     | `android` | `apps/android`: the Android app |
+     | `web` | the browser companion and `poc/web/` (ADR-0011) |
      | `ci` | workflows, `deny.toml`, `scripts/ci/` |
      | `docs` | documentation |
      | `deps` | dependency updates |
@@ -129,6 +133,7 @@ These commands mirror the jobs in [`.github/workflows/ci.yml`](.github/workflows
 cargo fmt --all --check                                                            # fmt
 git ls-files -z -- '*.rs' | xargs -0 awk 'FNR == 1 && $0 != "// SPDX-License-Identifier: MPL-2.0" { print FILENAME; bad = 1 } END { exit bad }'   # fmt (SPDX header on line 1)
 git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' ':!*pnpm-lock.yaml' | xargs -0 awk 'FNR == 1 && /^#!/ { next } FNR <= 2 { if ($0 != "# SPDX-License-Identifier: MPL-2.0") { print FILENAME; bad = 1 } nextfile } END { exit bad }'   # fmt (TOML, YAML, shell)
+# fmt also checks Swift, Kotlin and .kts files (line 2 of Package.swift; generated bindings exempt); see ci.yml
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings      # clippy
 cargo clippy --workspace --all-targets --no-default-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked  # docs
@@ -143,7 +148,9 @@ cargo deny --locked check                                                       
 | Job | What it does |
 |---|---|
 | `test (ubuntu-latest)`, `test (macos-latest)`, `test (windows-latest)` | The full test suite on each OS |
-| `build (aarch64-linux-android)`, `build (aarch64-apple-ios)` | Builds the core library crates only (`--exclude dropumi-cli --no-default-features`). Nothing is linked into an app or run. |
+| `build (aarch64-linux-android)`, `build (aarch64-apple-ios)` | Builds the core library crates only (`--exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen --no-default-features`). Nothing is linked into an app or run. |
+| `ffi (apple)` | macOS: the committed bindings are up to date, the XCFramework builds (iOS device, iOS simulator, macOS), and `swift test` runs the Swift binding tests. Not required. |
+| `ffi (android)` | Linux: `libdropumi_ffi.so` builds for arm64-v8a and x86_64 with 16 KB pages, and Gradle runs the Kotlin binding tests on the host JVM. Not required. |
 | `cargo-deny (advisories)`, `cargo-deny (bans licenses sources)` | The cargo-deny checks, split into two jobs |
 | `zizmor`, `actionlint` | Workflow security and syntax checks (locally: `zizmor --offline .github/`; actionlint runs from a pinned Docker image) |
 | `mdns-e2e (experimental)` | The opt-in mDNS end-to-end test; allowed to fail and never required |

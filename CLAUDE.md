@@ -10,6 +10,7 @@
   - secure-channel establishment;
   - receiver filesystem safety;
   - config permissions;
+  - the FFI's prompt and answer path (`crates/ffi/src/prompts.rs`), its file-source guards and its discovery rules, and the apps' consent and code screens;
   - `docs/protocol/`.
 - **Paste real command output** (with `$HOME` replaced by `~`).
   - Never claim a test, build or benchmark result you did not run.
