@@ -15,5 +15,12 @@
     "@lucide/astro": "^1.56.0",
     "astro": "^7.2.10",
     "sharp": "^0.35.3"
+  },
+  "packageManager": "pnpm@9.15.5",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
   }
 }
