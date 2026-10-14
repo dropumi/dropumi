@@ -16,6 +16,10 @@ How Dropumi is tested, how to run the tests, and exactly what has been verified 
 | Scripted terminal-mode smoke test | Passed on macOS 27 arm64 and in the Debian 12 aarch64 container (as root). A script (not in the repository) ran two `dropumi` processes, each on its own pseudo-terminal, and typed the answers: pairing with matching codes; a `y` typed before the first prompt did not answer it (the `n` typed at the prompt rejected the offer); a trusted transfer with equal SHA-256; `receive --accept trusted` without a prompt; Ctrl-C (exit 130); and a second Ctrl-C exiting at once while a silent connection held the graceful shutdown. A second script showed stray input answering a prompt in 5 of 5 tries before the terminal flush (macOS only: one run on the code without the flush) and in 0 of 5 after it (macOS and the container), both for a line typed before the first prompt and for a partial line typed before a later prompt |
 | Linux, full workspace suite (milestone 1 code) | **225 passed, 0 failed, 1 ignored** in a Debian 12 (bookworm) aarch64 container (Docker on the same machine, Rust 1.99.0, non-root user, `--no-fail-fast`), including the Linux-only `transfer::bounded_memory_independent_of_size` |
 | Windows target | Milestone 1 code: for `x86_64-pc-windows-gnu`, with MinGW in the Linux container image, `cargo clippy --workspace --all-targets -D warnings` (both feature sets) clean and `cargo build --workspace --all-targets --all-features` compiled and linked. Milestone 2a: `cargo xwin check -p dropumi-ffi -p dropumi-cli --all-targets --target x86_64-pc-windows-msvc` passed (the FFI's integration tests are Unix only). Nothing was run |
+| Apple app package tests (`swift test --package-path apps/apple/DropumiKit`, milestone 2b) | **38 passed** (`ShareInboxTests` 8, `BindingsTests` 6, `AppModelTests` 24; macOS 27.0.1 arm64, Xcode 27.0, 2026-10-15) |
+| Apple app, hosted and UI state tests (`xcodebuild test -scheme Dropumi-iOS`, iPhone 17 simulator, iOS 27.0) | **3 hosted tests passed, 8 UI state tests passed** (fake core, each with the accessibility audit); the interop suite is skipped outside its harness |
+| Apple app, hosted tests on macOS (`xcodebuild test -scheme Dropumi-macOS`) | **3 passed**. The macOS UI state tests did not run: UI automation needs the user's approval on the machine |
+| Apple app against the CLI (`scripts/apple/interop.sh`, opt-in) | **6 passed** on loopback: transfers both ways after comparing a code, and pairing, each on the iOS 27.0 simulator and on macOS 27. The two macOS Bonjour tests were not run (they ask the macOS Local Network question) |
 | GitHub Actions CI | **Not run yet.** The maintainer pushes the branch; every runner row below stays "Not tested (pending CI)" until its job is green. |
 
 Automated tests run both peers on one machine over loopback (`127.0.0.1`). Nothing has been tested between two real
@@ -33,7 +37,20 @@ cargo test --release -p dropumi-ffi --test measure --locked -- --ignored --nocap
 # Binding tests (need the XCFramework or the host library; see development.md)
 bash scripts/ffi/build-apple.sh --profile dev && swift test --package-path apps/apple/DropumiKit
 cargo build --locked -p dropumi-ffi --lib && ./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest
+
+# Apple apps (see apps/apple/README.md)
+(cd apps/apple && xcodegen generate)
+xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -derivedDataPath apps/apple/build
+xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-macOS \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath apps/apple/build
+bash scripts/apple/interop.sh                                         # the app's core against the CLI (opt-in)
 ```
+
+The Apple app tests are labelled by what they exercise:
+- *hosted tests* run inside the app with temporary folders;
+- *UI state tests (fake core)* show every screen on a scripted core and say nothing about the network;
+- *interop tests* run the app's real core, through the Swift layer, against the CLI on loopback.
 
 The tests never touch the real configuration: every process gets a temporary configuration directory and a temporary
 receive directory.
@@ -149,6 +166,8 @@ Rules:
 |---|---|---|
 | `DROPUMI_TEST_MDNS=1` | Enables `discovery::mdns_discover_and_send_by_fingerprint` (also needs `--ignored`). It advertises and browses on loopback interfaces (`--mdns-loopback`), finds the receiver by its fingerprint hint and sends to it. | Off (the test is `#[ignore]`) |
 | `DROPUMI_TEST_LARGE_MIB=<N>` | File size for `transfer::large_file_streaming`. | 64 |
+| `DROPUMI_TEST_APPLE=1` | Enables the `interop::apple::apple_*` tests (also need `--ignored`; run one at a time). They drive the app-hosted XCTest `AppleInteropTests` with `xcodebuild test-without-building`; `scripts/apple/interop.sh` builds the bundles first. With `DROPUMI_TEST_MDNS=1` as well, the `apple_macos_bonjour_*` tests run too; they ask the macOS Local Network question for Dropumi the first time. | Off (the tests are `#[ignore]`) |
+| `DROPUMI_TEST_APPLE_SIMULATOR=<name>` | Simulator for the iOS interop tests. | `iPhone 17` |
 | `--ignored` on `dropumi-ffi --test measure` | Runs the ADR-0009 measurements (cancel latency, events of a 2,000-file transfer) and prints the numbers. Run with `--release --nocapture`. | Off (the tests are `#[ignore]`) |
 
 ## Time budgets
@@ -191,7 +210,14 @@ local run"). No platform is ever labelled "supported".
 | Android x86_64 | Not built locally; CI job `ffi (android)` | Not tested (pending CI) |
 | `ffi (apple)`, `ffi (android)` (GitHub runners `macos-latest`, `ubuntu-latest`) | The CI jobs above | Not tested (pending CI) |
 | Real multi-device LAN or Wi-Fi | Nothing | Not tested |
-| iPhone, iPad, Mac and Android apps | In progress (milestone 2) | Not tested (no app yet) |
+| iOS 27.0 simulator (iPhone 17), Xcode 27.0, same machine | Apple app: hosted tests (3), UI state tests with accessibility audit (8), interop with the CLI (3) | Automated test passed (iOS simulator, loopback, local run); UI state tests use the fake core |
+| iOS 27.0 simulator (iPad Air 11-inch (M4)) | Apple app launched on the fake core; the wide two-column Nearby layout checked by screenshot | Manual simulator check only (no automated iPad tests) |
+| macOS 27.0.1 arm64, same machine | Apple Mac app: hosted tests (3), interop with the CLI (3) | Automated test passed (macOS app, loopback, local run) |
+| macOS 27.0.1 arm64, same machine | Apple Mac app: UI state tests | Not tested (UI automation approval needed) |
+| Apple app Bonjour (sandboxed Mac app; iPhone and iPad devices) | Opt-in `apple_macos_bonjour_*`; device matrix DISC-1 to DISC-4 | Not tested. On the iOS 27.0 simulator the app's DNS-SD requests are never answered ([`discovery.md`](protocol/discovery.md) §12) |
+| iPhone 15, iPad Air (5th generation), the Mac on a LAN | Device matrix | Not tested |
+| Android app | Milestone 2c | Not tested (no app yet) |
+| GitHub runner `macos-latest`, job `apple (app)` | Package tests, iOS simulator app tests, unsigned macOS build | Not tested (pending CI; needs Xcode 27, gate G5) |
 | Browser companion | Proposal and research prototype only ([ADR-0011](adr/0011-browser-companion.md)) | Not tested |
 
 Other local checks on the same machine: `cargo +1.89.0 check --workspace --all-targets --all-features --locked`
@@ -233,6 +259,7 @@ applies to loopback traffic is also UNVERIFIED.
 | MitM relay showing different SAS codes end to end (planned tests `channel::mitm_relay_sas_differs`, `security::mitm_relay_sas_codes_differ`) | Not implemented (planned). Covered at the protocol level by `mitm_split_handshakes_sas_independent`, and the pinned-trust case by `security::mitm_relay_rejected_by_pinned_trust`. |
 | Pre-auth slots recover after silent connections (planned test `security::silent_preauth_slots_recover`) | Not implemented (planned). Admission limits are covered by `usecases::admission::tests::admission_limits_global_per_ip_and_session`; the 10 s handshake deadline releases silent connections. |
 | Performance regressions in CI | Not automated. Benchmarks run by hand with `scripts/bench/loopback.sh`. |
-| FFI on a device | The bindings ran only on the host (macOS, host JVM). Android instrumented tests, the iOS simulator and real devices come with the apps. |
+| FFI on a device | Apple: the core ran inside the app on the iOS 27.0 simulator and on macOS (interop tests); no iPhone or iPad yet. Android: host JVM only; instrumented tests come with the app. |
+| Apple app on devices | Not tested: install on iPhone 15 and iPad Air (5th generation) and the device matrix are next. Share Extension, Photos import, background completion (`BGContinuedProcessingTask`), the Mac menu-bar receiver, notifications, open at login, the receive-folder bookmark and quarantine flags are all Not tested. |
 | Per-event callback cost across JNA and Swift (ADR-0009 S6) | Not isolated: the opt-in measurement counts the events of a 2,000-file transfer, whose time is dominated by per-file fsync. |
-| Host name published by native advertising (Bonjour, NSD) | Not tested; checked per platform before each app advertises ([`discovery.md`](protocol/discovery.md) §10). |
+| Host name published by native advertising (Bonjour, NSD) | Apple: the adapter registers a proxy with a random host; checked with `dns-sd` and from an unsandboxed process on the Mac, not yet from the app on a device (`apple_macos_bonjour_cli_finds_app_at_random_host`, DISC-4). Android: Not tested ([`discovery.md`](protocol/discovery.md) §7, §12). |

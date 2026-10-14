@@ -20,7 +20,7 @@ Free, open-source, ultra-lightweight cross-platform local file sharing. No inter
 
 Milestone 1 provides the Rust core, protocol v1 (draft) and the `dropumi` command-line tool. The CLI can create a device identity, pair two devices by comparing a 6-digit code, manage trusted devices, and send and receive files over an authenticated, encrypted TCP connection. Receivers can advertise themselves over mDNS, so senders can find them by name or fingerprint as well as by address.
 
-Milestone 2 is in progress: `dropumi-ffi`, the bridge the native apps use (Swift and Kotlin bindings generated with UniFFI), exists and is tested on the host; the iPhone, iPad, Mac and Android apps are being built on it. A browser companion is only a proposal ([ADR-0011](docs/adr/0011-browser-companion.md)).
+Milestone 2 is in progress: `dropumi-ffi`, the bridge the native apps use (Swift and Kotlin bindings generated with UniFFI), exists and is tested on the host. The Apple app for iPhone, iPad and Mac ([`apps/apple`](apps/apple/README.md)) runs on the iOS simulator and on macOS and has not been tested on devices yet; the Android app is being built. A browser companion is only a proposal ([ADR-0011](docs/adr/0011-browser-companion.md)).
 
 | Platform or environment | Status |
 |---|---|
@@ -37,7 +37,9 @@ Milestone 2 is in progress: `dropumi-ffi`, the bridge the native apps use (Swift
 | mDNS discovery, Ubuntu 24.04 x64 (GitHub runner) | Not tested (pending CI, experimental job) |
 | App bridge (`dropumi-ffi`), Swift and Kotlin bindings, macOS 27 arm64 host | Automated test passed (bindings on the host, loopback, local run) |
 | App bridge for iOS devices, the iOS simulator and Android arm64-v8a | Build verified only (library; no app, not run) |
-| iPhone, iPad, Mac and Android apps | In progress (milestone 2); Not tested |
+| Apple app, iOS 27.0 simulator and macOS 27 arm64 | Automated test passed (app tests and the app's core against the CLI on loopback, local run); UI state tests on a fake core |
+| Apple app on iPhone, iPad and on a LAN (Bonjour) | Not tested |
+| Android app | In progress (milestone 2); Not tested |
 
 - "Loopback" means both devices were two `dropumi` processes on one machine, talking over `127.0.0.1`.
 - In the latest local run on macOS 27 (Rust 1.99.0, milestone 2a code), 309 tests passed, including the two-process end-to-end suite (42 tests); milestone 1's code also passed in a Linux aarch64 container (225 tests, including a Linux-only one). The ignored tests are the opt-in mDNS test, which passed when run separately with `DROPUMI_TEST_MDNS=1`, and two opt-in measurements (see [`docs/testing.md`](docs/testing.md)).

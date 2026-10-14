@@ -239,6 +239,16 @@ Default timeouts (`crates/application/src/config.rs`):
 | Prompts | Registered before `PromptOpened` is published; answered by prompt id; withdrawn when the core stops waiting. |
 | Shutdown | `shutdown()` cancels everything, waits up to 5 s for the receiver, stops the runtime and drains the mailbox. Dropping the last handle cancels without waiting. |
 
+### The Apple app (`apps/apple`, [ADR-0012](docs/adr/0012-apple-apps.md))
+
+| Layer | What it does |
+|---|---|
+| `DropumiCore` (Swift package) | `LiveCoreClient` wraps `DropumiNode`. An `EventBridge` turns the facade's listener calls into an `AsyncStream` without blocking. `BonjourDiscovery` implements `PlatformDiscovery` with DNS-SD. `AppPaths` chooses the app-private folders. |
+| `DropumiAppState` | `@MainActor @Observable AppModel` holds every piece of UI state and reduces the core's events. Core calls run on detached tasks at the core threads' default priority. Receiver changes and discovery starts and stops are serialized. |
+| `DropumiDesign` | design.md tokens, fonts and shared components. No core. |
+| `DropumiShare` | The App Group inbox shared with the Share Extension. No core. |
+| App targets | SwiftUI screens that render `AppModel`, the prompt presenter, platform hooks: background completion on iOS; the menu bar, notifications and login item on the Mac. |
+
 ## 7. Memory
 
 **Design estimate, not measured.** Per authenticated session, `channel/io.rs` allocates its record buffers once,
@@ -295,7 +305,7 @@ Planned extension points:
 | Wi-Fi Direct, Wi-Fi Aware, hotspot transports | New `Connector`/`Listener` adapters | The secure channel runs over any `AsyncRead + AsyncWrite` stream. |
 | Keychain, Android Keystore, Windows credential storage | New `IdentityStore` adapters | Today the key is a 0600 file; on the app platforms it stays in app-private storage excluded from backups until then ([ADR-0014](docs/adr/0014-interim-key-storage-on-app-platforms.md)). |
 | Notifications, share sheets, permission prompts | New `Interaction` adapters and future platform ports | The CLI has no OS permission prompts. |
-| Desktop and mobile apps | `apps/apple`, `apps/android` (milestone 2, in progress) | Platform code stays in the apps, behind the facade's callback interfaces. |
+| Desktop and mobile apps | `apps/apple` (iPhone, iPad, Mac: [ADR-0012](docs/adr/0012-apple-apps.md)), `apps/android` (milestone 2, in progress) | Platform code stays in the apps, behind the facade's callback interfaces. Windows and Linux UIs are undecided. |
 | Language bindings | `dropumi-ffi` ([ADR-0009](docs/adr/0009-ffi-bindings-strategy.md), Accepted) | Exposes use cases, not ports; Swift and Kotlin are generated. |
 
 The spec's separate `discovery`, `transport`, `security`, `platform` and `testing` crates are deferred. Until then,

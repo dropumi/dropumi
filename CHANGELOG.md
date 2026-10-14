@@ -12,7 +12,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. The apps themselves are in progress. Pre-alpha, unaudited.
+Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. Milestone 2b adds the Apple app for iPhone, iPad and Mac. The Android app is in progress. Pre-alpha, unaudited.
+
+#### Apple app (iPhone, iPad, Mac; milestone 2b)
+
+- **The app.** One SwiftUI app for iPhone and iPad (iOS/iPadOS 27) and the Mac (macOS 27), arm64, over `dropumi-ffi` ([ADR-0012](docs/adr/0012-apple-apps.md)). Screens:
+  - onboarding;
+  - Nearby, with the radar and a drop zone on iPad and Mac;
+  - Send;
+  - Receive, a full-screen prompt with the code for unverified senders;
+  - code comparison;
+  - Transfers and history;
+  - Settings: who can send (Paired only, Everyone for 10 minutes, Off), auto-accept for paired devices (off by default), appearance;
+  - pairing, both ways;
+  - paired devices: rename, remove, add by fingerprint;
+  - this device;
+  - connect by address.
+- **Prompt safety.** No prompt is answered without a tap. There is no default button, Escape declines, and Accept is enabled after 600 ms. A nearby device is never labelled "Paired" before its key is checked.
+- **Share Extension.** It hands shared files to the app through an App Group inbox: staged, listed in a manifest, renamed into place. It never loads the core.
+- **Bonjour.** Discovery advertises a random host name (proxy registration), never the system's, and does not hold up the receiver while the Local Network question is open.
+- **Mac.**
+  - A menu-bar receiver keeps working when the window is closed; "Quit Dropumi completely" stops it.
+  - Notifications have no Accept action.
+  - Open at login is optional.
+  - A receive folder you choose is kept as a bookmark.
+- **iPhone and iPad.** Receive while Dropumi is open; running transfers ask iOS for time to finish in the background.
+- **Design.** design.md tokens, Plus Jakarta Sans (OFL), and a darker accent for small text to keep 4.5:1 contrast.
+- **Tests.**
+  - App-state tests on a fake core.
+  - Hosted tests: test isolation, backup exclusion.
+  - UI state tests with the accessibility audit (iOS simulator).
+  - Opt-in interop tests that run the app's real core against the CLI on the iOS simulator and on macOS (`scripts/apple/interop.sh`).
+- **CI.** `apple (app)` (not required; needs Xcode 27).
+- **Build.** The Xcode project is generated with xcodegen. The app build refuses a Rust core older than its sources.
+
+#### Changed (milestone 2b)
+
+- ADR-0008 (UI framework) is superseded by ADR-0012: the Mac app is SwiftUI, shared with iPhone and iPad; Windows and Linux stay undecided.
+- ADR-0014's macOS row now matches the app: the configuration folder is excluded from backups (Time Machine too).
+- Threat model: goals G34 to G38; R21 and R23 updated for the Apple apps. `discovery.md`: the Apple adapter and the iOS 27.0 simulator observation.
+- `scripts/ffi/build-apple.sh` stamps the XCFramework with a hash of only the crates `dropumi-ffi` links (`scripts/ffi/core-sources-hash.sh`).
 
 #### Core changes (each test-first)
 

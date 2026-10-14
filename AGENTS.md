@@ -32,10 +32,10 @@ Rules for coding agents and human contributors working in this repository. Keep 
 | `crates/cli/` (`dropumi-cli`, bin `dropumi`) | Composition root: `args`, `commands/`, `output` (human and NDJSON), `control` (`--control-stdin`), `interaction`, `exit` (exit codes). `tests/e2e/` holds the two-process suites, `ffi_interop.rs` (the facade against the CLI) and `support/{proc,files,raw_peer,proxy}.rs`. |
 | `crates/ffi/` (`dropumi-ffi`) | Composition root for the apps (UniFFI, ADR-0009): `node` (`DropumiNode`, operations), `mailbox` (events), `prompts`, `discovery` (`PlatformDiscovery`), `source` (`ForeignFile`), `runtime`, `types`, `error`; `uniffi.toml`. Tests in `tests/` (Unix only). |
 | `crates/ffi-bindgen/` | Build tool: the pinned UniFFI generator binaries. Never shipped. |
-| `apps/apple/`, `apps/android/` | The apps. `apple/DropumiKit`: Swift package with the XCFramework (built, not committed) and the generated Swift bindings. `android/core-bindings`: Gradle module with the generated Kotlin bindings. Generated files are committed and exempt from SPDX headers. |
+| `apps/apple/`, `apps/android/` | The apps. `apple/`: SwiftUI app for iPhone, iPad and Mac (ADR-0012); `project.yml` (xcodegen; the `.xcodeproj` is not committed), `Dropumi/`, `ShareExtension/`, `Tests/`, and `DropumiKit` (Swift package: XCFramework, built and not committed; generated bindings; Core, AppState, Design, Share, TestSupport). `android/core-bindings`: Gradle module with the generated Kotlin bindings. Generated files are committed and exempt from SPDX headers. |
 | `poc/web/` | Research prototype for ADR-0011 (not a feature, never deployed). |
 | `docs/` | `feasibility.md`, `adr/`, `protocol/{v1,threat-model,discovery}.md`, `benchmarks/`, `cli.md`, `development.md`, `testing.md`, `dependencies.md` |
-| `scripts/` | `ci/check-architecture.sh` (dependency deny-lists, `ring` ban, `panic = "abort"` ban), `bench/loopback.sh` (loopback benchmarks), `ffi/` (bindings, XCFramework, Android library, 16 KB check) |
+| `scripts/` | `ci/check-architecture.sh` (dependency deny-lists, `ring` ban, `panic = "abort"` ban), `bench/loopback.sh` (loopback benchmarks), `ffi/` (bindings, XCFramework, Android library, 16 KB check, core source hash), `apple/` (core staleness check, interop runner, Mac icon) |
 | `.github/` | `workflows/{ci,codeql,audit,deploy-site}.yml` (`deploy-site` publishes `website/` to GitHub Pages), `dependabot.yml`, `ISSUE_TEMPLATE/`, `pull_request_template.md` |
 | `website/` | Project website (Astro). It has its own `AGENTS.md` for site work; generated lockfiles are exempt from the SPDX header rule. |
 | `branding/`, `design.md` | Brand and UI design (no code): logo files (`branding/final/`) and rules (`branding/GUIDELINES.md`), app-icon and store assets, the UI design source (`branding/dropumi-ui.pen`) and exports; `design.md` holds the design tokens and UI rules. |
@@ -99,8 +99,10 @@ Rules for coding agents and human contributors working in this repository. Keep 
 - **Opt-in tests:**
   - mDNS tests are `#[ignore]`, named `mdns_*`, and run with `DROPUMI_TEST_MDNS=1` and `--ignored`;
   - the large-file test size is set with `DROPUMI_TEST_LARGE_MIB` (default 64);
-  - `crates/ffi/tests/measure.rs` holds `#[ignore]` measurements (ADR-0009).
+  - `crates/ffi/tests/measure.rs` holds `#[ignore]` measurements (ADR-0009);
+  - app interop tests are `#[ignore]`, named `apple_*` (later `android_*`), and run with `DROPUMI_TEST_APPLE=1` (`scripts/apple/interop.sh`).
 - The binding tests run the generated Swift (`swift test`) and Kotlin (Gradle, host JVM) against the real core.
+- App tests never use the real identity (temporary folders under XCTest). UI state tests run on a fake core that Release builds exclude; label them "UI state test (fake core)".
 - **Time budgets:** unit and application tests together < 30 s; end-to-end < 4 min per OS; any single test < 60 s.
 
 ## 9. Performance
@@ -151,12 +153,14 @@ cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dr
 bash scripts/ffi/bindings.sh --check && bash scripts/ffi/build-apple.sh --profile dev --slices all && swift test --package-path apps/apple/DropumiKit  # ffi (apple)
 bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 && bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs  # ffi (android)
 cargo build --locked -p dropumi-ffi --lib && ./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest  # ffi (android)
+(cd apps/apple && xcodegen generate) && xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS -destination 'platform=iOS Simulator,name=iPhone 17'  # apple (app)
 ```
 Android builds need the NDK clang (see `docs/development.md`). CI also runs zizmor (with online audits), actionlint (Docker), CodeQL and the experimental `mdns-e2e` job.
 ```sh
 zizmor --offline .github/                                                        # local workflow audit
 cargo test -p dropumi-cli --test e2e --locked                                    # e2e only
 DROPUMI_TEST_MDNS=1 cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_
+bash scripts/apple/interop.sh                                                    # Apple app core vs CLI (opt-in)
 ```
 
 ## 13. Definition of Done (master spec §16)

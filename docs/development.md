@@ -14,7 +14,9 @@ troubleshoot common problems. Contribution workflow and rules: [`CONTRIBUTING.md
 | `zizmor` | 1.30.1 | GitHub Actions security lint |
 | `actionlint` | 1.7.12, from a pinned Docker image | Workflow lint (includes shellcheck for `run:` steps) |
 | Android NDK | one that provides `aarch64-linux-android26-clang`; the recorded local build used 27.1 | Android cross build (blake3 compiles C for the target) |
-| Xcode | with the iOS SDK; the recorded local build used Xcode 27 (Swift 6.4) | iOS cross build; the XCFramework and `swift test` for the FFI |
+| Xcode | with the iOS SDK; the recorded local build used Xcode 27 (Swift 6.4) | iOS cross build; the XCFramework and `swift test` for the FFI; the Apple apps (Xcode 27, iOS 27.0 simulator runtime) |
+| `xcodegen` | 2.46.0 (CI downloads the release and checks its SHA-256) | Generates `apps/apple/Dropumi.xcodeproj` from `apps/apple/project.yml` |
+| `rsvg-convert` (librsvg) | any | Only to re-render the Mac app icon (`scripts/apple/render-mac-icon.sh`) |
 | JDK | 17 or later for Gradle; the recorded run used Temurin 21 | The Kotlin binding tests (`apps/android`) |
 | Android SDK | platform 36 and NDK 27.1.12297006 (`ANDROID_HOME`, or `sdk.dir` in the untracked `apps/android/local.properties`) | The Android library and the Kotlin binding tests |
 | `jq`, `perl`, `/usr/bin/time` | system | Benchmark script only |
@@ -156,7 +158,27 @@ JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./apps/android/gradlew -p apps/andro
 - The Gradle wrapper pins Gradle 9.8.1 with a checksum; dependency versions are in
   `apps/android/gradle/libs.versions.toml`.
 - Disk: a release build of every slice and ABI, Xcode's and Gradle's caches add several GiB. Rebuildable output is in
-  `target/`, `apps/apple/DropumiKit/.build/` and `apps/android/**/build/`.
+  `target/`, `apps/apple/DropumiKit/.build/`, `apps/apple/build/` and `apps/android/**/build/`.
+
+## The Apple apps
+
+```sh
+bash scripts/ffi/build-apple.sh --profile dev           # the core; the app build refuses a stale one
+(cd apps/apple && xcodegen generate)                     # Dropumi.xcodeproj (not committed)
+xcodebuild build -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -derivedDataPath apps/apple/build
+xcodebuild build -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-macOS \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath apps/apple/build
+```
+
+- **Core check.** A build phase runs `scripts/apple/check-core-artifacts.sh`. It compares the XCFramework's stamp with `scripts/ffi/core-sources-hash.sh`, which hashes the sources of the crates `dropumi-ffi` links. It never runs cargo.
+- **Signing.**
+  - Signing is automatic. Copy `apps/apple/Config/Signing.local.xcconfig.example` to `Signing.local.xcconfig` (gitignored) and set your team ID.
+  - Installing on your own devices is described in [`apps/apple/README.md`](../apps/apple/README.md).
+- **UI-test scenarios.**
+  - `-dropumi-ui-test -dropumi-scenario <name>` launches a Debug build on the fake core with temporary folders. The names are in `apps/apple/Dropumi/Shared/App/UITestScenarios.swift`.
+  - Release builds exclude that file and the fake core (`Config/Release.xcconfig`).
+- **The Mac app icon** is rendered from `apps/apple/Design/macos-app-icon.svg`; the iPhone and iPad icons are `branding/mobile/ios`.
 
 ## Linux tests and a Windows type check from another OS (Docker)
 
