@@ -2,7 +2,7 @@
 
 This directory records the significant architecture, security, protocol and governance decisions for Dropumi. Each record explains the context, the decision, its consequences and the alternatives that were rejected, so that later contributors can see why the code looks the way it does.
 
-> Dropumi is pre-alpha. The protocol and implementation are unaudited. These records cover milestone 1 (Phase 0 + Phase 1: secure LAN transfer core, protocol v1 draft and the `dropumi` CLI). On 2026-10-13 every record was reconciled with the implemented code; where a draft and the code disagreed, the record now describes the code. No platform is labelled "supported"; see [`../feasibility.md`](../feasibility.md) and [`../testing.md`](../testing.md) for what has actually been tested.
+> Dropumi is pre-alpha. The protocol and implementation are unaudited. These records cover milestone 1 (Phase 0 + Phase 1: secure LAN transfer core, protocol v1 draft and the `dropumi` CLI) and milestone 2 (the FFI for the native apps, the apps, and the browser companion design). On 2026-10-13 every record was reconciled with the implemented code; where a draft and the code disagreed, the record now describes the code. No platform is labelled "supported"; see [`../feasibility.md`](../feasibility.md) and [`../testing.md`](../testing.md) for what has actually been tested.
 
 ## Index
 
@@ -16,10 +16,12 @@ This directory records the significant architecture, security, protocol and gove
 | [0006](0006-integrity-and-receiver-filesystem-safety.md) | Integrity and receiver filesystem safety | Accepted | `crates/domain/src/{filename,text}.rs`, `crates/infra/src/fs/` |
 | [0007](0007-lan-discovery-mdns.md) | LAN discovery via mDNS | Accepted | `crates/infra/src/{mdns,txt}.rs` (feature `mdns`) |
 | [0008](0008-ui-framework-strategy.md) | UI framework strategy | Accepted (provisional) | Not implemented (no UI in milestone 1) |
-| [0009](0009-ffi-bindings-strategy.md) | FFI and bindings strategy | Proposed | Not implemented (no FFI in milestone 1) |
+| [0009](0009-ffi-bindings-strategy.md) | FFI and bindings strategy | Accepted | `crates/ffi/`, `crates/ffi-bindgen/`, `scripts/ffi/`, `apps/apple/DropumiKit/`, `apps/android/core-bindings/` |
 | [0010](0010-dependency-license-and-ci-supply-chain-policy.md) | Dependency, license and CI supply-chain policy | Accepted | `deny.toml`, `.github/workflows/`, `.github/dependabot.yml` |
+| [0011](0011-browser-companion.md) | Browser companion | Proposed | `poc/web/` (research prototype, part 1) |
+| [0014](0014-interim-key-storage-on-app-platforms.md) | Interim key storage on the app platforms | Accepted | `crates/ffi/src/node.rs` (configuration directory from the app); platform settings in the apps |
 
-All records are dated 2026-10-13.
+ADR-0001 to ADR-0010 are dated 2026-10-13; ADR-0009 was accepted, and ADR-0011 and ADR-0014 were written, on 2026-10-14 (milestone 2). Numbers 0012 (Apple apps) and 0013 (Android app) are reserved for milestone 2's app records.
 
 Related normative and supporting documents:
 
