@@ -26,3 +26,14 @@ rustc-ice-*.txt
 # --- Dropumi additions ---
 .DS_Store
 /bench-out/
+# Apple apps: the Rust XCFramework (scripts/ffi/build-apple.sh) and SwiftPM state
+/apps/apple/DropumiKit/Artifacts/
+/apps/apple/DropumiKit/.build/
+/apps/apple/DropumiKit/.swiftpm/
+# Android app: Gradle state, build output and local SDK paths
+/apps/android/.gradle/
+/apps/android/.kotlin/
+/apps/android/**/build/
+/apps/android/local.properties
+*.apk
+*.aab
