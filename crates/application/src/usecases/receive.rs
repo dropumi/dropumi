@@ -6,7 +6,8 @@
 //! reported `STORED` only after its hash matched and the sink committed it
 //! without overwriting anything; `CompleteAck` follows the directory sync.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use dropumi_domain::error::{Phase, TransferError};
@@ -71,41 +72,103 @@ pub enum ReceiveSummary {
     Once(TransferOutcome),
 }
 
-/// Cancels the transfers that are running now without stopping the
-/// receiver; later sessions are unaffected.
+/// Cancels running transfers without stopping the receiver: every active
+/// one, or one by id. It also keeps active transfer ids unique: an offer
+/// that reuses the id of an active transfer is rejected `BUSY`.
 #[derive(Debug, Clone, Default)]
-pub struct TransferCanceller(Arc<Mutex<CancellationToken>>);
+pub struct TransferCanceller(Arc<Mutex<CancelState>>);
+
+#[derive(Debug, Default)]
+struct CancelState {
+    /// Cancelled by `cancel_active`, then replaced, so later sessions are
+    /// unaffected.
+    all: CancellationToken,
+    /// One token per active transfer.
+    active: HashMap<TransferId, CancellationToken>,
+}
 
 impl TransferCanceller {
     /// Cancels every active transfer (each peer receives `Cancel USER`).
     pub fn cancel_active(&self) {
-        let mut current = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        current.cancel();
-        *current = CancellationToken::new();
+        let mut state = self.lock();
+        state.all.cancel();
+        state.all = CancellationToken::new();
+    }
+
+    /// Cancels the active transfer `id` (its peer receives `Cancel USER`).
+    /// Returns whether such a transfer was active.
+    pub fn cancel(&self, id: &TransferId) -> bool {
+        match self.lock().active.get(id) {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
     }
 
     fn current(&self) -> CancellationToken {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.lock().all.clone()
+    }
+
+    /// Marks `id` active in one step; `None` if a transfer with this id is
+    /// already active.
+    fn register(&self, id: TransferId) -> Option<ActiveTransfer> {
+        let mut state = self.lock();
+        if state.active.contains_key(&id) {
+            return None;
+        }
+        let token = CancellationToken::new();
+        state.active.insert(id, token.clone());
+        Some(ActiveTransfer {
+            canceller: self.clone(),
+            id,
+            token,
+        })
+    }
+
+    fn lock(&self) -> MutexGuard<'_, CancelState> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-/// The two ways a session can be cancelled locally.
+/// An active transfer id; unregistered when dropped.
+#[derive(Debug)]
+struct ActiveTransfer {
+    canceller: TransferCanceller,
+    id: TransferId,
+    token: CancellationToken,
+}
+
+impl Drop for ActiveTransfer {
+    fn drop(&mut self) {
+        self.canceller.lock().active.remove(&self.id);
+    }
+}
+
+/// The ways a session can be cancelled locally.
 #[derive(Debug, Clone)]
 struct SessionCancel {
     /// The receiver is stopping.
     stop: CancellationToken,
-    /// The user cancelled active transfers.
+    /// The user cancelled every active transfer.
     transfer: CancellationToken,
+    /// The user cancelled this transfer (set once its offer arrived).
+    this: Option<CancellationToken>,
 }
 
 impl SessionCancel {
     async fn cancelled(&self) -> CancelReason {
+        let this = async {
+            match &self.this {
+                Some(token) => token.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             () = self.stop.cancelled() => CancelReason::Shutdown,
             () = self.transfer.cancelled() => CancelReason::User,
+            () = this => CancelReason::User,
         }
     }
 }
@@ -226,9 +289,11 @@ where
                     let token = SessionCancel {
                         stop: sessions_cancel.clone(),
                         transfer: self.canceller.current(),
+                        this: None,
                     };
+                    let canceller = self.canceller.clone();
                     sessions.spawn(async move {
-                        serve(stream, deps, policy, permit, admission, token).await
+                        serve(stream, deps, policy, permit, admission, token, canceller).await
                     });
                 }
             }
@@ -261,6 +326,7 @@ async fn serve<St, S, T, I, K>(
     permit: PreAuthPermit,
     admission: Admission,
     cancel: SessionCancel,
+    canceller: TransferCanceller,
 ) -> SessionResult
 where
     St: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -331,7 +397,7 @@ where
             handshake_us: session.handshake_us,
         })
         .await;
-    receive_session(session, &deps, policy, cancel).await
+    receive_session(session, &deps, policy, cancel, &canceller).await
 }
 
 /// One running transfer (receiver side).
@@ -432,7 +498,8 @@ async fn receive_session<St, S, T, I, K>(
     session: EstablishedSession<St>,
     deps: &ReceiveDeps<S, T, I, K>,
     policy: TransferPolicy,
-    cancel: SessionCancel,
+    mut cancel: SessionCancel,
+    canceller: &TransferCanceller,
 ) -> SessionResult
 where
     St: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -515,6 +582,17 @@ where
         }
     };
     let id = request.id();
+    // Active transfer ids are unique, so a cancel or answer by id is never
+    // ambiguous. A reused id is rejected before anyone is asked.
+    let Some(active) = canceller.register(id) else {
+        if let Ok(m) = run.machine.reject(RejectReason::Busy) {
+            let _ = run.writer.send(&m).await;
+        }
+        run.writer.shutdown().await;
+        run.reader.drain(deps.timeouts.drain).await;
+        return closed(deps, &view, TransferError::Busy.code()).await;
+    };
+    cancel.this = Some(active.token.clone());
     run.id = Some(id);
     let mut domain = TransferSession::new(
         Direction::Receive,

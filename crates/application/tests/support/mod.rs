@@ -63,7 +63,12 @@ impl Net {
     pub fn listen(self: &Arc<Self>, at: SocketAddr) -> FakeListener {
         let (tx, rx) = mpsc::channel(32);
         self.listeners.lock().unwrap().insert(at, tx);
-        FakeListener { rx, addr: at }
+        FakeListener {
+            rx,
+            addr: at,
+            fail_next: Arc::default(),
+            attempts: Arc::default(),
+        }
     }
 
     pub fn connector(self: &Arc<Self>) -> FakeConnector {
@@ -109,12 +114,37 @@ impl Connector for FakeConnector {
 pub struct FakeListener {
     rx: mpsc::Receiver<DuplexStream>,
     addr: SocketAddr,
+    /// The next this many `accept` calls fail (an invalidated socket).
+    pub fail_next: Arc<AtomicUsize>,
+    /// Number of `accept` calls so far.
+    pub attempts: Arc<AtomicUsize>,
 }
 
 impl Listener for FakeListener {
     type Stream = DuplexStream;
 
     async fn accept(&mut self) -> Result<(DuplexStream, SocketAddr), TransportError> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        let mut left = self.fail_next.load(Ordering::SeqCst);
+        let failing = loop {
+            if left == 0 {
+                break false;
+            }
+            match self.fail_next.compare_exchange(
+                left,
+                left - 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break true,
+                Err(now) => left = now,
+            }
+        };
+        if failing {
+            return Err(TransportError::Io(std::io::Error::other(
+                "socket invalidated",
+            )));
+        }
         match self.rx.recv().await {
             Some(s) => Ok((s, addr(1))),
             None => std::future::pending().await,
@@ -571,7 +601,9 @@ pub fn drain(rx: &mut mpsc::Receiver<AppEvent>) -> Vec<AppEvent> {
 use dropumi_application::config::{AdmissionLimits, ReceiveConfig, SendRequest, Timeouts};
 use dropumi_application::events::TransferOutcome;
 use dropumi_application::usecases::UseCaseError;
-use dropumi_application::usecases::receive::{ReceiveDeps, ReceiveFiles, ReceiveSummary};
+use dropumi_application::usecases::receive::{
+    ReceiveDeps, ReceiveFiles, ReceiveSummary, TransferCanceller,
+};
 use dropumi_application::usecases::send::{SendDeps, SendFiles};
 use dropumi_domain::discovery::Target;
 use dropumi_domain::identity::FingerprintPrefix;
@@ -586,6 +618,10 @@ pub struct ReceiverHandle {
     pub sink: MemSink,
     pub trust: MemTrust,
     pub interaction: Scripted,
+    /// Cancels transfers by id, or all of them.
+    pub canceller: TransferCanceller,
+    /// Number of `accept` calls the listener saw.
+    pub accept_attempts: Arc<AtomicUsize>,
 }
 
 pub struct ReceiverSetup {
@@ -597,6 +633,8 @@ pub struct ReceiverSetup {
     pub policy: TransferPolicy,
     pub once: bool,
     pub timeouts: Timeouts,
+    /// The first this many `accept` calls fail.
+    pub listener_failures: usize,
 }
 
 impl ReceiverSetup {
@@ -613,11 +651,16 @@ impl ReceiverSetup {
             },
             once: true,
             timeouts: Timeouts::default(),
+            listener_failures: 0,
         }
     }
 
     pub fn start(self, net: &Arc<Net>, at: SocketAddr) -> ReceiverHandle {
         let listener = net.listen(at);
+        listener
+            .fail_next
+            .store(self.listener_failures, Ordering::SeqCst);
+        let accept_attempts = Arc::clone(&listener.attempts);
         let (sink_events, rx) = events();
         let cancel = CancellationToken::new();
         let deps = ReceiveDeps {
@@ -631,6 +674,7 @@ impl ReceiverSetup {
             events: sink_events,
         };
         let use_case = ReceiveFiles::new(listener, deps);
+        let canceller = use_case.canceller();
         let cfg = ReceiveConfig {
             policy: self.policy,
             once: self.once,
@@ -644,6 +688,8 @@ impl ReceiverSetup {
             sink: self.sink,
             trust: self.trust,
             interaction: self.interaction,
+            canceller,
+            accept_attempts,
         }
     }
 }
