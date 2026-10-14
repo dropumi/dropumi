@@ -74,8 +74,8 @@ xcodebuild -create-xcframework "${args[@]}" -output "${out}/DropumiFFI.xcframewo
 uniffi_version="$(cargo metadata --locked --format-version 1 --offline \
   | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "uniffi"))')"
 {
-  # Content of the tracked Rust sources as they are on disk now.
-  echo "sources $(git ls-files -z crates Cargo.lock Cargo.toml | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)"
+  # Content of the tracked core sources as they are on disk now.
+  echo "sources $(bash scripts/ffi/core-sources-hash.sh)"
   echo "profile ${profile}"
   echo "slices ${targets[*]}"
   echo "uniffi ${uniffi_version}"
