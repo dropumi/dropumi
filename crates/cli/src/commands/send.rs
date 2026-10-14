@@ -71,11 +71,12 @@ pub async fn run(args: SendArgs, ctx: &Ctx) -> u8 {
         allow_loopback: args.timeouts.mdns_loopback,
     };
     let (events, printer) = event_printer(Arc::clone(&ctx.out));
+    let source = LocalFileSource::default();
     let result = {
         let use_case = SendFiles::new(SendDeps {
             connector: &TcpConnector,
             discovery: disc.as_ref(),
-            source: &LocalFileSource,
+            source: &source,
             trust: &trust,
             interaction: &interaction,
             clock: &SystemClock,

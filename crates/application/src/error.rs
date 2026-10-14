@@ -115,6 +115,10 @@ pub enum SourceError {
         /// OS message.
         message: String,
     },
+    /// The file is one of Dropumi's own configuration files (or a link to
+    /// one), which are never sent.
+    #[error("refusing to send a Dropumi configuration file: {0}")]
+    Protected(String),
 }
 
 impl From<SourceError> for TransferError {
