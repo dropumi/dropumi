@@ -14,7 +14,9 @@ troubleshoot common problems. Contribution workflow and rules: [`CONTRIBUTING.md
 | `zizmor` | 1.30.1 | GitHub Actions security lint |
 | `actionlint` | 1.7.12, from a pinned Docker image | Workflow lint (includes shellcheck for `run:` steps) |
 | Android NDK | one that provides `aarch64-linux-android26-clang`; the recorded local build used 27.1 | Android cross build (blake3 compiles C for the target) |
-| Xcode | with the iOS SDK; the recorded local build used Xcode 27 | iOS cross build |
+| Xcode | with the iOS SDK; the recorded local build used Xcode 27 (Swift 6.4) | iOS cross build; the XCFramework and `swift test` for the FFI |
+| JDK | 17 or later for Gradle; the recorded run used Temurin 21 | The Kotlin binding tests (`apps/android`) |
+| Android SDK | platform 36 and NDK 27.1.12297006 (`ANDROID_HOME`, or `sdk.dir` in the untracked `apps/android/local.properties`) | The Android library and the Kotlin binding tests |
 | `jq`, `perl`, `/usr/bin/time` | system | Benchmark script only |
 
 ```sh
@@ -91,18 +93,21 @@ cargo test -p dropumi-cli --test e2e --locked -- security::   # one e2e module
 
 ## Cross builds (Android and iOS)
 
-CI builds only the core library crates for mobile targets: no CLI, no mDNS, nothing linked into an app or run. The
-result label is "Build verified only (core library crates; no app, not run)".
+The `build (<target>)` CI jobs build only the core library crates for mobile targets: no CLI, no FFI, no mDNS,
+nothing linked into an app or run. The result label is "Build verified only (core library crates; no app, not run)".
+The FFI for the apps has its own scripts ([below](#the-ffi-and-the-binding-packages)).
 
 ```sh
-cargo build --workspace --exclude dropumi-cli --no-default-features --locked --target <TARGET>
+cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen \
+  --no-default-features --locked --target <TARGET>
 ```
 
 **iOS** (macOS host with Xcode and the iOS SDK):
 
 ```sh
 rustup target add aarch64-apple-ios
-cargo build --workspace --exclude dropumi-cli --no-default-features --locked --target aarch64-apple-ios
+cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen \
+  --no-default-features --locked --target aarch64-apple-ios
 ```
 
 **Android.** `blake3` compiles C code for the target, so Cargo needs the NDK's clang and `llvm-ar`. Replace
@@ -115,11 +120,43 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 ndk_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin"
 export CC_aarch64_linux_android="$ndk_bin/aarch64-linux-android26-clang"
 export AR_aarch64_linux_android="$ndk_bin/llvm-ar"
-cargo build --workspace --exclude dropumi-cli --no-default-features --locked --target aarch64-linux-android
+cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen \
+  --no-default-features --locked --target aarch64-linux-android
 ```
 
 CI does the same on `ubuntu-latest` with the runner's preinstalled NDK (`ANDROID_NDK_HOME`, API level 26) and prints
 the NDK revision in the job log.
+
+## The FFI and the binding packages
+
+`dropumi-ffi` is the facade the apps use ([ADR-0009](adr/0009-ffi-bindings-strategy.md)). Its bindings are generated
+and committed; the native libraries are built by scripts and never committed.
+
+```sh
+# Regenerate the Swift and Kotlin bindings after changing the FFI (CI fails if they drift).
+bash scripts/ffi/bindings.sh            # --check only compares
+
+# Apple: DropumiFFI.xcframework (iOS device, iOS simulator, macOS; arm64), then the Swift binding tests.
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+bash scripts/ffi/build-apple.sh --profile dev          # --profile release for app builds; --slices ci skips the device
+swift test --package-path apps/apple/DropumiKit
+
+# Android: libdropumi_ffi.so for the app's jniLibs, with 16 KB pages, then the check.
+rustup target add aarch64-linux-android               # and x86_64-linux-android for the emulator
+bash scripts/ffi/build-android.sh --abis arm64-v8a    # finds the SDK and NDK 27.1.12297006 itself
+bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
+
+# Kotlin binding tests on the host JVM (they load target/debug/libdropumi_ffi).
+cargo build --locked -p dropumi-ffi --lib
+JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest
+```
+
+- `apps/apple/DropumiKit` declares iOS 17 and macOS 14 as its minimums so CI can test it on older runners
+  (`scripts/ffi/apple.env` sets the same for the Rust slices); the apps set their own deployment targets.
+- The Gradle wrapper pins Gradle 9.8.1 with a checksum; dependency versions are in
+  `apps/android/gradle/libs.versions.toml`.
+- Disk: a release build of every slice and ABI, Xcode's and Gradle's caches add several GiB. Rebuildable output is in
+  `target/`, `apps/apple/DropumiKit/.build/` and `apps/android/**/build/`.
 
 ## Linux tests and a Windows type check from another OS (Docker)
 
@@ -235,6 +272,9 @@ Publish only numbers it produced, with the machine, OS, Rust version and paramet
 | Testing on one machine | Use loopback: `receive --bind 127.0.0.1 --port 0 --no-mdns`, read the port from `listening`, then `send --to 127.0.0.1:<port>`. mDNS on loopback needs the hidden `--mdns-loopback` testing hook. |
 | Android build fails compiling `blake3` | `CC_aarch64_linux_android` / `AR_aarch64_linux_android` are not set to the NDK's clang and `llvm-ar`. |
 | A large e2e test needs too much disk | `large_file_streaming` writes 64 MiB by default on each side; lower `DROPUMI_TEST_LARGE_MIB`. |
+| `swift test` cannot find `DropumiFFI` or reports a stale library | Run `bash scripts/ffi/build-apple.sh` first; `apps/apple/DropumiKit/Artifacts/core-stamp.txt` records what it was built from. |
+| The Kotlin tests fail with `UnsatisfiedLinkError` | Build the host library first (`cargo build --locked -p dropumi-ffi --lib`); the tests load it from `target/debug` (`dropumi.hostLibDir` in `apps/android/gradle.properties`). |
+| `check-16k.sh` reports alignment below 0x4000 | The library was built without the 16 KB link flags; build it with `scripts/ffi/build-android.sh`, not plain `cargo build`. |
 
 ## Building and releasing
 

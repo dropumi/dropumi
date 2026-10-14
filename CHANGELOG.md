@@ -12,7 +12,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-Milestone 1 (Phase 0 + Phase 1) adds the secure LAN transfer core, a draft of protocol v1 and the `dropumi` CLI. This is pre-alpha, unaudited software. There are no desktop or mobile apps, no FFI bindings and no releases yet.
+Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. The apps themselves are in progress. Pre-alpha, unaudited.
+
+#### Core changes (each test-first)
+
+- The receiver can cancel one incoming transfer by id; an offer that reuses the id of a running transfer is rejected `BUSY` before anyone is asked (protocol draft §13.2 MAY rule; no wire change).
+- Accept errors back off (10 ms, doubling, at most 1 s) and stop the receiver after 8 in a row instead of spinning.
+- `ReceiverControl`: change a running receiver's policy for new sessions, and stop accepting connections while running transfers finish.
+- `TrustStore::rename`: rename a paired device in one locked step that never re-creates a removed device.
+- `LocalFileSource::with_denied`: refuse Dropumi's own configuration files, also through symlinks and hard links.
+- The random mDNS instance label moved out of the `mdns`-only module.
+
+#### App bridge (`dropumi-ffi`, `dropumi-ffi-bindgen`)
+
+- `DropumiNode` over UniFFI 0.32.2: identity, trust, discovery through the app's Bonjour or NSD, receiving, sending (local paths or documents the app reads), pairing and a pairing window; synchronous calls, operation handles, a bounded event mailbox that never blocks the core, prompts answered by id. The crate keeps `unsafe_code = "forbid"`.
+- Scripts: bindings generation and drift check, the XCFramework, the Android library with 16 KB pages, and the alignment check.
+- Binding packages: `apps/apple/DropumiKit` (Swift) and `apps/android/core-bindings` (Kotlin), with tests against the real core.
+- Tests: facade unit and loopback tests, a thread-safety stress test, the facade against the real CLI, Swift and Kotlin binding tests, opt-in measurements.
+- CI: `ffi (apple)` and `ffi (android)` (not required); Swift and Kotlin SPDX checks; Dependabot for Gradle.
+
+#### Decisions
+
+- ADR-0009 (FFI and bindings) accepted with the spike results.
+- ADR-0011 (browser companion) proposed, with a research prototype in `poc/web/`.
+- ADR-0014 (interim key storage on the app platforms) accepted.
+- Threat model: trust boundaries TB6 to TB8, adversaries ADV7 and ADV8, goals G25 to G33, residual risks R20 to R24.
+
+### Added (milestone 1)
+
+Milestone 1 (Phase 0 + Phase 1) adds the secure LAN transfer core, a draft of protocol v1 and the `dropumi` CLI. This is pre-alpha, unaudited software. It has no desktop or mobile apps, no FFI bindings and no releases.
 
 #### Assessment and decisions
 

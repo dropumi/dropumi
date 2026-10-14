@@ -1,10 +1,11 @@
 # Architecture
 
-> Pre-alpha. The protocol and implementation are unaudited. This document describes the code on the
-> `feat/secure-lan-transfer-core` branch (milestone 1: Rust core, protocol v1 draft, `dropumi` CLI). No UI, FFI or
-> mobile app exists yet.
+> Pre-alpha. The protocol and implementation are unaudited. This document describes milestone 1 (Rust core,
+> protocol v1 draft, `dropumi` CLI) and the start of milestone 2: `dropumi-ffi`, the facade the native apps use
+> ([ADR-0009](docs/adr/0009-ffi-bindings-strategy.md)). The apps themselves are in progress.
 
-Dropumi uses ports and adapters (hexagonal architecture) in one Cargo workspace of five crates. The decisions behind
+Dropumi uses ports and adapters (hexagonal architecture) in one Cargo workspace of seven crates: five layers, the
+FFI facade and its bindings generator. The decisions behind
 this layout are in [ADR-0001](docs/adr/0001-architecture-and-workspace-layout.md); the wire format is in
 [`docs/protocol/v1.md`](docs/protocol/v1.md).
 
@@ -13,13 +14,16 @@ this layout are in [ADR-0001](docs/adr/0001-architecture-and-workspace-layout.md
 ```mermaid
 flowchart LR
     cli["dropumi-cli<br/>bin: dropumi<br/>composition root"] --> infra["dropumi-infra<br/>adapters"]
+    ffi["dropumi-ffi<br/>UniFFI facade for the apps<br/>composition root"] --> infra
     infra --> app["dropumi-application<br/>ports, secure channel, use cases"]
     app --> proto["dropumi-protocol<br/>sans-IO wire protocol"]
     proto --> domain["dropumi-domain<br/>pure model"]
 ```
 
-Arrows mean "depends on". Dependencies point inward only: `domain` <- `protocol` <- `application` <- `infra` <- `cli`.
-A crate may also use any crate further inward (for example, `cli` uses all four).
+Arrows mean "depends on". Dependencies point inward only: `domain` <- `protocol` <- `application` <- `infra` <-
+`cli` and `ffi`. A crate may also use any crate further inward (for example, `cli` uses all four). `cli` and `ffi` are
+both composition roots and do not depend on each other (the CLI uses `ffi` as a dev-dependency only, for interop
+tests). `dropumi-ffi-bindgen` is a build tool that holds the UniFFI generator; nothing depends on it.
 
 | Crate | Path | Responsibility | External dependencies (normal) |
 |---|---|---|---|
@@ -28,6 +32,8 @@ A crate may also use any crate further inward (for example, `cli` uses all four)
 | `dropumi-application` | `crates/application` | The nine ports, secure-channel establishment and record I/O (`channel::{establish, io}`), use cases, events, timeouts and admission limits. Depends only on ports, never on adapters. | `thiserror`, `tokio`, `tokio-util`, `tracing` |
 | `dropumi-infra` | `crates/infra` | Adapters: TCP, receive directory and finalization, file source, stale-file cleanup, identity/device/trust stores, config paths, permission checks, system clock, TXT hints, mDNS (cargo feature `mdns`, on by default). | `dirs`, `serde`, `serde_json`, `tempfile`, `thiserror`, `tokio`, `tracing`, `zeroize`, `rustix` (Unix only), `mdns-sd` (optional) |
 | `dropumi-cli` | `crates/cli` | Composition root and the `dropumi` binary: clap arguments, human and NDJSON output, `--control-stdin`, the `Interaction` adapter, exit codes. Holds the two-process e2e suite (`tests/e2e/`). | `clap`, `serde_json`, `tokio`, `tokio-util`, `tracing`, `tracing-subscriber`, `rustix` (Unix only; `termios`) |
+| `dropumi-ffi` | `crates/ffi` | Composition root for the apps: `DropumiNode` (identity, trust, discovery, receiving, sending, pairing), the event mailbox, prompts answered by id, and the callback interfaces the apps implement (`EventListener`, `PlatformDiscovery`, `ForeignFile`). Built as `lib`, `staticlib` and `cdylib`. | `uniffi` (`=0.32.2`, no default features), `thiserror`, `tokio`, `tokio-util`, `tracing` |
+| `dropumi-ffi-bindgen` | `crates/ffi-bindgen` | Build tool: the `uniffi-bindgen` and `uniffi-bindgen-swift` binaries. Never shipped. | `uniffi` (`cli`, `cargo-metadata`) |
 
 Every direct dependency, its version, license and justification is listed in
 [`docs/dependencies.md`](docs/dependencies.md).
@@ -35,19 +41,27 @@ Every direct dependency, its version, license and justification is listed in
 ### Enforcement
 
 `scripts/ci/check-architecture.sh` (CI job `architecture`) runs `cargo tree -e normal --all-features --target all`
-for the three inner crates and fails if a denied crate appears anywhere in the graph, directly or transitively:
+for every crate below and fails if a denied crate appears anywhere in the graph, directly or transitively
+("UniFFI" stands for `uniffi`, `uniffi_core`, `uniffi_macros`, `uniffi_bindgen`, `uniffi_pipeline` and
+`dropumi-ffi`):
 
 | Package | Denied crates |
 |---|---|
 | `dropumi-domain` | `tokio`, `tokio-util`, `snow`, `sha2`, `getrandom`, `minicbor`, `blake3`, `mdns-sd`, `tempfile`, `serde`, `serde_json`, `dirs`, `clap`, `tracing`, `tracing-subscriber`, `rustix`, `dropumi-protocol`, `dropumi-application`, `dropumi-infra`, `dropumi-cli` |
 | `dropumi-protocol` | `tokio`, `tokio-util`, `mdns-sd`, `tempfile`, `serde`, `serde_json`, `dirs`, `clap`, `tracing`, `tracing-subscriber`, `dropumi-application`, `dropumi-infra`, `dropumi-cli` |
-| `dropumi-application` | `mdns-sd`, `tempfile`, `dirs`, `serde`, `serde_json`, `clap`, `tracing-subscriber`, `rustix`, `dropumi-infra`, `dropumi-cli` |
+| `dropumi-application` | `mdns-sd`, `tempfile`, `dirs`, `serde`, `serde_json`, `clap`, `tracing-subscriber`, `rustix`, `dropumi-infra`, `dropumi-cli`, UniFFI |
+| `dropumi-infra` | `dropumi-cli`, UniFFI |
+| `dropumi-cli` (normal dependencies) | UniFFI |
+| `dropumi-ffi` | `mdns-sd`, `clap`, `tracing-subscriber`, `dropumi-cli`, `uniffi_bindgen`, `cargo_metadata` |
 | whole workspace | `ring` (snow is built with its pure-Rust features only; [ADR-0002](docs/adr/0002-secure-channel-noise-xx.md)) |
+
+The script also fails if any manifest sets `panic = "abort"`: UniFFI turns panics into errors with `catch_unwind`.
 
 Exit status: 0 clean, 1 violation, 2 the dependency graph could not be read. Cycles (for example `infra` depending
 on `cli`) are rejected by Cargo itself.
 
-Other rules are enforced by lints: `unsafe_code = "forbid"` in every crate; `unwrap`, `expect`, `panic!`, `todo!`,
+Other rules are enforced by lints: `unsafe_code = "forbid"` in every crate (in `dropumi-ffi` too: the scaffolding
+generated by UniFFI's macros is not attributed to the crate; ADR-0009); `unwrap`, `expect`, `panic!`, `todo!`,
 `unimplemented!`, `dbg!` and `mem::forget` denied outside tests; the protocol crate also denies `indexing_slicing`,
 `arithmetic_side_effects` and `cast_possible_truncation` because it parses untrusted input.
 
@@ -201,7 +215,8 @@ most 2 s (`Timeouts::drain`), so the other side can read the final `Cancel`, `Er
 | Sender | The use-case task writes records. A spawned reader task reads records and forwards control messages over a bounded channel (8); it is aborted when the transfer ends (`AbortOnDrop`). Source reads race cancellation and inbound messages in `select!`, so a stuck source never blocks a receiver's `Cancel`. |
 | Receiver | `ReceiveFiles::run` accepts connections and spawns one task per connection into a `JoinSet`. Each session reads a frame, writes it to the sink, then reads the next: no queue between network and disk, so a slow disk slows the sender through TCP. |
 | Admission | At most 16 unauthenticated connections in total and 4 per remote IP (excess dropped immediately, no queue); at most 4 authenticated sessions (excess get `BUSY` at the preamble); at most 1 active session per peer fingerprint (excess get `BUSY` after the Hello). |
-| Cancellation | A root `CancellationToken` (Ctrl-C, `quit`) with child tokens per command; the receiver waits at most 4 s for open sessions to close (plus up to 2 s to withdraw its mDNS advertisement and stop the mDNS daemon), and a second Ctrl-C exits the process at once with code 130. The receiver's `TransferCanceller` cancels the transfers that are running now (`Cancel USER`) without stopping the receiver. Stopping the receiver cancels sessions with `Cancel SHUTDOWN`, waits up to 4 s (twice the drain timeout), then aborts what is left. |
+| Cancellation | A root `CancellationToken` (Ctrl-C, `quit`) with child tokens per command; the receiver waits at most 4 s for open sessions to close (plus up to 2 s to withdraw its mDNS advertisement and stop the mDNS daemon), and a second Ctrl-C exits the process at once with code 130. The receiver's `TransferCanceller` cancels every running transfer, or one by transfer id (`Cancel USER`), without stopping the receiver; an offer that reuses the id of a running transfer is rejected `BUSY`. Stopping the receiver cancels sessions with `Cancel SHUTDOWN`, waits up to 4 s (twice the drain timeout), then aborts what is left. `ReceiverControl::stop_accepting` instead closes the listener at once and lets running sessions finish. |
+| Accept errors | Retried after a pause (10 ms, doubling, at most 1 s); after 8 consecutive failures the receiver drains and returns an error instead of spinning. |
 
 Default timeouts (`crates/application/src/config.rs`):
 
@@ -213,6 +228,16 @@ Default timeouts (`crates/application/src/config.rs`):
 | Whole offer from an unverified peer | 150 s | Sender waiting for `CompleteAck` (restarted by each new `FileAck`) | 60 s |
 | Receiving user's decision | 120 s | Drain after a final message | 2 s |
 | SAS confirmation and pairing result | 120 s | | |
+
+### The app facade (`dropumi-ffi`)
+
+| Element | Behaviour |
+|---|---|
+| Runtime | One tokio `current_thread` runtime on its own thread (`dropumi-rt`), `max_blocking_threads(8)`. Exported calls are synchronous; long work is spawned on the runtime. |
+| Events | Use cases emit into a bounded channel per operation (256); a pump forwards each event to the mailbox without waiting. The `dropumi-events` thread delivers batches (at most 256; critical events at once, others at most every 100 ms) to the app's `EventListener`. The mailbox is bounded (critical: 4,096, then `ResyncRequired`; soft: 1,024, oldest dropped) and never makes the core wait. |
+| App code | Never called on the runtime thread or under a Rust lock: each call into `PlatformDiscovery` runs on a short-lived thread (`dropumi-app`), and each document is read on its own thread (`dropumi-reader`) into a channel of 4 chunks of 256 KiB. |
+| Prompts | Registered before `PromptOpened` is published; answered by prompt id; withdrawn when the core stops waiting. |
+| Shutdown | `shutdown()` cancels everything, waits up to 5 s for the receiver, stops the runtime and drains the mailbox. Dropping the last handle cancels without waiting. |
 
 ## 7. Memory
 
@@ -265,12 +290,13 @@ Planned extension points:
 
 | Future capability | Plugs in as | Notes |
 |---|---|---|
-| BLE, native Bonjour/NSD discovery | New `Discovery` adapters | Discovery stays separate from transport; results stay hints. |
+| BLE discovery | A new `Discovery` adapter | Discovery stays separate from transport; results stay hints. |
+| Native Bonjour/NSD discovery | `dropumi-ffi`'s `PlatformDiscovery`, implemented by the apps | Rust names instances and builds and parses TXT. |
 | Wi-Fi Direct, Wi-Fi Aware, hotspot transports | New `Connector`/`Listener` adapters | The secure channel runs over any `AsyncRead + AsyncWrite` stream. |
-| Keychain, Android Keystore, Windows credential storage | New `IdentityStore` adapters | Today the key is a 0600 file. |
+| Keychain, Android Keystore, Windows credential storage | New `IdentityStore` adapters | Today the key is a 0600 file; on the app platforms it stays in app-private storage excluded from backups until then ([ADR-0014](docs/adr/0014-interim-key-storage-on-app-platforms.md)). |
 | Notifications, share sheets, permission prompts | New `Interaction` adapters and future platform ports | The CLI has no OS permission prompts. |
-| Desktop and mobile apps | Future `apps/` directories (ADR-0008) | Platform code stays in adapters behind `cfg` or cargo features. |
-| Language bindings | A future `dropumi-ffi` crate ([ADR-0009](docs/adr/0009-ffi-bindings-strategy.md), Proposed) | Exposes use cases, not ports. |
+| Desktop and mobile apps | `apps/apple`, `apps/android` (milestone 2, in progress) | Platform code stays in the apps, behind the facade's callback interfaces. |
+| Language bindings | `dropumi-ffi` ([ADR-0009](docs/adr/0009-ffi-bindings-strategy.md), Accepted) | Exposes use cases, not ports; Swift and Kotlin are generated. |
 
 The spec's separate `discovery`, `transport`, `security`, `platform` and `testing` crates are deferred. Until then,
 discovery lives in `domain::discovery` and `infra::mdns`, transport in `application::channel` and `infra::net`,

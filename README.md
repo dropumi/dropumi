@@ -20,6 +20,8 @@ Free, open-source, ultra-lightweight cross-platform local file sharing. No inter
 
 Milestone 1 provides the Rust core, protocol v1 (draft) and the `dropumi` command-line tool. The CLI can create a device identity, pair two devices by comparing a 6-digit code, manage trusted devices, and send and receive files over an authenticated, encrypted TCP connection. Receivers can advertise themselves over mDNS, so senders can find them by name or fingerprint as well as by address.
 
+Milestone 2 is in progress: `dropumi-ffi`, the bridge the native apps use (Swift and Kotlin bindings generated with UniFFI), exists and is tested on the host; the iPhone, iPad, Mac and Android apps are being built on it. A browser companion is only a proposal ([ADR-0011](docs/adr/0011-browser-companion.md)).
+
 | Platform or environment | Status |
 |---|---|
 | macOS 27 arm64 (maintainer machine) | Automated test passed (CLI, loopback, local run) |
@@ -33,10 +35,12 @@ Milestone 1 provides the Rust core, protocol v1 (draft) and the `dropumi` comman
 | Real multi-device LAN | Not tested |
 | mDNS discovery, macOS 27 arm64 | Automated test passed (opt-in, loopback, local run on macOS 27) |
 | mDNS discovery, Ubuntu 24.04 x64 (GitHub runner) | Not tested (pending CI, experimental job) |
-| Desktop and mobile apps | Not implemented |
+| App bridge (`dropumi-ffi`), Swift and Kotlin bindings, macOS 27 arm64 host | Automated test passed (bindings on the host, loopback, local run) |
+| App bridge for iOS devices, the iOS simulator and Android arm64-v8a | Build verified only (library; no app, not run) |
+| iPhone, iPad, Mac and Android apps | In progress (milestone 2); Not tested |
 
 - "Loopback" means both devices were two `dropumi` processes on one machine, talking over `127.0.0.1`.
-- In the local run on macOS 27 (Rust 1.99.0), 224 tests passed, including the two-process end-to-end suite (37 tests, green 3 times in a row); the same suite passed in a Linux aarch64 container (225 tests, including a Linux-only one). The one ignored test is the opt-in mDNS test, which passed when run separately with `DROPUMI_TEST_MDNS=1` (see [`docs/testing.md`](docs/testing.md)).
+- In the latest local run on macOS 27 (Rust 1.99.0, milestone 2a code), 309 tests passed, including the two-process end-to-end suite (42 tests); milestone 1's code also passed in a Linux aarch64 container (225 tests, including a Linux-only one). The ignored tests are the opt-in mDNS test, which passed when run separately with `DROPUMI_TEST_MDNS=1`, and two opt-in measurements (see [`docs/testing.md`](docs/testing.md)).
 - Nothing has been tried between two real devices yet. See [`docs/testing.md`](docs/testing.md) and [`docs/feasibility.md`](docs/feasibility.md) §9.
 
 ## Quick start
