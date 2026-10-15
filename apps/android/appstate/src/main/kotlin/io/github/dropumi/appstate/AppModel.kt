@@ -34,6 +34,8 @@ import io.github.dropumi.ffi.FileStatus
 import io.github.dropumi.ffi.IdentityInfo
 import io.github.dropumi.ffi.NearbyPeer
 import io.github.dropumi.ffi.NodeEvent
+import io.github.dropumi.ffi.NodeSnapshot
+import io.github.dropumi.ffi.OperationResult
 import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.Prompt
 import io.github.dropumi.ffi.ReceiveOptions
@@ -51,6 +53,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -148,13 +151,15 @@ data class AppState(
     val onboarded: Boolean,
     /** This device's advertisement; GateClosed means browse-only (ADR-0013 D5). */
     val advertising: AdvertiseState = AdvertiseState.GateClosed,
+    /**
+     * A pairing window is opening or open, or the core is resuming the
+     * receiver the window paused. Receiving changes made meanwhile are kept
+     * and applied once it is over.
+     */
+    val pairingWindowActive: Boolean = false,
 ) {
     /** The prompt to show now. */
     val currentPrompt: Prompt? get() = prompts.firstOrNull()
-
-    /** A pairing window is open and has not ended: receiving settings wait for it. */
-    val pairingWindowOpen: Boolean
-        get() = pairing?.let { it.role == PairingSession.Role.Window && it.result == null } == true
 
     /**
      * The name onboarding suggests: only the core's own `Dropumi-XXXX`, never
@@ -225,8 +230,30 @@ class AppModel(
     /** Calls that start an operation (send, pair, pairing window) and have not returned yet. */
     private var startsUnderWay = 0
 
-    /** openPairingWindow() is under way (before its session is in the state). */
-    private var pairingWindowStarting = false
+    /*
+     * The pairing window, tracked by its own operation and never from the
+     * pairing shown on screen. Opening a window pauses a running receiver
+     * (ReceiverStopped); when the window ends (PairingFinished) the core
+     * resumes that receiver with the settings it had (ReceiverStarted, or
+     * ReceiverStopped if it could not). Until then the model leaves the
+     * receiver alone, and then makes it match the settings of the moment.
+     */
+
+    /** openPairingWindow() calls under way. */
+    private var windowStarts = 0
+
+    /** pair() calls under way. */
+    private var pairStarts = 0
+
+    /** The open window's operation; cleared only by that operation's PairingFinished. */
+    private var windowOperation: ULong? = null
+
+    /** A receiver stopped while the window was opening or open: the core resumes it afterwards. */
+    private var windowPausedReceiver = false
+
+    /** The window ended and the core is resuming the receiver it paused. */
+    private var resumeExpected = false
+    private var resumeEpoch = 0
 
     /**
      * Events for an operation the model does not know yet, kept while a
@@ -403,36 +430,40 @@ class AppModel(
 
     // Receiving
 
-    /** Changes who may send to this device. Refused while a pairing window is open. */
+    /**
+     * Changes who may send to this device. During a pairing window the
+     * change is kept and applied when the window is over (the core resumes
+     * the paused receiver with its old settings; the model then changes it).
+     */
     suspend fun setVisibility(value: ReceiveVisibility) {
-        if (refusedDuringPairingWindow()) return
         settings.visibility = value
         update { copy(visibility = value) }
         applyVisibility()
     }
 
-    /** Refused while a pairing window is open. */
+    /** Like [setVisibility], applied after a pairing window. */
     suspend fun setAutoAcceptPaired(value: Boolean) {
-        if (refusedDuringPairingWindow()) return
         settings.autoAcceptPaired = value
         update { copy(autoAcceptPaired = value) }
         applyVisibility()
     }
 
-    /**
-     * A pairing window pauses the receiver and the core resumes it, with
-     * its old settings, when the window ends: a change made meanwhile would
-     * not take effect (Off would not keep it stopped), so none is made.
-     */
-    private fun refusedDuringPairingWindow(): Boolean {
-        if (!pairingWindowOpen) return false
-        update { copy(banner = Banner(Banner.Style.INFO, "Finish pairing first", "Who can send can change once the pairing window closes.")) }
-        return true
-    }
+    /** A pairing window is opening or open, or the receiver it paused is being resumed. */
+    private val pairingHold: Boolean
+        get() = windowStarts > 0 || windowOperation != null || resumeExpected
 
-    /** Whether a pairing window is opening or open (the core has paused the receiver). */
-    private val pairingWindowOpen: Boolean
-        get() = pairingWindowStarting || _state.value.pairingWindowOpen
+    /**
+     * Publishes [pairingHold]. When it ends, the receiver is made to match
+     * the settings of the moment (unless [reconcile] is false: the caller
+     * does that itself).
+     */
+    private fun syncPairingHold(reconcile: Boolean = true) {
+        val held = pairingHold
+        val was = _state.value.pairingWindowActive
+        if (held == was) return
+        update { copy(pairingWindowActive = held) }
+        if (was && reconcile) chainReceiver { matchReceiver() }
+    }
 
     /**
      * Makes the receiver match the visibility and the accept setting. Calls
@@ -442,6 +473,37 @@ class AppModel(
     suspend fun applyVisibility() {
         chainReceiver { applyVisibilityNow() }.join()
     }
+
+    /**
+     * Makes a receiver that is running (or none) match the settings now. The
+     * core also starts a receiver by itself: when a pairing window ends it
+     * resumes the one the window paused, with the settings it had then, and
+     * this may be after the user chose Off or left the app.
+     */
+    private suspend fun matchReceiver() {
+        val s = _state.value
+        if (pairingHold || !s.onboarded) return
+        if (s.isInBackground) {
+            stopAcceptingInBackground()
+            return
+        }
+        val info = s.receiver
+        if (info != null && info.matches(s)) return
+        applyVisibilityNow()
+    }
+
+    /** Whether a running receiver already has the chosen policy kind and accept mode. */
+    private fun ReceiverInfo.matches(s: AppState): Boolean {
+        val policyMatches = when (s.visibility) {
+            ReceiveVisibility.OFF -> false
+            ReceiveVisibility.PAIRED_ONLY -> policy is ReceivePolicy.TrustedOnly
+            ReceiveVisibility.EVERYONE -> policy is ReceivePolicy.Everyone
+        }
+        return policyMatches && accept == s.acceptMode
+    }
+
+    private val AppState.acceptMode: AcceptMode
+        get() = if (autoAcceptPaired) AcceptMode.AUTO_TRUSTED else AcceptMode.PROMPT
 
     private fun chainReceiver(body: suspend () -> Unit): Job {
         val previous = receiverChain
@@ -456,7 +518,11 @@ class AppModel(
     private suspend fun applyVisibilityNow() {
         val s = _state.value
         if (s.isInBackground) return
-        val accept = if (s.autoAcceptPaired) AcceptMode.AUTO_TRUSTED else AcceptMode.PROMPT
+        // The core refuses receiver changes while a pairing window holds the
+        // receiver, and resumes it with its old settings afterwards; the
+        // change waits until then (syncPairingHold, receiverStarted).
+        if (pairingHold) return
+        val accept = s.acceptMode
         val policy = s.visibility.policy
         if (policy == null) {
             if (s.receiver != null) {
@@ -471,9 +537,7 @@ class AppModel(
             if (s.receiver != null) {
                 val info = work { core.setReceivePolicy(policy, accept) }
                 update { copy(receiver = info) }
-            } else if (!s.receiverStopping && !pairingWindowOpen) {
-                // (During a pairing window the core resumes the paused
-                // receiver itself; it refuses a start meanwhile.)
+            } else if (!s.receiverStopping) {
                 // Advertised only where the R21 gate is open (ADR-0013 D5);
                 // elsewhere the core never calls advertise, and peers reach
                 // this device by address or after pairing.
@@ -722,7 +786,14 @@ class AppModel(
 
     // Pairing
 
+    /**
+     * Asks [target] to pair. Refused while another pairing (a window or a
+     * request) is starting or running: there is one pairing on screen, and
+     * its Cancel must stay reachable.
+     */
     suspend fun pair(target: SendTarget, name: String) {
+        if (refusedWhilePairing()) return
+        pairStarts += 1
         try {
             startOperation({ core.pair(target) }) { op ->
                 update { copy(pairing = PairingSession(op.id, PairingSession.Role.Initiator(name))) }
@@ -731,25 +802,65 @@ class AppModel(
             throw e
         } catch (e: Exception) {
             show(e, "Pairing could not start")
+        } finally {
+            pairStarts -= 1
         }
     }
 
-    /** Lets one device pair with this one for five minutes. */
+    /**
+     * Lets one device pair with this one for five minutes. Refused like
+     * [pair]. The core pauses a running receiver before the call returns.
+     */
     suspend fun openPairingWindow() {
-        // The core pauses the receiver before the call returns.
-        pairingWindowStarting = true
+        if (refusedWhilePairing()) return
+        windowStarts += 1
+        windowPausedReceiver = false
+        syncPairingHold()
         try {
             startOperation({ core.openPairingWindow(PAIRING_WINDOW_MINUTES) }) { op ->
+                // Set before the events that came early (even its end) are applied.
+                windowOperation = op.id
                 val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
                 update { copy(pairing = PairingSession(op.id, PairingSession.Role.Window, expiresAtMs = expires)) }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            // Refused before the core paused anything.
+            if (windowOperation == null) windowPausedReceiver = false
             show(e, "Pairing could not start")
         } finally {
-            pairingWindowStarting = false
+            windowStarts -= 1
+            syncPairingHold()
         }
+    }
+
+    private fun refusedWhilePairing(): Boolean {
+        val session = _state.value.pairing
+        val busy = pairStarts > 0 || pairingHold || (session != null && session.result == null)
+        if (!busy) return false
+        update { copy(banner = Banner(Banner.Style.INFO, "Finish pairing first", "Another pairing is under way. Finish or cancel it first.")) }
+        return true
+    }
+
+    /** The window's operation ended: the core resumes the receiver it paused, if any. */
+    private fun windowEnded() {
+        windowOperation = null
+        if (windowPausedReceiver) {
+            windowPausedReceiver = false
+            resumeExpected = true
+            // Bounded: if the core's answer never comes (or was not for this
+            // window), the settings still apply.
+            val epoch = ++resumeEpoch
+            scope.launch {
+                delay(RESUME_WAIT_MS)
+                if (resumeExpected && resumeEpoch == epoch) {
+                    resumeExpected = false
+                    syncPairingHold()
+                }
+            }
+        }
+        syncPairingHold()
     }
 
     fun cancelPairing() {
@@ -865,7 +976,7 @@ class AppModel(
             return
         }
         when (event) {
-            is NodeEvent.ReceiverStarted -> update { copy(receiver = event.info, receiverStopping = false) }
+            is NodeEvent.ReceiverStarted -> receiverStarted(event.info)
             is NodeEvent.ReceiverStopped -> receiverStopped(event)
             is NodeEvent.PolicyChanged -> policyChanged(event)
             is NodeEvent.DiscoveryUnavailable -> update { copy(discoveryProblem = event.reason) }
@@ -921,6 +1032,7 @@ class AppModel(
                             ?: pairing,
                     )
                 }
+                if (event.operation == windowOperation) windowEnded()
                 scope.launch { refreshTrusted() }
             }
             is NodeEvent.SessionClosed -> {
@@ -935,8 +1047,33 @@ class AppModel(
         }
     }
 
+    /**
+     * A receiver started. The model's own starts already set it (this event
+     * can come before or after the call returns); one the model already asked
+     * to stop is ignored. The core also starts one by itself after a pairing
+     * window, with the settings it had: it is made to match the settings now.
+     */
+    private fun receiverStarted(info: ReceiverInfo) {
+        if (_state.value.receiverStopping && !resumeExpected) return
+        update { copy(receiver = info, receiverStopping = false) }
+        if (resumeExpected) {
+            resumeExpected = false
+            syncPairingHold()
+        } else {
+            chainReceiver { matchReceiver() }
+        }
+    }
+
     private fun receiverStopped(event: NodeEvent.ReceiverStopped) {
+        // While a window opens or is open, this is the pause: the core
+        // resumes this receiver when the window ends.
+        if (windowStarts > 0 || windowOperation != null) windowPausedReceiver = true
         update { copy(receiver = null, receiverStopping = false) }
+        // The resume after a window failed: said below, like any other stop.
+        if (resumeExpected) {
+            resumeExpected = false
+            syncPairingHold(reconcile = false)
+        }
         val s = _state.value
         val wanted = !s.isInBackground && s.visibility != ReceiveVisibility.OFF
         when {
@@ -953,7 +1090,7 @@ class AppModel(
             // A stop that finished after the user turned receiving back on
             // (or the app came back to the front meanwhile).
             // A pairing window's pause is not restarted here: the core resumes the receiver after it.
-            event.reason == ReceiverStopReason.STOPPED && s.onboarded && wanted && !pairingWindowOpen ->
+            event.reason == ReceiverStopReason.STOPPED && s.onboarded && wanted && !pairingHold ->
                 scope.launch { applyVisibility() }
         }
     }
@@ -1109,6 +1246,29 @@ class AppModel(
                 )
             }
             setPrompts { snapshot.prompts }
+            resyncPairing(snapshot)
+            // A receiver the core started (or stopped) may have been among
+            // the dropped events.
+            chainReceiver { matchReceiver() }
+        }
+    }
+
+    /** Pairing ends that were among the dropped events, so the window's hold always ends. */
+    private fun resyncPairing(snapshot: NodeSnapshot) {
+        val known = snapshot.operations.associateBy { it.id }
+        val session = _state.value.pairing?.takeIf { it.result == null }?.operation
+        for (op in listOfNotNull(windowOperation, session).distinct()) {
+            val info = known[op]
+            val result = (info?.result as? OperationResult.Pairing)?.result
+            when {
+                result != null -> apply(NodeEvent.PairingFinished(op, result))
+                // Only finished operations are forgotten.
+                info == null && op == windowOperation -> windowEnded()
+            }
+        }
+        if (resumeExpected && snapshot.receiver != null) {
+            resumeExpected = false
+            syncPairingHold(reconcile = false)
         }
     }
 
@@ -1203,6 +1363,9 @@ class AppModel(
 
     private companion object {
         const val STOP_WAIT_MS = 5_000L
+
+        /** How long the model waits for the core to resume the receiver a pairing window paused. */
+        const val RESUME_WAIT_MS = 30_000L
         const val PAIRING_WINDOW_MINUTES = 5u
         const val UNPAIRED_NOTICE_INTERVAL_MS = 60_000L
         const val NOT_AUTHORIZED = "not_authorized"

@@ -42,6 +42,7 @@ import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.PromptCloseReason
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
+import io.github.dropumi.ffi.ReceiverInfo
 import io.github.dropumi.ffi.ReceiverStopReason
 import io.github.dropumi.ffi.SendItem
 import io.github.dropumi.ffi.SendTarget
@@ -934,31 +935,251 @@ class AppModelTest {
         assertNull(s.model.state.value.receiver)
     }
 
+    /** The receiver's settings as the core resumes it after a window: those it had (Paired only, ask). */
+    private val resumedReceiver = ReceiverInfo(47_321u, null, ReceivePolicy.TrustedOnly, AcceptMode.PROMPT, null)
+
     /**
-     * While a pairing window is open the receiver's settings cannot change:
-     * the core resumes the paused receiver with its old settings afterwards,
-     * so a change made meanwhile would not take effect (Off would not stop it).
+     * A model that receives (Paired only) and has opened a pairing window,
+     * which paused the receiver as the core does (ReceiverStopped while the
+     * call runs). Returns the window's operation.
      */
-    @Test
-    fun receivingSettingsWaitForThePairingWindow() = runTest {
+    private suspend fun TestScope.receivingWithAPairingWindow(): Pair<Setup, ULong> {
         val s = makeModel()
         s.model.start()
         s.model.finishOnboarding()
         advanceUntilIdle()
+        assertEquals(1, s.core.starts().size)
+        s.core.emitBeforeReturning("openPairingWindow") { listOf(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED)) }
         s.model.openPairingWindow()
         advanceUntilIdle()
-        s.model.setVisibility(ReceiveVisibility.OFF)
+        assertNull(s.model.state.value.receiver)
+        assertTrue(s.model.state.value.pairingWindowActive)
+        return s to requireNotNull(s.model.state.value.pairing).operation
+    }
+
+    /**
+     * Settings chosen during a pairing window are kept, and applied when the
+     * core resumes the paused receiver (with the settings it had then).
+     */
+    @Test
+    fun receivingSettingsChosenDuringAPairingWindowApplyWhenItEnds() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.setVisibility(ReceiveVisibility.EVERYONE)
         s.model.setAutoAcceptPaired(true)
-        advanceUntilIdle()
-        assertEquals(ReceiveVisibility.PAIRED_ONLY, s.model.state.value.visibility)
-        assertFalse(s.model.state.value.autoAcceptPaired)
-        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
-        // Once the window has ended, changes apply again.
-        val window = requireNotNull(s.model.state.value.pairing).operation
+        runCurrent()
+        assertEquals(ReceiveVisibility.EVERYONE, s.model.state.value.visibility)
+        assertTrue(s.model.state.value.autoAcceptPaired)
+        assertNull("nothing refused, nothing failed", s.model.state.value.banner)
+        assertEquals("the core refuses receiver changes during the window", 1, s.core.starts().size)
+        assertTrue(s.core.calls.none { it is FakeCoreClient.Call.SetReceivePolicy })
         s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
-        s.model.setVisibility(ReceiveVisibility.OFF)
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        runCurrent()
+        assertFalse(s.model.state.value.pairingWindowActive)
+        assertEquals(
+            FakeCoreClient.Call.SetReceivePolicy(ReceivePolicy.Everyone(ReceiveVisibility.EVERYONE_MINUTES), AcceptMode.AUTO_TRUSTED),
+            s.core.calls.last(),
+        )
+        assertEquals(1, s.core.starts().size)
+    }
+
+    /**
+     * Review of C1 (#1): pair() replaced the window's session, which unlocked
+     * the receiving settings while the receiver was still paused; Off then
+     * did nothing, and the core resumed the receiver with Paired only. Now a
+     * pairing request is refused while the window is open (whose session and
+     * Cancel stay on screen), and Off stops the resumed receiver.
+     */
+    @Test
+    fun pairDuringAPairingWindowIsRefusedAndOffStopsTheResumedReceiver() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.pair(SendTarget.Nearby("dropumi-00000001"), "Maya's phone")
         advanceUntilIdle()
+        assertTrue("no pairing request", s.core.calls.none { it is FakeCoreClient.Call.Pair })
+        assertEquals(window, s.model.state.value.pairing?.operation)
+        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
+        assertTrue(s.model.state.value.pairingWindowActive)
+        s.model.dismissBanner()
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        runCurrent()
         assertEquals(ReceiveVisibility.OFF, s.model.state.value.visibility)
+        // The window ends; the core resumes the receiver with its old settings.
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        runCurrent()
+        assertTrue("Off stops the resumed receiver", FakeCoreClient.Call.StopReceiving in s.core.calls)
+        assertNull(s.model.state.value.receiver)
+        assertEquals(1, s.core.starts().size)
+    }
+
+    /**
+     * Review of C1 (#1): the core reports the window's end before it resumes
+     * the receiver. Off chosen in between is applied to the resumed receiver.
+     */
+    @Test
+    fun offChosenBetweenTheWindowsEndAndTheResumeStopsTheReceiver() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Paired(Fixtures.peer(trusted = true)))))
+        runCurrent()
+        assertTrue("the core is resuming the receiver", s.model.state.value.pairingWindowActive)
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        runCurrent()
+        assertFalse(FakeCoreClient.Call.StopReceiving in s.core.calls)
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        runCurrent()
+        assertTrue(FakeCoreClient.Call.StopReceiving in s.core.calls)
+        assertNull(s.model.state.value.receiver)
+        assertFalse(s.model.state.value.pairingWindowActive)
+    }
+
+    /**
+     * Review of C1 (#1): Everyone chosen between the window's end and the
+     * resume used to start a second receiver, which the core refused
+     * ("Receiving could not start"). It is applied to the resumed one.
+     */
+    @Test
+    fun everyoneChosenBeforeTheResumeIsAppliedToTheResumedReceiver() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        s.model.setVisibility(ReceiveVisibility.EVERYONE)
+        runCurrent()
+        assertEquals(1, s.core.starts().size)
+        assertNull(s.model.state.value.banner)
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        runCurrent()
+        assertEquals(
+            FakeCoreClient.Call.SetReceivePolicy(ReceivePolicy.Everyone(ReceiveVisibility.EVERYONE_MINUTES), AcceptMode.PROMPT),
+            s.core.calls.last(),
+        )
+        assertNull(s.model.state.value.banner)
+    }
+
+    /** A receiver the core resumes while the app is in the background stops accepting at once. */
+    @Test
+    fun receiverResumedInTheBackgroundStopsAccepting() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.enterBackground()
+        runCurrent()
+        assertFalse(FakeCoreClient.Call.StopAccepting in s.core.calls)
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        runCurrent()
+        assertTrue(FakeCoreClient.Call.StopAccepting in s.core.calls)
+    }
+
+    /** A window that paused nothing: a choice made during it applies when it ends. */
+    @Test
+    fun windowWithoutAReceiverAppliesTheChoiceWhenItEnds() = runTest {
+        val s = makeModel()
+        s.model.start()
+        s.model.finishOnboarding(ReceiveVisibility.OFF)
+        advanceUntilIdle()
+        s.model.openPairingWindow()
+        advanceUntilIdle()
+        val window = requireNotNull(s.model.state.value.pairing).operation
+        s.model.setVisibility(ReceiveVisibility.PAIRED_ONLY)
+        runCurrent()
+        assertTrue("the core refuses a start during the window", s.core.starts().isEmpty())
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        runCurrent()
+        assertFalse(s.model.state.value.pairingWindowActive)
+        assertEquals(1, s.core.starts().size)
+        assertNotNull(s.model.state.value.receiver)
+    }
+
+    /** If the core's resume is never reported, the hold still ends (bounded) and the settings apply. */
+    @Test
+    fun pairingHoldEndsWhenTheResumeIsNeverReported() = runTest {
+        val (s, window) = receivingWithAPairingWindow()
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        runCurrent()
+        assertTrue(s.model.state.value.pairingWindowActive)
+        advanceUntilIdle()
+        assertFalse(s.model.state.value.pairingWindowActive)
+        assertEquals("receiving starts again", 2, s.core.starts().size)
+    }
+
+    /** A dropped window end (ResyncRequired) cannot keep the settings on hold. */
+    @Test
+    fun resyncEndsThePairingHoldWhenTheWindowsEndWasDropped() = runTest {
+        val (s, _) = receivingWithAPairingWindow()
+        // The fake's snapshot lists no operation (the window was forgotten)
+        // and a running receiver (it was resumed).
+        s.model.apply(listOf(NodeEvent.ResyncRequired))
+        advanceUntilIdle()
+        assertFalse(s.model.state.value.pairingWindowActive)
+        assertNotNull(s.model.state.value.receiver)
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        assertTrue(FakeCoreClient.Call.StopReceiving in s.core.calls)
+    }
+
+    /**
+     * Review of C1 (#1): a second tap on "Wait for a device" while the first
+     * call runs is refused, and does not end the hold the first one holds.
+     */
+    @Test
+    fun secondWindowWhileTheFirstOpensIsRefusedAndKeepsTheHold() = runTest {
+        val s = makeModel(io = Dispatchers.IO)
+        s.model.finishOnboarding()
+        val gate = s.core.holdNext("openPairingWindow")
+        val first = async { s.model.openPairingWindow() }
+        gate.reached()
+        s.model.openPairingWindow()
+        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
+        assertTrue(s.model.state.value.pairingWindowActive)
+        // The core may be pausing the receiver right now: a change waits.
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        assertFalse(FakeCoreClient.Call.StopReceiving in s.core.calls)
+        gate.open()
+        first.await()
+        assertEquals(1, s.core.calls.count { it == FakeCoreClient.Call.OpenPairingWindow })
+        assertTrue(s.model.state.value.pairingWindowActive)
+    }
+
+    /** A window the core refuses ends the hold, and a change made meanwhile applies. */
+    @Test
+    fun refusedWindowEndsTheHold() = runTest {
+        val s = makeModel()
+        s.model.finishOnboarding()
+        s.core.failures["openPairingWindow"] = DropumiException.Busy("a transfer is running")
+        s.model.openPairingWindow()
+        advanceUntilIdle()
+        assertFalse(s.model.state.value.pairingWindowActive)
+        assertEquals("Pairing could not start", s.model.state.value.banner?.title)
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        assertTrue(FakeCoreClient.Call.StopReceiving in s.core.calls)
+    }
+
+    /** A pairing request that runs refuses a window (one pairing on screen, with its Cancel). */
+    @Test
+    fun windowIsRefusedWhileAPairingRequestRuns() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        s.model.pair(SendTarget.Nearby("dropumi-00000001"), "Maya's phone")
+        val request = requireNotNull(s.model.state.value.pairing).operation
+        s.model.openPairingWindow()
+        assertTrue(s.core.calls.none { it == FakeCoreClient.Call.OpenPairingWindow })
+        assertEquals(request, s.model.state.value.pairing?.operation)
+        assertFalse(s.model.state.value.pairingWindowActive)
+        // Once it has ended, a window can open.
+        s.model.apply(listOf(NodeEvent.PairingFinished(request, PairingResult.Cancelled)))
+        s.model.openPairingWindow()
+        assertEquals(1, s.core.calls.count { it == FakeCoreClient.Call.OpenPairingWindow })
+    }
+
+    /** A start reported after the model asked the receiver to stop does not bring it back. */
+    @Test
+    fun startReportedAfterAStopIsIgnored() = runTest {
+        val s = makeModel()
+        s.model.finishOnboarding()
+        val info = requireNotNull(s.model.state.value.receiver)
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        s.model.apply(listOf(NodeEvent.ReceiverStarted(info)))
+        advanceUntilIdle()
+        assertNull(s.model.state.value.receiver)
+        assertTrue(s.model.state.value.receiverStopping)
+        assertEquals(1, s.core.calls.count { it == FakeCoreClient.Call.StopReceiving })
     }
 
     /** Paired devices: a rename or a removal the core refuses says so (Apple gap 2). */

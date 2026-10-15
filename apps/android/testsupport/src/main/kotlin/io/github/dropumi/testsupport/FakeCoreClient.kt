@@ -302,12 +302,16 @@ class FakeCoreClient : CoreClient {
     }
 
     override fun pair(target: SendTarget): CoreOperation {
+        fail("pair")
         note(Call.Pair(target))
+        gate("pair")
         return started("pair", newOperation())
     }
 
     override fun openPairingWindow(minutes: UInt): CoreOperation {
+        fail("openPairingWindow")
         note(Call.OpenPairingWindow)
+        gate("openPairingWindow")
         return started("openPairingWindow", newOperation())
     }
 

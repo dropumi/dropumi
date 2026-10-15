@@ -123,7 +123,6 @@ fun SettingsScreen(state: AppState) {
                         }
                     },
                     label = "Auto-accept paired devices",
-                    enabled = !state.pairingWindowOpen,
                     modifier = Modifier.testTag("settings.autoAccept"),
                 )
             }
@@ -179,12 +178,11 @@ private fun WhoCanSend(state: AppState, onChoose: (ReceiveVisibility) -> Unit) {
             ),
             selected = state.visibility,
             onSelect = onChoose,
-            enabled = !state.pairingWindowOpen,
             modifier = Modifier.testTag("settings.visibility"),
         )
         Caption(
-            if (state.pairingWindowOpen) {
-                "A pairing window is open. Who can send can change once it closes."
+            if (state.pairingWindowActive) {
+                "A pairing window is open. A change here applies when it closes."
             } else {
                 ScreenText.visibilityCaption(state, now)
             },
