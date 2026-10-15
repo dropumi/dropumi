@@ -39,8 +39,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +64,7 @@ import io.github.dropumi.ui.design.DSType
 import io.github.dropumi.ui.design.PrimaryButton
 import io.github.dropumi.ui.design.ScreenHeader
 import io.github.dropumi.ui.design.Wordmark
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 
 private const val STEPS = 4
@@ -73,11 +74,16 @@ fun OnboardingScreen(state: AppState) {
     val model = LocalModel.current
     val scope = LocalAppScope.current
     val confirmations = LocalConfirmations.current
-    var step by rememberSaveable { mutableIntStateOf(0) }
+    // The page and the rename in progress live in the model: the rename runs
+    // on the app's scope and outlives a recreated screen, which must neither
+    // miss the next page nor keep Continue disabled.
+    val step = state.onboardingPage
     // Starts empty and takes only the core's own name (never a system name).
     var name by rememberSaveable { mutableStateOf("") }
     var choice by rememberSaveable { mutableStateOf(ReceiveVisibility.PAIRED_ONLY) }
-    var working by rememberSaveable { mutableStateOf(false) }
+    // Only for the last page, which this screen leaves once onboarding is done.
+    var finishing by remember { mutableStateOf(false) }
+    val working = state.renaming || finishing
     val suggested = state.suggestedDeviceName
     LaunchedEffect(suggested) {
         if (name.isEmpty() && suggested != null) name = suggested
@@ -85,25 +91,26 @@ fun OnboardingScreen(state: AppState) {
     val trimmed = name.trim()
 
     fun next() {
+        if (working) return
         when (step) {
             1 -> {
-                working = true
-                scope.launch {
-                    if (trimmed != state.identity?.name) model.renameDevice(trimmed)
-                    working = false
-                    step = 2
+                val current = state.identity?.name
+                // Undispatched: the model marks the rename before the next frame.
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    if (trimmed != current) model.renameDevice(trimmed)
+                    model.showOnboardingPage(2)
                 }
             }
             STEPS - 1 -> {
                 // Receiving starts only now.
-                working = true
+                finishing = true
                 val value = choice
                 scope.launch {
                     model.finishOnboarding(value)
-                    working = false
+                    finishing = false
                 }
             }
-            else -> step += 1
+            else -> model.showOnboardingPage(step + 1)
         }
     }
 

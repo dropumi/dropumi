@@ -1376,6 +1376,35 @@ class AppModelTest {
         assertEquals("Not all files were deleted", s.model.state.value.banner?.title)
     }
 
+    /**
+     * Review of C1 (#4): the rename's in-progress flag lives in the model,
+     * so a screen recreated during a rename shows it and sees it end. A
+     * second rename while one runs is ignored.
+     */
+    @Test
+    fun renameInProgressIsHeldByTheModel() = runTest {
+        val s = makeModel(io = Dispatchers.IO)
+        s.model.start()
+        val gate = s.core.holdNext("setDeviceName")
+        val renaming = async { s.model.renameDevice("Studio tablet") }
+        gate.reached()
+        assertTrue(s.model.state.value.renaming)
+        s.model.renameDevice("Other name")
+        gate.open()
+        renaming.await()
+        assertFalse(s.model.state.value.renaming)
+        assertEquals("Studio tablet", s.model.state.value.identity?.name)
+    }
+
+    /** Review of C1 (#4): the onboarding page lives in the model, not in a screen's saved state. */
+    @Test
+    fun onboardingPageIsHeldByTheModel() = runTest {
+        val s = makeModel()
+        assertEquals(0, s.model.state.value.onboardingPage)
+        s.model.showOnboardingPage(2)
+        assertEquals(2, s.model.state.value.onboardingPage)
+    }
+
     @Test
     fun receivedSizesAreKeptForSave() = runTest {
         val dir = Files.createTempDirectory("received").toFile().also(roots::add)

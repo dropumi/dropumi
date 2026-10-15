@@ -37,6 +37,7 @@ import io.github.dropumi.ui.design.ScreenColumn
 import io.github.dropumi.ui.design.ScreenHeader
 import io.github.dropumi.ui.design.SectionLabel
 import io.github.dropumi.ui.design.SoftPill
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,21 +49,23 @@ fun ThisDeviceScreen(state: AppState) {
     val confirmations = LocalConfirmations.current
     val c = DS.colors
     var name by rememberSaveable { mutableStateOf("") }
-    var saving by rememberSaveable { mutableStateOf(false) }
+    // The core's name the field last took: a recreated screen keeps what was typed.
+    var taken by rememberSaveable { mutableStateOf<String?>(null) }
+    // Held by the model, not the screen: the rename outlives a recreated screen.
+    val saving = state.renaming
     val current = state.identity?.name
-    LaunchedEffect(current) {
-        if (current != null && !saving) name = current
+    LaunchedEffect(current, saving) {
+        if (current != null && !saving && current != taken) {
+            name = current
+            taken = current
+        }
     }
     val trimmed = name.trim()
 
     fun save() {
-        if (trimmed.isEmpty() || trimmed == current) return
-        saving = true
-        scope.launch {
-            model.renameDevice(trimmed)
-            name = model.state.value.identity?.name ?: trimmed
-            saving = false
-        }
+        if (trimmed.isEmpty() || trimmed == current || saving) return
+        // Undispatched: the model marks the rename before the next frame.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { model.renameDevice(trimmed) }
     }
 
     ScreenColumn {

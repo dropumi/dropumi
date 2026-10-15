@@ -192,6 +192,7 @@ class FakeCoreClient : CoreClient {
 
     override fun setDeviceName(name: String): IdentityInfo {
         fail("setDeviceName")
+        gate("setDeviceName")
         synchronized(lock) { deviceName = name }
         failAfterApplying("setDeviceName")
         return identity()

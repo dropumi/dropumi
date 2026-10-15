@@ -158,6 +158,10 @@ data class AppState(
      * and applied once it is over.
      */
     val pairingWindowActive: Boolean = false,
+    /** A rename of this device is under way (it stops and restarts the receiver). */
+    val renaming: Boolean = false,
+    /** The onboarding page on screen; kept here so a recreated screen shows the same one. */
+    val onboardingPage: Int = 0,
 ) {
     /** The prompt to show now. */
     val currentPrompt: Prompt? get() = prompts.firstOrNull()
@@ -256,6 +260,8 @@ class AppModel(
     private var resumeExpected = false
     private var resumeEpoch = 0
 
+    private var renamesUnderWay = 0
+
     /**
      * Events for an operation the model does not know yet, kept while a
      * start call is under way: the core may report on the operation (a
@@ -334,9 +340,25 @@ class AppModel(
         }
     }
 
+    /**
+     * Renames this device: stops the receiver, saves the name, starts the
+     * receiver again. [AppState.renaming] is true meanwhile; a call made
+     * while another rename runs is ignored.
+     */
     suspend fun renameDevice(name: String) {
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty() || renamesUnderWay > 0) return
+        renamesUnderWay += 1
+        update { copy(renaming = true) }
+        try {
+            renameNow(trimmed)
+        } finally {
+            renamesUnderWay -= 1
+            update { copy(renaming = renamesUnderWay > 0) }
+        }
+    }
+
+    private suspend fun renameNow(trimmed: String) {
         val wasReceiving = _state.value.receiver != null
         if (wasReceiving) stopReceivingAndWait()
         val before = _state.value.identity?.name
@@ -352,6 +374,9 @@ class AppModel(
         }
         if (wasReceiving) applyVisibility()
     }
+
+    /** Shows onboarding page [page]. */
+    fun showOnboardingPage(page: Int) = update { copy(onboardingPage = page) }
 
     suspend fun resetIdentity() {
         val wasReceiving = _state.value.receiver != null
