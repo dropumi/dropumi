@@ -16,6 +16,11 @@ val keystoreProperties = rootProject.file("keystore.properties").takeIf { it.isF
     Properties().apply { file.inputStream().use { load(it) } }
 }
 
+// The ABIs the APK ships. The ABI filter and the core check below use this
+// one list, so an APK never carries JNA's libjnidispatch for an ABI that has
+// no libdropumi_ffi.
+val coreAbis = listOf("arm64-v8a", "x86_64")
+
 android {
     namespace = "io.github.dropumi"
     compileSdk = 36
@@ -31,7 +36,7 @@ android {
         // 32-bit libjnidispatch; without the filter the APK could install on
         // a 32-bit device that has no libdropumi_ffi.
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += coreAbis
         }
     }
 
@@ -96,14 +101,26 @@ kotlin {
     jvmToolchain(17)
 }
 
-// The build refuses a missing or stale Rust core and never runs cargo
-// (scripts/android/check-core-artifacts.sh).
-val checkCoreArtifacts = tasks.register<Exec>("checkCoreArtifacts") {
-    description = "Checks that libdropumi_ffi.so was built from the current Rust sources."
-    commandLine("bash", rootProject.file("../../scripts/android/check-core-artifacts.sh").path)
-}
-tasks.named("preBuild") {
-    dependsOn(checkCoreArtifacts)
+// Every variant refuses a missing or stale Rust core, or one that lacks a
+// library for any ABI in coreAbis, and never runs cargo
+// (scripts/android/check-core-artifacts.sh). The check gets the variant's
+// build type, so a release build with a dev-profile core prints a warning.
+val checkCoreScript = rootProject.file("../../scripts/android/check-core-artifacts.sh").path
+androidComponents {
+    onVariants { variant ->
+        val suffix = variant.name.replaceFirstChar { it.uppercase() }
+        val coreBuildType = if (variant.buildType == "release") "release" else "debug"
+        val check = tasks.register<Exec>("checkCoreArtifacts$suffix") {
+            description = "Checks that libdropumi_ffi.so exists for ${coreAbis.joinToString()} " +
+                "and was built from the current Rust sources."
+            commandLine(
+                "bash", checkCoreScript,
+                "--abis", coreAbis.joinToString(","),
+                "--build-type", coreBuildType,
+            )
+        }
+        tasks.named { it == "pre${suffix}Build" }.configureEach { dependsOn(check) }
+    }
 }
 
 dependencies {

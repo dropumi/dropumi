@@ -144,10 +144,11 @@ bash scripts/ffi/build-apple.sh --profile dev          # --profile release for a
 swift test --package-path apps/apple/DropumiKit
 
 # Android: libdropumi_ffi.so for the app's jniLibs, with 16 KB pages, then the check.
-rustup target add aarch64-linux-android               # and x86_64-linux-android for the emulator
-bash scripts/ffi/build-android.sh --abis arm64-v8a    # finds the SDK and NDK 27.1.12297006 itself
+# The app ships arm64-v8a and x86_64 and its build refuses a core that lacks either one.
+rustup target add aarch64-linux-android x86_64-linux-android
+bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile dev   # --profile release for release APKs; finds the NDK itself
 bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
-bash scripts/android/check-core-artifacts.sh          # the stamp matches the sources; the app build runs it, never cargo
+bash scripts/android/check-core-artifacts.sh --abis arm64-v8a,x86_64   # the app build runs it per variant, never cargo
 
 # Kotlin binding tests on the host JVM (they load target/debug/libdropumi_ffi).
 cargo build --locked -p dropumi-ffi --lib
