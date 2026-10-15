@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 
 use dropumi_ffi::{
     AcceptMode, CancelledBy, CodePurpose, Direction, DropumiError, ErrorCode, ForeignFile,
-    NodeEvent, OperationResult, PairingResult, Prompt, ReceiveOptions, ReceivePolicy,
-    ReceiverStopReason, SendItem, SendOptions, SendTarget, TransferStatus,
+    NodeEvent, OperationResult, PairingResult, Prompt, PromptCloseReason, ReceiveOptions,
+    ReceivePolicy, ReceiverStopReason, SendItem, SendOptions, SendTarget, TransferStatus,
 };
 use support::*;
 
@@ -301,6 +301,51 @@ fn pairing_one_denies_stores_nothing() {
     assert!(matches!(
         pairing_finished(&mut b),
         PairingResult::Failed { .. }
+    ));
+    assert!(a.node.trusted_devices().unwrap().is_empty());
+    assert!(b.node.trusted_devices().unwrap().is_empty());
+}
+
+/// The other device's "no" withdraws this device's code prompt at once:
+/// nobody has to answer it, a late answer is refused, nothing is stored.
+#[test]
+fn pairing_peer_no_withdraws_the_code_prompt() {
+    let (mut a, mut b) = (node(), node());
+    b.node.open_pairing_window(1).unwrap();
+    let NodeEvent::PairingWindowOpened { port, .. } = b.events.wait("the window", |e| {
+        matches!(e, NodeEvent::PairingWindowOpened { .. })
+    }) else {
+        unreachable!()
+    };
+    a.node.pair_with(to(port)).unwrap();
+    let (Prompt::Code { id: ia, .. }, Prompt::Code { id: ib, .. }) =
+        (a.events.prompt(), b.events.prompt())
+    else {
+        panic!("expected code prompts");
+    };
+    a.node.answer_sas(ia, false).unwrap();
+    let NodeEvent::PromptClosed { reason, .. } = b.events.wait(
+        "b's prompt to close",
+        |e| matches!(e, NodeEvent::PromptClosed { id, .. } if *id == ib),
+    ) else {
+        unreachable!()
+    };
+    assert_eq!(reason, PromptCloseReason::Withdrawn);
+    assert!(matches!(
+        pairing_finished(&mut b),
+        PairingResult::Failed {
+            error: ErrorCode::PairingRejected
+        }
+    ));
+    assert!(matches!(
+        pairing_finished(&mut a),
+        PairingResult::Failed {
+            error: ErrorCode::PairingRejected
+        }
+    ));
+    assert!(matches!(
+        b.node.answer_sas(ib, true),
+        Err(DropumiError::PromptNotFound)
     ));
     assert!(a.node.trusted_devices().unwrap().is_empty());
     assert!(b.node.trusted_devices().unwrap().is_empty());
