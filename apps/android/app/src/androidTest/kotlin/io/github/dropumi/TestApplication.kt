@@ -34,6 +34,10 @@ class TestApplication : Application(), AppGraphHost {
     lateinit var fakeCore: FakeCoreClient
         private set
 
+    /** The fake graph's documents: they accept every URI and record every read attempt. */
+    lateinit var documents: RecordingDocuments
+        private set
+
     override val graph: AppGraph by lazy {
         when (val choice = InstrumentationRegistry.getArguments().getString(APP_ARGUMENT) ?: FAKE) {
             FAKE -> fakeGraph()
@@ -45,6 +49,7 @@ class TestApplication : Application(), AppGraphHost {
         val paths = AppPaths.under(File(noBackupFilesDir, "uitest-" + UUID.randomUUID()))
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val core = FakeCoreClient().also { fakeCore = it }
+        val docs = RecordingDocuments().also { documents = it }
         val pendingShare = PendingShare()
         val loader = AppLoader(scope, Dispatchers.IO) {
             AppModel(
@@ -53,6 +58,7 @@ class TestApplication : Application(), AppGraphHost {
                 HistoryStore(paths.historyFile),
                 scope,
                 Dispatchers.IO,
+                documents = docs,
                 pendingShare = pendingShare,
             )
         }
