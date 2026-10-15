@@ -242,8 +242,9 @@ pub trait TrustStore: Send + Sync {
     ///
     /// `merge` runs while the store's lock is held: it must not call back
     /// into this store's write methods (`upsert`, `upsert_with`, `remove`,
-    /// `touch`), which take the same lock and would deadlock. It receives
-    /// the current entry, so it has no reason to read the store either.
+    /// `touch`, `rename`), which take the same lock and would deadlock. It
+    /// receives the current entry, so it has no reason to read the store
+    /// either.
     ///
     /// # Errors
     /// [`StoreError`] for I/O, corruption or unsafe permissions, or if the
@@ -277,7 +278,8 @@ pub trait TrustStore: Send + Sync {
     /// device back. The fingerprint, key, method and dates are unchanged.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// alias is stored but the directory sync failed.
     fn rename(&self, fp: &Fingerprint, alias: DeviceName) -> Result<bool, StoreError>;
 }
 
