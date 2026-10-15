@@ -105,6 +105,18 @@ class FakeCoreClient : CoreClient {
     private val trustedList = mutableListOf<TrustedDeviceInfo>()
     private var deviceName = "Dropumi-1A2B"
     private var receiving: ReceiverInfo? = null
+
+    /**
+     * Whether the receiver runs and accepts, as in the core: from
+     * startReceiving until stopAccepting or stopReceiving. Only then does
+     * cancelIncoming find a transfer. The core drops the receiver's
+     * canceller once the receiver stops accepting (`stop_receiver` in
+     * crates/ffi/src/node.rs), so a transfer that keeps a stopping receiver
+     * alive cannot be cancelled; this follows the core until it keeps the
+     * canceller while the receiver drains.
+     */
+    private var receiverAccepting = false
+
     private val nearbyTable = mutableListOf<NearbyPeer>()
     private val gates = mutableMapOf<String, CallGate>()
     private val duringCall = mutableMapOf<String, (ULong) -> List<NodeEvent>>()
@@ -265,12 +277,16 @@ class FakeCoreClient : CoreClient {
             accept = options.accept,
             everyoneUntil = null,
         )
-        synchronized(lock) { receiving = info }
+        synchronized(lock) {
+            receiving = info
+            receiverAccepting = true
+        }
         return info
     }
 
     override fun stopAccepting() {
         note(Call.StopAccepting)
+        synchronized(lock) { receiverAccepting = false }
         if (stopAcceptingEndsReceiver) {
             synchronized(lock) { receiving = null }
             emit(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED))
@@ -279,7 +295,10 @@ class FakeCoreClient : CoreClient {
 
     override fun stopReceiving() {
         note(Call.StopReceiving)
-        synchronized(lock) { receiving = null }
+        synchronized(lock) {
+            receiving = null
+            receiverAccepting = false
+        }
     }
 
     override fun setReceivePolicy(policy: ReceivePolicy, accept: AcceptMode): ReceiverInfo {
@@ -287,9 +306,10 @@ class FakeCoreClient : CoreClient {
         return ReceiverInfo(47321u, null, policy, accept, null)
     }
 
+    /** True only while the receiver accepts (see [receiverAccepting]), as the core answers. */
     override fun cancelIncoming(transferId: String): Boolean {
         note(Call.CancelIncoming(transferId))
-        return true
+        return synchronized(lock) { receiverAccepting }
     }
 
     override fun answerOffer(promptId: ULong, accept: Boolean) {

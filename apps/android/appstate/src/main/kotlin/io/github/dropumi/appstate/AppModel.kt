@@ -798,13 +798,38 @@ class AppModel(
     }
 
 
-    fun cancel(record: TransferRecord) {
+    /**
+     * Cancels [record] (the card's Cancel). A send's operation always takes
+     * the cancel. A receive is cancelled by the core's receiver, which can
+     * say no: once Dropumi has left the screen and stopped accepting, the
+     * core no longer holds the canceller of the transfers that keep its
+     * stopping receiver alive, and they go on until they end. A notice then
+     * says that the transfer could not be cancelled, instead of nothing
+     * happening (no notice if the transfer has ended meanwhile).
+     */
+    fun cancel(record: TransferRecord) = cancel(record, sayIfNotCancelled = true)
+
+    private fun cancel(record: TransferRecord, sayIfNotCancelled: Boolean) {
         val handle = record.operation?.let { operations[it] }
         val transferId = record.transferId
         when {
             handle != null -> scope.launch { quietly { handle.cancel() } }
-            transferId != null -> scope.launch { quietly { core.cancelIncoming(transferId) } }
+            transferId != null -> scope.launch {
+                val cancelled = quietly { core.cancelIncoming(transferId) } == true
+                if (!cancelled && sayIfNotCancelled && _state.value.active.any(incoming(transferId))) noticeNotCancelled()
+            }
         }
+    }
+
+    private fun noticeNotCancelled() = update {
+        copy(
+            banner = Banner(
+                Banner.Style.WARNING,
+                "Could not cancel",
+                "Dropumi could not cancel this transfer. A transfer that was already running when you left the app " +
+                    "continues until it ends.",
+            ),
+        )
     }
 
     // Prompts
@@ -1431,13 +1456,18 @@ class AppModel(
     }
 
     /**
-     * The system's time limit for the transfer service ran out (API 35+):
-     * every running transfer is cancelled, as the user would. Offers still
-     * waiting for this user's answer stay.
+     * The system's time limit for the transfer service ran out (API 35+;
+     * only in the background, so accepting has stopped). Every running send
+     * is cancelled, and the core is asked to cancel every running receive;
+     * offers still waiting for this user's answer stay. The core cannot
+     * cancel a receive that keeps its stopping receiver alive (see
+     * [cancel]): that receive goes on without the service, and its card says
+     * it may pause. No notice: the user did not ask to cancel.
      */
     fun transfersTimedOut() {
         transferServiceRefused()
-        _state.value.active.filter { it.phase != TransferPhase.WaitingForAnswer }.forEach(::cancel)
+        _state.value.active.filter { it.phase != TransferPhase.WaitingForAnswer }
+            .forEach { cancel(it, sayIfNotCancelled = false) }
     }
 
     /** Whether notifications can be seen now (after the permission request, or back from Settings). */

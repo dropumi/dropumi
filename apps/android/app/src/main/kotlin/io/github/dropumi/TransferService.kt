@@ -16,7 +16,10 @@
 // - It stops with the newest start id only, so a start on its way is never
 //   cut off; that start goes to the foreground again.
 // - The system's dataSync time limit (API 35+, onTimeout) cancels every
-//   running transfer, and the service stops at once.
+//   running send and asks the core to cancel every running receive, and the
+//   service stops at once. The core cannot cancel a receive that was
+//   already running when accepting stopped (AppModel.transfersTimedOut);
+//   that receive goes on without the service.
 package io.github.dropumi
 
 import android.Manifest
@@ -151,7 +154,10 @@ class TransferService : Service() {
         stopSelfResult(lastStartId)
     }
 
-    /** The system's dataSync time limit ran out (API 35+): cancel every running transfer and stop now. */
+    /**
+     * The system's dataSync time limit ran out (API 35+): cancel what can be
+     * cancelled (AppModel.transfersTimedOut) and stop now.
+     */
     override fun onTimeout(startId: Int, fgsType: Int) {
         model?.transfersTimedOut()
         stopNow()

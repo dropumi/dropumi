@@ -10,13 +10,16 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.dropumi.FakeScenarioRule
 import io.github.dropumi.MainActivity
 import io.github.dropumi.appstate.ServiceStart
 import io.github.dropumi.ffi.NodeEvent
+import io.github.dropumi.testsupport.FakeCoreClient
 import io.github.dropumi.testsupport.FakeServiceStarter
 import io.github.dropumi.testsupport.Fixtures
 import io.github.dropumi.testsupport.Scenario
@@ -81,6 +84,28 @@ class TransfersBackgroundTest {
             compose.waitUntil(TIMEOUT_MS) { exists("transfers.notifications") }
             compose.onNodeWithTag("transfers.notifications.dismiss").performClick()
             compose.waitUntil(TIMEOUT_MS) { !exists("transfers.notifications") }
+        }
+    }
+
+    /**
+     * Left and came back while a receive runs: the fake core, like the real
+     * one, cannot cancel it any more (the stopping receiver has no
+     * canceller), and Cancel says "Could not cancel" instead of nothing.
+     */
+    @Test
+    fun cancelAfterLeavingShowsCouldNotCancel() {
+        transferOnTransfers().use { scenario ->
+            scenario.moveToState(Lifecycle.State.CREATED)
+            compose.waitUntil(TIMEOUT_MS) { fake.core.calls.contains(FakeCoreClient.Call.StopAccepting) }
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            compose.waitUntil(TIMEOUT_MS) { fake.app.graph.loader.model?.state?.value?.isInBackground == false }
+            compose.waitUntil(TIMEOUT_MS) { exists("transfer.cancel") }
+            assertTrue(!exists("banner"))
+            compose.onNodeWithTag("transfer.cancel").performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("banner") }
+            compose.onNodeWithText("Could not cancel", useUnmergedTree = true).assertExists()
+            assertTrue(fake.core.calls.contains(FakeCoreClient.Call.CancelIncoming("tt")))
+            assertTrue(exists("transfer.card"))
         }
     }
 

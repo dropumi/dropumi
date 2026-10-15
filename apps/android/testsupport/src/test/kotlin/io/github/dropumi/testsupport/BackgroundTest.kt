@@ -10,6 +10,7 @@ package io.github.dropumi.testsupport
 
 import io.github.dropumi.appstate.AppLoader
 import io.github.dropumi.appstate.AppModel
+import io.github.dropumi.appstate.Banner
 import io.github.dropumi.appstate.GrantSpec
 import io.github.dropumi.appstate.HistoryEntry
 import io.github.dropumi.appstate.HistoryStore
@@ -395,13 +396,20 @@ class BackgroundTest {
     }
 
     /**
-     * The system's time limit for the service ran out (API 35+): every
-     * running transfer is cancelled; an offer still waiting for this user's
-     * answer stays.
+     * The system's time limit for the service ran out (API 35+). That only
+     * happens in the background, so accepting has already stopped. Every
+     * running send is cancelled, and the core is asked to cancel every
+     * running receive; an offer still waiting for this user's answer stays.
+     * The core cannot cancel a receive once its receiver stops accepting (it
+     * drops the canceller; the fake does the same), so that receive goes on
+     * without the service and its card says it may pause. No notice: the
+     * user did not ask to cancel. Regression test: this used to run only in
+     * front, against a fake that always cancelled.
      */
     @Test
-    fun timeoutCancelsEveryRunningTransfer() = runTest {
+    fun timeoutCancelsSendsAndAsksTheCoreToCancelReceives() = runTest {
         val s = makeModel()
+        s.model.start()
         val op = s.sendOneFile()
         s.model.apply(
             listOf(
@@ -410,13 +418,84 @@ class BackgroundTest {
                 NodeEvent.OfferReceived("cc", Fixtures.peer(), 1u, 10u),
             ),
         )
+        s.model.enterBackground()
+        advanceUntilIdle()
+        assertEquals(1, s.core.count(FakeCoreClient.Call.StopAccepting))
         s.model.transfersTimedOut()
         advanceUntilIdle()
         assertTrue(requireNotNull(s.core.operation(op)).cancelled)
         assertEquals(listOf(FakeCoreClient.Call.CancelIncoming("bb")), s.core.calls.filterIsInstance<FakeCoreClient.Call.CancelIncoming>())
-        assertEquals(TransferServiceState.REFUSED, s.model.state.value.transferService)
-        val waiting = s.model.state.value.active.single { it.transferId == "cc" }
-        assertEquals(TransferPhase.WaitingForAnswer, waiting.phase)
+        val state = s.model.state.value
+        assertEquals(TransferServiceState.REFUSED, state.transferService)
+        assertEquals(TransferPhase.Transferring, state.active.single { it.transferId == "bb" }.phase)
+        assertTrue(state.transfersMayPause)
+        assertNull(state.banner)
+        assertEquals(TransferPhase.WaitingForAnswer, state.active.single { it.transferId == "cc" }.phase)
+    }
+
+    // Cancelling a receive
+
+    /** A receive that moves (an auto-accepted offer from a paired device). */
+    private fun Setup.receiveMoves(transferId: String = "aa") = model.apply(
+        listOf(NodeEvent.OfferReceived(transferId, Fixtures.peer(trusted = true), 1u, 10u), NodeEvent.TransferAccepted(null, transferId)),
+    )
+
+    /** While the receiver accepts, the core cancels the receive: no notice (its TransferFinished ends the card). */
+    @Test
+    fun cancelWhileReceivingShowsNoNotice() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        s.receiveMoves()
+        s.model.cancel(s.model.state.value.active.single())
+        advanceUntilIdle()
+        assertEquals(listOf(FakeCoreClient.Call.CancelIncoming("aa")), s.core.calls.filterIsInstance<FakeCoreClient.Call.CancelIncoming>())
+        assertNull(s.model.state.value.banner)
+    }
+
+    /**
+     * Back in front with a receive that was running when the app left: the
+     * receiver is still stopping, and the core can no longer cancel the
+     * transfer (it drops the canceller; the fake does the same). Cancel says
+     * so instead of doing nothing, and the transfer stays on screen.
+     * Regression test: the core's false answer used to be ignored.
+     */
+    @Test
+    fun cancelAfterLeavingSaysItCouldNotCancel() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        s.receiveMoves()
+        s.model.enterBackground()
+        advanceUntilIdle()
+        s.model.becomeActive()
+        advanceUntilIdle()
+        assertTrue(s.model.state.value.receiverStopping)
+        s.model.cancel(s.model.state.value.active.single())
+        advanceUntilIdle()
+        assertEquals(listOf(FakeCoreClient.Call.CancelIncoming("aa")), s.core.calls.filterIsInstance<FakeCoreClient.Call.CancelIncoming>())
+        val banner = requireNotNull(s.model.state.value.banner)
+        assertEquals(Banner.Style.WARNING, banner.style)
+        assertEquals("Could not cancel", banner.title)
+        assertEquals(TransferPhase.Transferring, s.model.state.value.active.single().phase)
+    }
+
+    /** The core said no because the receive had just ended: nothing to say. */
+    @Test
+    fun cancelOfAReceiveThatEndedMeanwhileSaysNothing() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        s.receiveMoves()
+        s.model.enterBackground()
+        advanceUntilIdle()
+        s.model.cancel(s.model.state.value.active.single())
+        // The receive ends before the core call runs.
+        s.model.apply(listOf(finished(null, Direction.INCOMING)))
+        advanceUntilIdle()
+        assertEquals(1, s.core.calls.count { it is FakeCoreClient.Call.CancelIncoming })
+        assertTrue(s.model.state.value.active.isEmpty())
+        assertNull(s.model.state.value.banner)
     }
 
     // Notifications
