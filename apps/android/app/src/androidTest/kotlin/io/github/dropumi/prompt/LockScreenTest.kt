@@ -4,7 +4,9 @@
 // tests (fake core): MainActivity runs on the fake core with temporary
 // folders, and an offer shows only because the scenario pushed it; these
 // results say nothing about the real core. The lock test changes the
-// device's lock screen setting for its duration and puts it back.
+// device's lock screen setting for its duration and puts it back;
+// scripts/android/ui-tests.sh's exit trap puts it back too (API 28+, where
+// the setting can be read), in case a run dies first.
 package io.github.dropumi.prompt
 
 import android.app.KeyguardManager
@@ -117,7 +119,9 @@ class LockScreenTest {
      * a PIN. Where the lock screen is disabled (the AVDs), it is enabled for
      * this test and disabled again after it. API 26-27 have no `locksettings
      * get-disabled`: there the setting shows only by locking, so a lock
-     * screen that does not come up is enabled the same way.
+     * screen that does not come up within [LOCK_TIMEOUT_MS] (the same wait
+     * as for the lock screen itself) is enabled the same way. The setting
+     * is disabled again afterwards only if this test enabled it.
      */
     @Test
     @UseScenario(Scenario.OFFER_UNVERIFIED)
@@ -127,24 +131,30 @@ class LockScreenTest {
         val power = requireNotNull(context.getSystemService(PowerManager::class.java))
         assertFalse("needs a device without a secure lock screen (it must be unlocked again)", keyguard.isDeviceSecure)
         // true or false; null where the command does not exist (API 26-27).
-        var lockDisabled = when (shell("locksettings get-disabled").trim()) {
+        val lockDisabled = when (shell("locksettings get-disabled").trim()) {
             "true" -> true
             "false" -> false
             else -> null
         }
+        // Set once this test has run `locksettings set-disabled false`: only
+        // then does it disable the lock screen again afterwards.
+        var enabledByTest = false
         launchShowing("prompt.offer").use { scenario ->
             try {
-                if (lockDisabled == true) shell("locksettings set-disabled false")
+                if (lockDisabled == true) {
+                    enabledByTest = true
+                    shell("locksettings set-disabled false")
+                }
                 sleepAndWake(power)
                 if (lockDisabled == null) {
                     val locks = try {
-                        compose.waitUntil(PROBE_MS) { keyguard.isKeyguardLocked }
+                        compose.waitUntil(LOCK_TIMEOUT_MS) { keyguard.isKeyguardLocked }
                         true
                     } catch (_: ComposeTimeoutException) {
                         false
                     }
-                    lockDisabled = !locks
                     if (!locks) {
+                        enabledByTest = true
                         shell("locksettings set-disabled false")
                         sleepAndWake(power)
                     }
@@ -178,7 +188,7 @@ class LockScreenTest {
             } finally {
                 shell("input keyevent KEYCODE_WAKEUP")
                 shell("wm dismiss-keyguard")
-                if (lockDisabled == true) shell("locksettings set-disabled true")
+                if (enabledByTest) shell("locksettings set-disabled true")
             }
             compose.waitUntil(TIMEOUT_MS) { !keyguard.isKeyguardLocked }
             compose.waitUntil(TIMEOUT_MS) {
@@ -202,9 +212,6 @@ class LockScreenTest {
 
     private companion object {
         const val TIMEOUT_MS = 10_000L
-
-        /** How long a lock screen that is enabled takes at most to come up (API 26-27, which cannot be asked). */
-        const val PROBE_MS = 5_000L
 
         /** Long enough for the lock screen to come up on a slow emulator. */
         const val LOCK_TIMEOUT_MS = 20_000L
