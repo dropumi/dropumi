@@ -30,7 +30,10 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -187,8 +190,7 @@ class AndroidInteropTest {
             val saved = File(receiveDir, name)
             fields["saved_as"] = name
             fields["sha256"] = sha256(saved.readBytes())
-            // App-private: under the app's own data, never shared storage.
-            fields["private"] = saved.canonicalPath.startsWith(app.noBackupFilesDir.canonicalPath + File.separator).toString()
+            fields += savedFileFacts(receiveDir, name)
         }
         fields["part_files"] = receiveDir.list().orEmpty().count { it.endsWith(".part") }.toString()
         status("finished", fields)
@@ -335,6 +337,31 @@ class AndroidInteropTest {
         throw AssertionError("timed out waiting for $what")
     }
 
+    /**
+     * What can fail about a received file: it is the entry [name] of the
+     * receive folder itself (its canonical path: no link, no `..`, no
+     * separator), a regular file (lstat: a link is not one) of this app's
+     * UID with mode 0600, in a folder (not a link) of this app's UID with
+     * mode 0700. This is the interop graph's receive folder
+     * (noBackupFilesDir/interop-<uuid>/received); the app's own layout
+     * (filesDir/received) is AppPathsTest's.
+     */
+    private fun savedFileFacts(dir: File, name: String): Map<String, String> {
+        val file = File(dir, name)
+        val canonical = file.canonicalFile
+        val f = Os.lstat(file.path)
+        val d = Os.lstat(dir.path)
+        return mapOf(
+            "in_receive_dir" to (canonical.parentFile == dir.canonicalFile && canonical.name == name).toString(),
+            "regular_file" to OsConstants.S_ISREG(f.st_mode).toString(),
+            "file_mode" to "%o".format(f.st_mode and PERMISSION_BITS),
+            "file_owner_is_app" to (f.st_uid == Process.myUid()).toString(),
+            "dir_is_folder" to OsConstants.S_ISDIR(d.st_mode).toString(),
+            "dir_mode" to "%o".format(d.st_mode and PERMISSION_BITS),
+            "dir_owner_is_app" to (d.st_uid == Process.myUid()).toString(),
+        )
+    }
+
     /** A folder for the files the app sends, next to the interop graph's folders. */
     private fun sourceDir(): File =
         File(app.interopPaths.configDir.parentFile, "sources").apply { check(isDirectory || mkdirs()) }
@@ -363,6 +390,9 @@ class AndroidInteropTest {
         const val CLI_FP = "dropumi_cli_fp"
         const val STEP_MS = 25_000L
         const val POLL_MS = 50L
+
+        /** rwxrwxrwx. */
+        const val PERMISSION_BITS = 0b111_111_111
 
         /** The fingerprint hint in an advertisement: the first 8 characters. */
         const val HINT_LENGTH = 8

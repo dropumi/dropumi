@@ -425,10 +425,20 @@ fn cli_sends_to_app_after_code() {
     assert_eq!(finished["outcome"], "completed");
     assert_eq!(finished["sha256"], sha256(&f).as_str());
     assert_eq!(finished["part_files"], "0");
-    assert_eq!(
-        finished["private"], "true",
-        "saved in the app's private folder"
-    );
+    // The saved file is the receive folder's own entry, not a link, the
+    // app's, 0600 in a 0700 folder of the app's (AndroidInteropTest's
+    // savedFileFacts).
+    for (fact, want) in [
+        ("in_receive_dir", "true"),
+        ("regular_file", "true"),
+        ("file_mode", "600"),
+        ("file_owner_is_app", "true"),
+        ("dir_is_folder", "true"),
+        ("dir_mode", "700"),
+        ("dir_owner_is_app", "true"),
+    ] {
+        assert_eq!(finished[fact], want, "{fact}: {finished}");
+    }
     app.finish();
     assert_eq!(
         shared_downloads(),
