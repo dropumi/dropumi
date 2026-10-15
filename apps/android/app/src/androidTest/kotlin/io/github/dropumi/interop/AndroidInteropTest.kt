@@ -66,6 +66,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -224,6 +226,7 @@ class AndroidInteropTest {
     fun unpairedSenderRefused() = play { model ->
         model.finishOnboarding(ReceiveVisibility.PAIRED_ONLY)
         val receiver = until(model, "receiving") { it.receiver }
+        assertNoBanner(model)
         status("listening", mapOf("port" to receiver.port.toString()))
         awaitRefusal(model)
     }
@@ -239,6 +242,7 @@ class AndroidInteropTest {
         val receiver = until(model, "receiving") { it.receiver }
         val gateOpen = model.state.value.advertising != AdvertiseState.GateClosed
         if (gateOpen) until(model, "the advertisement") { it.advertising.takeIf { a -> a == AdvertiseState.Registered } }
+        assertNoBanner(model)
         status(
             "advertising",
             mapOf(
@@ -286,12 +290,40 @@ class AndroidInteropTest {
         return entry
     }
 
-    /** A refused sender shows a notice, never a prompt or a transfer. */
+    /**
+     * The model shows the refusal notice only when no other banner is up
+     * (AppModel.noticeRefused), so a banner already showing would hide it:
+     * checked before the harness lets the sender connect. The title is the
+     * app's own text.
+     */
+    private fun assertNoBanner(model: AppModel) {
+        assertNull("a banner already showing would hide the refusal notice", model.state.value.banner?.title)
+    }
+
+    /**
+     * A refused sender shows the refusal notice, never a prompt or a
+     * transfer. Waits for one of the refusal titles (not any banner), and
+     * looks at every state on the way for a prompt or a transfer. The notice
+     * comes when the core closes the refused session, so nothing of that
+     * session can follow it.
+     */
     private suspend fun awaitRefusal(model: AppModel) {
-        val banner = until(model, "the refused sender") { it.banner }
-        status("refused", mapOf("title" to banner.title))
-        assertTrue("a sender that isn't paired never reaches a prompt", model.state.value.prompts.isEmpty())
-        assertTrue(model.state.value.history.isEmpty())
+        var prompted = false
+        var transferred = false
+        val notice = until(model, "the refusal notice") { s ->
+            if (s.prompts.isNotEmpty()) prompted = true
+            if (s.history.isNotEmpty()) transferred = true
+            s.banner?.takeIf { it.title in REFUSAL_TITLES }
+        }
+        val after = model.state.value
+        prompted = prompted || after.prompts.isNotEmpty()
+        transferred = transferred || after.history.isNotEmpty()
+        status(
+            "refused",
+            mapOf("title" to notice.title, "prompted" to prompted.toString(), "transferred" to transferred.toString()),
+        )
+        assertFalse("a sender that isn't paired never reaches a prompt", prompted)
+        assertFalse("a sender that isn't paired never starts a transfer", transferred)
     }
 
     /**
@@ -390,6 +422,9 @@ class AndroidInteropTest {
         const val CLI_FP = "dropumi_cli_fp"
         const val STEP_MS = 25_000L
         const val POLL_MS = 50L
+
+        /** The two refusal notices AppModel.noticeRefused shows (without and with the peer). */
+        val REFUSAL_TITLES = setOf("A device was refused", "A device that isn't paired tried to send")
 
         /** rwxrwxrwx. */
         const val PERMISSION_BITS = 0b111_111_111

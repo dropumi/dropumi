@@ -53,6 +53,13 @@ const STATUS_PREFIX: &str = "INSTRUMENTATION_STATUS: DROPUMI_STATUS=";
 /// Starting the instrumentation and opening the core can take a while.
 const LAUNCH: Duration = Duration::from_secs(45);
 
+/// The app's refusal notices (`AppModel.noticeRefused`): without and with
+/// the peer.
+const REFUSAL_TITLES: [&str; 2] = [
+    "A device was refused",
+    "A device that isn't paired tried to send",
+];
+
 fn enabled() -> bool {
     if std::env::var("DROPUMI_TEST_ANDROID").as_deref() == Ok("1") {
         return true;
@@ -513,7 +520,21 @@ fn refused_by_app(app: &AppTest, app_fp: &str, port: u16) {
     let mut tx = sender(&cli, std::slice::from_ref(&f), host_port, &[]);
     assert_eq!(tx.wait_exit(EXIT), 6, "the app refused the unpaired sender");
     assert_eq!(tx.wait_event("failed")["code"], "not_authorized");
-    app.wait("refused", STEP);
+    // The refusal notice itself (AppModel.noticeRefused), not any banner;
+    // no prompt or transfer on the way to it.
+    let refused = app.wait("refused", STEP);
+    assert!(
+        REFUSAL_TITLES.contains(&refused["title"].as_str().unwrap_or("")),
+        "the app showed the refusal notice: {refused}"
+    );
+    assert_eq!(
+        refused["prompted"], "false",
+        "no prompt for the refused sender"
+    );
+    assert_eq!(
+        refused["transferred"], "false",
+        "no transfer from the refused sender"
+    );
 }
 
 fn unpaired_sender_refused() {
