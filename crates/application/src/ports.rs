@@ -8,7 +8,7 @@
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use dropumi_domain::device::DeviceName;
 use dropumi_domain::discovery::DiscoveredPeer;
@@ -104,8 +104,18 @@ pub struct SourceMeta {
     pub name: String,
     /// Size in bytes.
     pub size: u64,
-    /// Modification time (Unix seconds), if available.
+    /// Modification time (Unix seconds), if available. This is the value
+    /// sent on the wire.
     pub modified: Option<i64>,
+    /// Local only, never sent on the wire: the modification time at the
+    /// file system's full resolution, if available. Detects an edit within
+    /// the same second, which `modified` cannot.
+    pub local_modified: Option<SystemTime>,
+    /// Local only, never sent on the wire: the inode change time (Unix
+    /// seconds and nanoseconds), where the platform has one. Any metadata
+    /// change (a `chmod`, for example) also counts as a change of the file,
+    /// which is the safe direction.
+    pub local_changed: Option<(i64, i64)>,
 }
 
 /// Reads files to send.

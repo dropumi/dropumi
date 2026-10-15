@@ -255,6 +255,8 @@ impl FileSource for MemSource {
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             size: data.len() as u64,
             modified: Some(1),
+            local_modified: None,
+            local_changed: None,
         })
     }
 

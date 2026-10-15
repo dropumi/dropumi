@@ -22,16 +22,35 @@ fn meta_of(path: &Path, meta: &std::fs::Metadata) -> Result<SourceMeta, SourceEr
         .file_name()
         .map(wire_name_from_local)
         .ok_or_else(|| SourceError::NotAFile(path.display().to_string()))?;
-    let modified = meta
-        .modified()
-        .ok()
+    let local_modified = meta.modified().ok();
+    let modified = local_modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
+    #[cfg(unix)]
+    let local_changed = {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.ctime(), meta.ctime_nsec()))
+    };
+    #[cfg(not(unix))]
+    let local_changed = None;
     Ok(SourceMeta {
         name,
         size: meta.len(),
         modified,
+        local_modified,
+        local_changed,
     })
+}
+
+/// Whether `now` still describes the file `expected` was taken from: same
+/// size, same wire time, and the same full-resolution modification time
+/// and (Unix) inode change time, so an edit within the same second that
+/// keeps the size is still a change.
+fn same_file_state(now: &SourceMeta, expected: &SourceMeta) -> bool {
+    now.size == expected.size
+        && now.modified == expected.modified
+        && now.local_modified == expected.local_modified
+        && now.local_changed == expected.local_changed
 }
 
 fn unreadable(path: &Path, e: &std::io::Error) -> SourceError {
@@ -61,7 +80,7 @@ impl FileSource for LocalFileSource {
             .map_err(|e| unreadable(path, &e))?;
         let meta = file.metadata().await.map_err(|e| unreadable(path, &e))?;
         let now = meta_of(path, &meta)?;
-        if now.size != expected.size || now.modified != expected.modified {
+        if !same_file_state(&now, expected) {
             return Err(SourceError::Changed);
         }
         Ok(file)
@@ -69,9 +88,46 @@ impl FileSource for LocalFileSource {
 
     async fn unchanged(&self, path: &Path, expected: &SourceMeta) -> bool {
         match tokio::fs::metadata(path).await {
-            Ok(m) => meta_of(path, &m)
-                .is_ok_and(|now| now.size == expected.size && now.modified == expected.modified),
+            Ok(m) => meta_of(path, &m).is_ok_and(|now| same_file_state(&now, expected)),
             Err(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn set_mtime(path: &Path, at: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    }
+
+    /// An edit that keeps the size, within the same second as the previous
+    /// write, is still a change (the wire time has whole seconds only).
+    #[tokio::test]
+    async fn same_size_subsecond_edit_detected() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("a.txt");
+        let second = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::write(&path, b"aaaa").unwrap();
+        set_mtime(&path, second + Duration::from_millis(100));
+        let source = LocalFileSource;
+        let meta = source.meta(&path).await.unwrap();
+
+        std::fs::write(&path, b"bbbb").unwrap();
+        set_mtime(&path, second + Duration::from_millis(600));
+
+        assert!(matches!(
+            source.open(&path, &meta).await,
+            Err(SourceError::Changed)
+        ));
+        assert!(!source.unchanged(&path, &meta).await);
     }
 }
