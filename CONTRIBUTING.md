@@ -150,6 +150,7 @@ cargo deny --locked check                                                       
 | `test (ubuntu-latest)`, `test (macos-latest)`, `test (windows-latest)` | The full test suite on each OS |
 | `build (aarch64-linux-android)`, `build (aarch64-apple-ios)` | Builds the core library crates only (`--exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen --no-default-features`). Nothing is linked into an app or run. |
 | `ffi (apple)` | macOS: the committed bindings are up to date, the XCFramework builds (iOS device, iOS simulator, macOS), and `swift test` runs the Swift binding tests. Not required. |
+| `apple (app)` | macOS with Xcode 27 (the job fails without it): the XCFramework builds (iOS simulator, macOS), `swift test` runs the `DropumiKit` package tests, xcodegen generates the Xcode project, the app's hosted tests and UI state tests (fake core) run on an iPhone 17 simulator, and the macOS app builds unsigned. The macOS UI tests and the opt-in interop tests do not run here. Not required. |
 | `ffi (android)` | Linux: `libdropumi_ffi.so` builds for arm64-v8a and x86_64 with 16 KB pages, and Gradle runs the Kotlin binding tests on the host JVM. Not required. |
 | `cargo-deny (advisories)`, `cargo-deny (bans licenses sources)` | The cargo-deny checks, split into two jobs |
 | `zizmor`, `actionlint` | Workflow security and syntax checks (locally: `zizmor --offline .github/`; actionlint runs from a pinned Docker image) |
@@ -172,8 +173,8 @@ The full rules are in [AGENTS.md](AGENTS.md) and [ARCHITECTURE.md](ARCHITECTURE.
   // SPDX-License-Identifier: MPL-2.0
   ```
 
-  CI fails without it. TOML, YAML and shell files start with `# SPDX-License-Identifier: MPL-2.0` (shell scripts on line 2, after the shebang; generated `pnpm-lock.yaml` files are exempt); CI checks them too.
-- **Dependencies point inward:** `dropumi-domain` ← `dropumi-protocol` ← `dropumi-application` ← `dropumi-infra` ← `dropumi-cli`. `scripts/ci/check-architecture.sh` enforces this.
+  CI fails without it. TOML, YAML and shell files start with `# SPDX-License-Identifier: MPL-2.0` (shell scripts on line 2, after the shebang; generated `pnpm-lock.yaml` files are exempt). Swift, Kotlin and `.kts` files start with `// SPDX-License-Identifier: MPL-2.0` (line 2 of `Package.swift`; the generated bindings are exempt). CI checks them too.
+- **Dependencies point inward:** `dropumi-domain` ← `dropumi-protocol` ← `dropumi-application` ← `dropumi-infra` ← `dropumi-cli` and `dropumi-ffi`. The two composition roots never depend on each other, except for the CLI's dev-dependency on `dropumi-ffi` for interop tests. `scripts/ci/check-architecture.sh` enforces this.
 - **Unsafe code is forbidden.** `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!` and `mem::forget` are denied outside tests. Use typed errors with `thiserror`.
 - **Never weaken a security check to make a test pass.**
 - **Tests:**

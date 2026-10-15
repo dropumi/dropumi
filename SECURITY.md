@@ -1,6 +1,6 @@
 # Security policy
 
-Last updated: 2026-10-13
+Last updated: 2026-10-15
 
 ## Project status
 
@@ -13,7 +13,7 @@ Dropumi is **pre-alpha** software.
 The design, threat model and accepted residual risks are documented in:
 
 - [`docs/protocol/threat-model.md`](docs/protocol/threat-model.md)
-- [`docs/adr/`](docs/adr/), especially ADR-0002 (secure channel), ADR-0003 (identity and key storage), ADR-0004 (pairing and trust) and ADR-0006 (integrity and receiver filesystem safety).
+- [`docs/adr/`](docs/adr/), especially ADR-0002 (secure channel), ADR-0003 (identity and key storage), ADR-0004 (pairing and trust), ADR-0006 (integrity and receiver filesystem safety), ADR-0009 (the FFI facade for the apps), ADR-0012 (the Apple app) and ADR-0014 (key storage in the apps).
 
 ## Supported versions
 
@@ -41,9 +41,9 @@ Reports are triaged by the project maintainers, [@fahmialfareza](https://github.
 
 ### What to include
 
-- The commit SHA, or the output of `dropumi --version`.
+- The commit SHA the build came from. Also give the output of `dropumi --version` for the CLI, or the version shown at the bottom of the app's **Settings** screen for the app. There are no releases yet, so a version number alone does not identify a build.
 - The operating system, its version and the CPU architecture of each device involved.
-- The affected area, for example the handshake, pairing, record layer, CBOR decoding, file finalization, the CLI, CI or a dependency.
+- The affected area, for example the handshake, pairing, record layer, CBOR decoding, file finalization, the CLI, the app facade (`dropumi-ffi`), the Apple app, its Share Extension or its Bonjour adapter, the Kotlin bindings, CI or a dependency.
 - Minimal steps to reproduce. Use synthetic test files and throwaway identities created in temporary configuration directories, for example `dropumi --config-dir "$(mktemp -d)" identity show`.
 - The impact you expect, and a suggested fix if you have one.
 
@@ -83,6 +83,11 @@ If a proof of concept needs any of these, generate throwaway values in a tempora
 - Local key and trust storage, including the permission checks described below.
 - mDNS discovery: spoofed records and TXT parsing.
 - The `dropumi` CLI.
+- The app facade `dropumi-ffi` (`crates/ffi`, UniFFI, ADR-0009) and its generated Swift and Kotlin bindings: prompts (answered by prompt ID, never by the facade itself), the event mailbox, the refusal to send Dropumi's own configuration files, and the discovery rules (TXT parsing, IPv4 only, a cap of 256 devices, and pinning a paired device's key when a send goes to a listed device).
+- The Apple app for iPhone, iPad and Mac (`apps/apple`, ADR-0012): the consent and code screens (no automatic answers, no trust from an accepted offer, "Looks like" labels, peer strings shown literally), the identity folder (ADR-0014), the receive folders and the Mac menu-bar receiver.
+- The app's Share Extension. It never loads the Rust core or uses the network. It copies shared items into an inbox in the App Group `group.io.github.dropumi`, and the app checks each batch against its manifest before it offers the files for sending.
+- The app's Bonjour discovery adapter (`apps/apple/DropumiKit/Sources/DropumiCore/BonjourDiscovery.swift`). It registers a proxy with a random host name, so that the system's host name is never the SRV target.
+- The Android Kotlin bindings (`apps/android/core-bindings`). There is no Android app yet.
 - CI workflows, the dependency policy (`deny.toml`) and the supply chain.
 
 **Out of scope**
@@ -92,18 +97,26 @@ If a proof of concept needs any of these, generate throwaway values in a tempora
 - Network flooding that any host on the same network could do to any service.
 - Reports from automated scanners with no demonstrated impact.
 - Forks and third-party builds.
-- Vulnerabilities in upstream crates, such as `snow`, `blake3` or `mdns-sd`. Please report these to the upstream project. If Dropumi is affected, tell us through the private form.
+- Apps that you granted accessibility (UI automation) access to, which can drive Dropumi's screens like a user.
+- Vulnerabilities in upstream crates, such as `snow`, `blake3`, `mdns-sd` or `uniffi`. Please report these to the upstream project. If Dropumi is affected, tell us through the private form.
 
 **Known limitations (documented, not vulnerabilities)**
 
 These are listed in the threat model. A report showing that one of them is worse than documented is welcome.
 
 - The responder's static public key can be probed by anyone who connects.
-- mDNS TXT records (device name and an 8-character fingerprint hint) allow devices to be tracked on the local network. `receive --no-mdns` and `pair --listen --no-mdns` do not advertise.
-- The identity key is stored in a plaintext file protected only by file permissions (Unix mode checks; on Windows, the ACL of the user profile). Phase 2 plans OS keychain storage.
+- mDNS TXT records (device name and an 8-character fingerprint hint) allow devices to be tracked on the local network. `receive --no-mdns` and `pair --listen --no-mdns` do not advertise. The apps advertise while they receive, which iPhone and iPad do only while Dropumi is open. To stop advertising, set **Who can send to this device** to **Off** in the app's Settings; on the Mac, **Quit Dropumi completely** in the menu bar also stops it.
+- Native advertising may publish the system's host name, which can contain the owner's name. The Apple app's Bonjour adapter registers a proxy with a random host name instead. What an iPhone, iPad or Mac running the app actually publishes is Not tested.
+- The identity key is stored in a plaintext file protected only by file permissions.
+  - **CLI:** Unix mode checks; on Windows, the ACL of the user profile. Backups can include the configuration directory; on macOS, Time Machine does.
+  - **Apple app** (ADR-0014): the same key file, with the same 0700 folder and the same owner and mode checks, in `Application Support/Dropumi` inside the app's own container (never the App Group the Share Extension uses). The app excludes the folder from backups; on iPhone and iPad it also sets the data protection class `completeUntilFirstUserAuthentication`. Any code running as the app's user, and root, can still read the key. The backup exclusion relies on each OS honouring the flag; whether iOS device-to-device migration honours it is UNVERIFIED.
+  - Keychain storage (iOS and macOS) and Android Keystore storage are planned for a later milestone, behind the existing `IdentityStore` port.
 - An address or host-name target does not pin a key in advance unless `--expect-fingerprint` is given. The receiver's identity is reported after the handshake, and it must still be trusted, or confirmed with the 6-digit code when `--allow-unverified` is used.
-- Received files are not marked with the macOS quarantine attribute or the Windows Mark-of-the-Web, so opening a received program may not trigger the Gatekeeper or SmartScreen checks that a download would. Treat received programs with care.
-- Protocol v1 has no rekeying, in-protocol key rotation or revocation. `dropumi identity reset --yes` replaces the key, and every peer must pair again.
+- Files received by the CLI are not marked with the macOS quarantine attribute or the Windows Mark-of-the-Web, so opening a received program may not trigger the Gatekeeper or SmartScreen checks that a download would. The Mac app sets `LSFileQuarantineEnabled` so that macOS marks the files it receives; this is Not tested. Treat received programs with care.
+- Another app can draw over a consent prompt (Android overlays), and keys typed ahead can reach a prompt (keyboards on Mac and iPad). The Apple app's prompts have no default button, Escape declines, and Accept and "Codes match" are enabled only 600 ms after the prompt appears. On the Mac, an offer posts a notification without an Accept action and never brings the window forward.
+- UniFFI generates `unsafe` code that Dropumi did not write, and `forbid(unsafe_code)` in `dropumi-ffi` does not cover it. UniFFI is pinned to one version (`=0.32.2`), and the committed bindings show every change.
+- Events from `dropumi-ffi` carry peer names and file names (sanitized, never paths). An app that logged events would record them; the apps must not log event contents.
+- Protocol v1 has no rekeying, in-protocol key rotation or revocation. `dropumi identity reset --yes` (in the app: **Settings**, **This device**, **Reset identity**) replaces the key, and every peer must pair again.
 
 ## Safe harbor
 
@@ -121,7 +134,9 @@ We cannot authorize testing of systems, devices or networks that belong to someo
 
 ## Protecting your local configuration
 
-Dropumi stores its identity and trust data in a configuration directory. It is chosen in this order:
+This section describes the `dropumi` CLI. The Apple app keeps the same files in a folder inside its own app container and runs the same Unix checks on them (see the known limitations above and ADR-0014).
+
+The CLI stores its identity and trust data in a configuration directory. It is chosen in this order:
 
 1. `--config-dir DIR`
 2. the `DROPUMI_CONFIG_DIR` environment variable
