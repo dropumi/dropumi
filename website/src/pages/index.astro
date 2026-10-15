@@ -52,6 +52,7 @@ const platforms = [
 			</div>
 			<small>Pre-alpha and unaudited · No releases yet · Command-line tool and Apple app in development</small>
 			<div class="shot"><AppMockup /></div>
+			<img class="hero-phone" src={`${base}/images/app-mobile-light.png`} alt="dropumi on a phone showing nearby devices" width="260" />
 		</section>
 
 		<section id="how" class="dark">
@@ -142,6 +143,7 @@ const platforms = [
 	.ctas { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
 	.btn { display: inline-flex; align-items: center; height: 56px; padding: 0 30px; border-radius: 999px; font-weight: 600; font-size: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); }
 	.btn { gap: 10px; }
+	.hero-phone { display: none; }
 	.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 	.btn.small { height: 38px; padding: 0 18px; font-size: 13px; }
 	.btn.teal { background: var(--light-teal); color: #06111f; border-color: var(--light-teal); }
@@ -180,5 +182,25 @@ const platforms = [
 	.plat { width: 200px; min-height: 228px; align-items: center; text-align: center; gap: 8px; border-radius: 20px; padding: 24px; }
 	.plat .btn { margin-top: auto; }
 	@media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } }
-	@media (max-width: 760px) { .phones .mid { display: none; } .phones img { width: 40vw; } }
+	@media (max-width: 760px) {
+		section { padding: 64px var(--gutter); gap: 18px; }
+		.hero { padding-top: 24px; gap: 18px; }
+		h1 { font-size: 38px; }
+		h2 { font-size: 30px; }
+		.lead { font-size: 17px; }
+		.badge { font-size: 12px; padding: 7px 12px; }
+		.ctas { flex-direction: column; width: 100%; }
+		.ctas .btn { width: 100%; justify-content: center; height: 52px; }
+		.shot { display: none; }
+		.hero-phone { display: block; width: 62%; max-width: 260px; height: auto; margin-top: 12px; border-radius: 28px; border: 1px solid var(--border); box-shadow: 0 24px 50px rgba(11, 31, 58, 0.18); }
+		.card { padding: 24px; border-radius: 20px; }
+		.mobile { flex-direction: column; gap: 36px; align-items: stretch; }
+		.mtext { max-width: none; }
+		.phones { justify-content: center; gap: 14px; }
+		.phones .mid { display: none; }
+		.phones img { width: calc(50% - 7px); max-width: 190px; border-radius: 24px; }
+		.steps3 { gap: 40px; }
+		.plat { width: calc(50% - 8px); min-height: 0; padding: 20px 12px; }
+		.platforms { width: 100%; gap: 12px; }
+	}
 </style>
