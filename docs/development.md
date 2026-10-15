@@ -275,6 +275,7 @@ Publish only numbers it produced, with the machine, OS, Rust version and paramet
 | `swift test` cannot find `DropumiFFI` or reports a stale library | Run `bash scripts/ffi/build-apple.sh` first; `apps/apple/DropumiKit/Artifacts/core-stamp.txt` records what it was built from. |
 | The Kotlin tests fail with `UnsatisfiedLinkError` | Build the host library first (`cargo build --locked -p dropumi-ffi --lib`); the tests load it from `target/debug` (`dropumi.hostLibDir` in `apps/android/gradle.properties`). |
 | `check-16k.sh` reports alignment below 0x4000 | The library was built without the 16 KB link flags; build it with `scripts/ffi/build-android.sh`, not plain `cargo build`. |
+| `check-16k.sh` reports `no .so files found` | The directory holds no library (a directory without one fails rather than passing unchecked); run `scripts/ffi/build-android.sh` first, or pass the directory given to its `--out`. |
 
 ## Building and releasing
 
