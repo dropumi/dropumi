@@ -24,6 +24,15 @@ struct DropumiApp: App {
         }
         .commands { DropumiCommands(router: loader.router) }
         .onChange(of: scenePhase) { _, phase in
+            // Kept by the loader too: the core may still be opening.
+            switch phase {
+            case .background:
+                loader.isInBackground = true
+            case .active:
+                loader.isInBackground = false
+            default:
+                break
+            }
             guard let model = loader.model else { return }
             switch phase {
             case .background:

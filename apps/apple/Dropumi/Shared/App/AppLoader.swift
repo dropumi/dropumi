@@ -23,6 +23,10 @@ final class AppLoader {
     let router = Router()
     /// Files opened with Dropumi before the core was ready.
     private var pendingFiles: [URL] = []
+    /// iOS: whether the app was last seen in the background (D5). The app
+    /// can go there while the core is still opening; the new model starts
+    /// in the background then, so it does not receive until it is in front.
+    var isInBackground = false
 
     var model: AppModel? {
         if case let .ready(model) = state { return model }
@@ -34,6 +38,7 @@ final class AppLoader {
         #if DEBUG
         if let scenario = UITestScenario.fromLaunchArguments() {
             let model = scenario.makeModel()
+            if isInBackground { model.enterBackground() }
             router.tab = scenario.initialTab
             state = .ready(model)
             await model.start()
@@ -64,6 +69,7 @@ final class AppLoader {
             let inbox: ShareInbox? = nil
             #endif
             let model = AppModel(core: core, paths: paths, settings: settings, inbox: inbox)
+            if isInBackground { model.enterBackground() }
             state = .ready(model)
             await model.start()
             let files = pendingFiles

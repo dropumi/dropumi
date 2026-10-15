@@ -186,12 +186,24 @@ public final class AppModel {
 
     /// iOS: the app went to the background. Stop accepting new connections
     /// (the listener closes and the advertisement is withdrawn); running
-    /// transfers finish.
+    /// transfers finish. Called before `start()`, it keeps `start()` from
+    /// receiving.
     public func enterBackground() {
         isInBackground = true
-        guard receiver != nil else { return }
+        // Queued behind the receiver changes already under way, so a
+        // receiver that is still starting stops accepting once it is up.
+        let previous = visibilityTask
+        visibilityTask = Task { [weak self] in
+            await previous?.value
+            await self?.stopAcceptingInBackground()
+        }
+    }
+
+    private func stopAcceptingInBackground() async {
+        // Back in front meanwhile: `becomeActive()` keeps the receiver.
+        guard isInBackground, receiver != nil else { return }
         let core = core
-        Task.detached { core.stopAccepting() }
+        await work { core.stopAccepting() }
     }
 
     /// iOS: the app is in front again.
@@ -297,7 +309,8 @@ public final class AppModel {
 
     /// Makes the receiver match `visibility` and the accept setting. Calls
     /// run one after another (launch and "became active" both ask), so the
-    /// receiver is never started twice.
+    /// receiver is never started twice; `enterBackground()` queues behind
+    /// them too.
     public func applyVisibility() async {
         let previous = visibilityTask
         let task = Task { [weak self] in

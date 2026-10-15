@@ -149,6 +149,38 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
         #expect(!core.calls.contains(.stopReceiving))
     }
 
+    /// ADR-0012 D5: the app went to the background while the core was still
+    /// opening (the loader hands the state over before `start()`). It does
+    /// not receive until it is in front again.
+    @Test func backgroundBeforeStartNeverStartsReceiving() async throws {
+        let (model, core) = try makeModel()
+        model.onboarded = true
+        model.enterBackground()
+        await model.start()
+        #expect(!core.calls.contains { if case .startReceiving = $0 { return true } else { return false } })
+        #expect(model.receiver == nil)
+        await model.becomeActive()
+        #expect(core.calls.contains { if case .startReceiving = $0 { return true } else { return false } })
+        #expect(model.receiver != nil)
+    }
+
+    /// The app goes to the background while the receiver is still starting:
+    /// once it is up, it stops accepting.
+    @Test func backgroundWhileTheReceiverStartsStopsAcceptingOnceItIsUp() async throws {
+        let (model, core) = try makeModel()
+        let gate = core.holdNextStartReceiving()
+        let onboarding = Task { await model.finishOnboarding() }
+        await gate.reached()
+        model.enterBackground()
+        gate.open()
+        await onboarding.value
+        #expect(model.receiver != nil)
+        // Receiver changes run one after another; this one runs last.
+        await model.applyVisibility()
+        #expect(core.calls.contains(.stopAccepting))
+        #expect(!core.calls.contains(.stopReceiving))
+    }
+
     @Test func pairedOnlyIsTheDefaultAndAutoAcceptIsOff() async throws {
         let (model, core) = try makeModel()
         await model.finishOnboarding()

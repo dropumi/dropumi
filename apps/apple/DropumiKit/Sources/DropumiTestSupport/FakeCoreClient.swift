@@ -39,6 +39,34 @@ nonisolated public final class FakeOperation: CoreOperation, @unchecked Sendable
     }
 }
 
+/// Holds one fake core call until the test opens it, so a test can act
+/// while the call is under way (no sleeps).
+nonisolated public final class CallGate: @unchecked Sendable {
+    private let release = DispatchSemaphore(value: 0)
+    private let arrivals: AsyncStream<Void>
+    private let arrival: AsyncStream<Void>.Continuation
+
+    init() {
+        (arrivals, arrival) = AsyncStream.makeStream(of: Void.self)
+    }
+
+    /// Returns once the held call has started.
+    public func reached() async {
+        for await _ in arrivals { return }
+    }
+
+    /// Lets the held call return.
+    public func open() {
+        release.signal()
+    }
+
+    /// Called by the held call (off the main thread).
+    func hold() {
+        arrival.yield()
+        release.wait()
+    }
+}
+
 nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
     public enum Call: Equatable, Sendable {
         case startReceiving(ReceiveOptions)
@@ -67,6 +95,7 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
     private var deviceName = "Dropumi-1A2B"
     private var receiving: ReceiverInfo?
     private var nearbyTable: [NearbyPeer] = []
+    private var startGate: CallGate?
     /// Errors to throw from the next calls, by method name.
     public var failures: [String: DropumiError] = [:]
 
@@ -189,9 +218,23 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         return nearbyTable
     }
 
+    /// Holds the next `startReceiving` until the test opens the gate.
+    public func holdNextStartReceiving() -> CallGate {
+        let gate = CallGate()
+        lock.lock()
+        startGate = gate
+        lock.unlock()
+        return gate
+    }
+
     public func startReceiving(_ options: ReceiveOptions) throws -> ReceiverInfo {
         try fail("startReceiving")
         note(.startReceiving(options))
+        lock.lock()
+        let gate = startGate
+        startGate = nil
+        lock.unlock()
+        gate?.hold()
         let info = ReceiverInfo(
             port: 47321, instance: options.advertise ? "dropumi-0000abcd" : nil, policy: options.policy,
             accept: options.accept, everyoneUntil: nil)

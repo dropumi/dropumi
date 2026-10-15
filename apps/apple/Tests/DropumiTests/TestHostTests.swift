@@ -34,6 +34,19 @@ struct TestHostTests {
         await model.shutdownAndWait()
     }
 
+    /// ADR-0012 D5: the app went to the background while the core was still
+    /// opening. The model starts in the background, so it does not receive
+    /// until the app is in front again.
+    @Test func backgroundDuringLoadKeepsTheModelInTheBackground() async throws {
+        let loader = AppLoader()
+        loader.isInBackground = true
+        await loader.load()
+        let model = try #require(loader.model)
+        #expect(model.isInBackground)
+        #expect(model.receiver == nil)
+        await model.shutdownAndWait()
+    }
+
     @Test func acceptIsArmedAfter600ms() {
         #expect(promptArmDelay == .milliseconds(600))
     }
