@@ -1,6 +1,5 @@
 ---
-import Smartphone from '@lucide/astro/icons/smartphone';
-import Monitor from '@lucide/astro/icons/monitor';
+import MonitorSmartphone from '@lucide/astro/icons/monitor-smartphone';
 import Laptop from '@lucide/astro/icons/laptop';
 import Upload from '@lucide/astro/icons/upload';
 import Radar from '@lucide/astro/icons/radar';
@@ -10,13 +9,16 @@ import FileText from '@lucide/astro/icons/file-text';
 import Check from '@lucide/astro/icons/check';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+// The app shows the same symbol for every device: it does not detect the
+// device type, and it does not know how far away a device is. "Looks like"
+// is how it marks a paired device before its key has been checked.
 const devices = [
-	{ name: "Maya's iPhone", meta: 'iPhone · 2 m away', Icon: Smartphone, cls: 'maya' },
-	{ name: 'Pixel 8', meta: 'Android · 4 m away', Icon: Smartphone, cls: 'pixel' },
-	{ name: 'Living-room PC', meta: 'Windows · Direct link', Icon: Monitor, cls: 'pc' },
+	{ name: "Maya's iPhone", meta: 'Looks like Maya', Icon: MonitorSmartphone, cls: 'maya' },
+	{ name: 'Studio Mac', meta: 'Not paired', Icon: MonitorSmartphone, cls: 'pixel' },
+	{ name: 'Kitchen iPad', meta: 'Not paired', Icon: MonitorSmartphone, cls: 'pc' },
 ];
 ---
-<div class="mock" role="img" aria-label="The dropumi desktop app finding nearby devices and sending a file to Maya's iPhone">
+<div class="mock" role="img" aria-label="Design mockup of the dropumi Mac app, in development, finding nearby devices and sending a file to Maya's iPhone">
 	<div class="stage" aria-hidden="true">
 		<div class="win">
 			<aside>
@@ -25,7 +27,7 @@ const devices = [
 				<div class="item on"><Radar size={20} />Nearby</div>
 				<div class="item"><ArrowLeftRight size={20} />Transfers<b>1</b></div>
 				<div class="item"><Settings size={20} />Settings</div>
-				<div class="me"><span class="av"><Laptop size={20} /></span><div><strong>Santo's MacBook</strong><small><u></u>Visible to everyone</small></div></div>
+				<div class="me"><span class="av"><Laptop size={20} /></span><div><strong>Santo's MacBook</strong><small><u></u>Paired devices only</small></div></div>
 			</aside>
 			<main>
 				<h3>Nearby</h3>
@@ -40,7 +42,7 @@ const devices = [
 					))}
 				</div>
 
-				<div class="drop"><span class="up"><Upload size={22} /></span><strong>Drop files here to send</strong><small>or <u>browse files</u> · <u>choose a folder</u></small></div>
+				<div class="drop"><span class="up"><Upload size={22} /></span><strong>Drop files here to send</strong><small>or <u>browse files</u></small></div>
 				<h4>Send to</h4>
 				<ul>
 					{devices.map(({ name, meta, Icon, cls }, i) => (
