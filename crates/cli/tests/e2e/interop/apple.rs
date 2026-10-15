@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::srv_target;
 use crate::support::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -85,36 +86,6 @@ fn mdns_enabled() -> bool {
     }
     eprintln!("skipped: set DROPUMI_TEST_MDNS=1 as well (needs multicast on a LAN interface)");
     false
-}
-
-/// The host name the app's advertisement points at (its SRV target), read
-/// with `dns-sd -L`, which prints "… can be reached at HOST:PORT …".
-fn srv_target(instance: &str) -> (String, u16) {
-    let mut child = Command::new("dns-sd")
-        .args(["-L", instance, "_dropumi._tcp", "local."])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("run dns-sd");
-    let out = child.stdout.take().expect("stdout");
-    let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(out).lines() {
-            let Ok(line) = line else { break };
-            if let Some(at) = line.find("can be reached at ") {
-                let rest = &line[at + 18..];
-                let target = rest.split_whitespace().next().unwrap_or("").to_owned();
-                let _ = tx.send(target);
-                break;
-            }
-        }
-    });
-    let target = rx.recv_timeout(STEP);
-    let _ = child.kill();
-    let _ = child.wait();
-    let target = target.expect("dns-sd resolved the advertisement");
-    let (host, port) = target.rsplit_once(':').expect("HOST:PORT");
-    (host.to_owned(), port.parse().expect("port"))
 }
 
 fn apple_dir() -> PathBuf {

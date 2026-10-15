@@ -75,7 +75,33 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
+        // The build the CLI interop harness runs (scripts/android/interop.sh):
+        // minified with the release rules, so the harness exercises what R8
+        // does to the app, plus keep rules for what the test APK calls
+        // (src/androidTest/proguard-qa.pro). Not debuggable; signed with the
+        // debug key, so it needs no secret. The library modules have no qa
+        // variant and use their release one.
+        create("qa") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".qa"
+            matchingFallbacks += listOf("release")
+            isMinifyEnabled = true
+            setProguardFiles(
+                listOf(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro",
+                    "src/androidTest/proguard-qa.pro",
+                ),
+            )
+            // AGP also runs R8 on qa's test APK, with the app's mapping.
+            testProguardFiles("src/androidTest/proguard-qa-test.pro")
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
+
+    // The instrumented tests run against debug, except when the interop
+    // harness passes -Pdropumi.testBuildType=qa.
+    testBuildType = providers.gradleProperty("dropumi.testBuildType").getOrElse("debug")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
