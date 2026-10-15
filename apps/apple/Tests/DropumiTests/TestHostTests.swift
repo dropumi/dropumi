@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+import DropumiAppState
 import DropumiCore
 import Foundation
 import Testing
@@ -44,6 +45,28 @@ struct TestHostTests {
         let model = try #require(loader.model)
         #expect(model.isInBackground)
         #expect(model.receiver == nil)
+        await model.shutdownAndWait()
+    }
+
+    /// The hand-over order: an onboarded model begun while the app is in the
+    /// background never starts receiving (it would advertise in the
+    /// background otherwise). Fails if `enterBackground()` runs after
+    /// `start()`.
+    @Test func modelBegunInTheBackgroundDoesNotStartReceiving() async throws {
+        let loader = AppLoader()
+        loader.isInBackground = true
+        let core = FakeCoreClient()
+        let paths = try AppPaths.temporary()
+        try paths.prepare()
+        let settings = SettingsStore(defaults: TestHost.defaults())
+        settings.onboarded = true
+        let model = AppModel(core: core, paths: paths, settings: settings)
+        await loader.begin(model)
+        #expect(loader.model === model)
+        #expect(model.isInBackground)
+        #expect(!core.calls.contains { if case .startReceiving = $0 { true } else { false } })
+        await model.becomeActive()
+        #expect(core.calls.contains { if case .startReceiving = $0 { true } else { false } })
         await model.shutdownAndWait()
     }
 

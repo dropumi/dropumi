@@ -38,10 +38,8 @@ final class AppLoader {
         #if DEBUG
         if let scenario = UITestScenario.fromLaunchArguments() {
             let model = scenario.makeModel()
-            if isInBackground { model.enterBackground() }
             router.tab = scenario.initialTab
-            state = .ready(model)
-            await model.start()
+            await begin(model)
             scenario.afterStart(model)
             return
         }
@@ -69,15 +67,23 @@ final class AppLoader {
             let inbox: ShareInbox? = nil
             #endif
             let model = AppModel(core: core, paths: paths, settings: settings, inbox: inbox)
-            if isInBackground { model.enterBackground() }
-            state = .ready(model)
-            await model.start()
+            await begin(model)
             let files = pendingFiles
             pendingFiles = []
             files.forEach(open)
         } catch {
             state = .failed(ErrorCatalog.message(for: error))
         }
+    }
+
+    /// Makes `model` the app's model and starts it in the state the app is
+    /// in now: a model created while the app is in the background starts
+    /// there (D5), so `start()` does not begin receiving. The order matters:
+    /// the background state must be set before `start()`.
+    func begin(_ model: AppModel) async {
+        if isInBackground { model.enterBackground() }
+        state = .ready(model)
+        await model.start()
     }
 
     /// A file opened with Dropumi ("Open in Dropumi" in Files, or the

@@ -23,7 +23,8 @@ struct DropumiApp: App {
                 .task { await loader.load() }
         }
         .commands { DropumiCommands(router: loader.router) }
-        .onChange(of: scenePhase) { _, phase in
+        // `initial`: a scene that connects already in the background is seen too.
+        .onChange(of: scenePhase, initial: true) { _, phase in
             // Kept by the loader too: the core may still be opening.
             switch phase {
             case .background:

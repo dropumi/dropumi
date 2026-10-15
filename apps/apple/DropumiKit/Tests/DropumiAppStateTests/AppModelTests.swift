@@ -141,10 +141,8 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
         await model.finishOnboarding()
         #expect(model.receiver != nil)
         model.enterBackground()
-        // The stop runs off the main thread; wait for it, bounded.
-        for _ in 0..<100 where !core.calls.contains(.stopAccepting) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // The stop is queued behind receiver changes; this waits for it.
+        await model.applyVisibility()
         #expect(core.calls.contains(.stopAccepting))
         #expect(!core.calls.contains(.stopReceiving))
     }

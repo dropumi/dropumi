@@ -78,9 +78,9 @@
 - **Harness:** `crates/cli/tests/e2e/interop/apple.rs`.
 
 **Tests**
-- Package (`swift test`, macOS host): `ShareInboxTests` (8), `BindingsTests` (6), `AppModelTests` (24).
-- App-hosted: `TestHostTests` (3) on the iOS 27.0 simulator and macOS 27.
-- UI state tests (fake core), with the accessibility audit: `UIStateTests` (8) on the iPhone 17 / iOS 27.0 simulator. The audit found and we fixed:
+- Package (`swift test`, macOS host): `ShareInboxTests` (8), `BindingsTests` (6), `AppModelTests` (27).
+- App-hosted: `TestHostTests` (5) on the iOS 27.0 simulator; `TestHostTests` (3) and `MenuBarReceiverTests` (3) on macOS 27.
+- UI state tests (fake core): `UIStateTests` (9) on the iPhone 17 / iOS 27.0 simulator, 4 of them with the accessibility audit. The audit found and we fixed:
   - small accent text below 4.5:1 (the new `accentText` token);
   - fixed-size code digits;
   - small hit areas;
