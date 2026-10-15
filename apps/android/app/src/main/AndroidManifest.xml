@@ -8,6 +8,7 @@
 
     <!-- Nothing is backed up or moved to a new device (ADR-0013 D3). -->
     <application
+        android:name=".DropumiApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

@@ -31,7 +31,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Installs the test Application, never DropumiApplication (ADR-0013 D9).
+        testInstrumentationRunner = "io.github.dropumi.DropumiTestRunner"
         // The Rust core is built for these two ABIs only. JNA also ships
         // 32-bit libjnidispatch; without the filter the APK could install on
         // a 32-bit device that has no libdropumi_ffi.
