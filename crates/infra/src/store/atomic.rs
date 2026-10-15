@@ -13,7 +13,9 @@ use crate::paths::io_err;
 /// directory, fsync, rename over the target, then a directory fsync (Unix).
 ///
 /// # Errors
-/// [`StoreError::Io`] on failure (the temp file is removed).
+/// [`StoreError::Io`] on failure (the temp file is removed). A failed
+/// directory fsync is reported after the rename: the new content may
+/// already be in place, but its durability was not confirmed.
 pub fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> Result<(), StoreError> {
     let target = dir.join(name);
     let mut tmp = tempfile::Builder::new()
@@ -39,12 +41,24 @@ pub fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> Result<(), StoreErro
             Err(e) => return Err(io_err(&target, &e.error)),
         }
     }
+    sync_dir(dir)
+}
+
+/// Fsyncs `dir` so a rename or a new entry in it is durable (Unix).
+/// Windows has no portable directory fsync; NTFS journals directory
+/// metadata.
+///
+/// # Errors
+/// [`StoreError::Io`] if the directory cannot be opened or synced.
+pub(crate) fn sync_dir(dir: &Path) -> Result<(), StoreError> {
     #[cfg(unix)]
     {
-        if let Ok(d) = std::fs::File::open(dir) {
-            let _ = d.sync_all();
-        }
+        std::fs::File::open(dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| io_err(dir, &e))?;
     }
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }
 
@@ -72,5 +86,26 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    /// A directory that cannot be opened for the fsync (write and search,
+    /// no read) makes the write fail, after the rename.
+    #[cfg(unix)]
+    #[test]
+    fn dir_sync_failure_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        write_atomic(d.path(), "a.json", b"one").unwrap();
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = write_atomic(d.path(), "a.json", b"two");
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        // The error comes after the rename: the new content is in place.
+        assert_eq!(std::fs::read(d.path().join("a.json")).unwrap(), b"two");
     }
 }

@@ -35,12 +35,12 @@
 
 | File | Content | Protection |
 |---|---|---|
-| `identity.key` | 8-byte magic `DRPMKEY1` + 32-byte secret (exactly 40 bytes; anything else is reported as corrupt) | 0600. First creation: a 0600 temp file, fsync, then `persist_noclobber`, so concurrent first runs end with one identity. `identity reset` replaces it atomically under the lock. |
+| `identity.key` | 8-byte magic `DRPMKEY1` + 32-byte secret (exactly 40 bytes; anything else is reported as corrupt) | 0600. First creation: a 0600 temp file, fsync, then `persist_noclobber` (and a directory fsync on Unix), so concurrent first runs end with one identity. `identity reset` replaces it atomically under the lock. |
 | `device.json` | `{"version":1,"name":"…"}` | 0600, atomic replace |
 | `trusted_devices.json` | `{"version":1,"devices":[…]}` (ADR-0004) | 0600, atomic replace, re-read from disk on every lookup |
 | `.lock` | Empty lock file | 0600; std `File::lock` (exclusive) around every read-modify-write and around identity creation |
 
-Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename over the target (Windows: retried on errors 5 and 32), then a directory fsync on Unix.
+Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename over the target (Windows: retried on errors 5 and 32), then a directory fsync on Unix. A failed directory fsync is reported as an error even though the new file may already be in place, because its durability was not confirmed.
 
 **Permission checks** run whenever a command opens the identity or trust store (`identity`, `trust`, `pair`, `receive`, `send`), and again on every read of a store file. `discover` does not read the config directory.
 - **Unix:** every checked path must be owned by the effective UID (`rustix::process::geteuid`) and must not be a symbolic link. The config directory, `device.json` and `trusted_devices.json` must have no `0o022` bits (no group or other write). `identity.key` must have no `0o077` bits (no group or other access).

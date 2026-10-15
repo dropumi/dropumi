@@ -13,7 +13,7 @@ use dropumi_protocol::random;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::{ConfigLock, write_atomic};
+use super::{ConfigLock, sync_dir, write_atomic};
 use crate::paths::{ensure_private_dir, io_err};
 use crate::perms::{
     NO_GROUP_OTHER_ACCESS, NO_GROUP_OTHER_WRITE, check_config_dir, check_private_file,
@@ -79,7 +79,11 @@ impl FileIdentityStore {
         Ok(Some(StaticSecret::from_bytes(key)))
     }
 
-    /// Creates the key unless another process created it first.
+    /// Creates the key unless another process created it first, then
+    /// fsyncs the directory.
+    ///
+    /// A failed directory fsync is reported after the key file is in
+    /// place: a later load uses that key.
     fn create_key(&self) -> Result<StaticSecret, StoreError> {
         let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
         let path = self.key_path();
@@ -93,7 +97,10 @@ impl FileIdentityStore {
         tmp.write_all(&content).map_err(|e| io_err(&path, &e))?;
         tmp.as_file().sync_all().map_err(|e| io_err(&path, &e))?;
         match tmp.into_temp_path().persist_noclobber(&path) {
-            Ok(()) => Ok(secret),
+            Ok(()) => {
+                sync_dir(&self.dir)?;
+                Ok(secret)
+            }
             Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => self
                 .load_key()?
                 .ok_or_else(|| StoreError::Io("identity key disappeared".into())),
@@ -229,6 +236,29 @@ mod tests {
             store.load_or_create(),
             Err(StoreError::InsecurePermissions { .. })
         ));
+    }
+
+    /// Creating the key syncs the directory and reports a failed sync
+    /// (write and search, no read), after the key file is in place.
+    #[cfg(unix)]
+    #[test]
+    fn key_dir_sync_failure_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        store.load_or_create().unwrap();
+        // Keep device.json, so only the key is written.
+        std::fs::remove_file(base.path().join(KEY_FILE)).unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.load_or_create();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        assert!(base.path().join(KEY_FILE).exists());
     }
 
     #[test]
