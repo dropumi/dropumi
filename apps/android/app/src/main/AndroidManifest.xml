@@ -5,6 +5,8 @@
 
     <!-- The core's listener and connections (LAN only, ADR-0013 D1). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- This device's Wi-Fi and Ethernet addresses (LocalAddresses, ADR-0013 D5). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Nothing is backed up or moved to a new device (ADR-0013 D3). -->
     <application

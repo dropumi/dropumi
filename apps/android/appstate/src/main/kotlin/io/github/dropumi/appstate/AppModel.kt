@@ -19,6 +19,8 @@ package io.github.dropumi.appstate
 
 import io.github.dropumi.core.CoreClient
 import io.github.dropumi.core.CoreOperation
+import io.github.dropumi.core.discovery.AdvertiseState
+import io.github.dropumi.core.discovery.Advertising
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
@@ -130,6 +132,8 @@ data class AppState(
     val route: Route? = null,
     val appearance: Appearance,
     val onboarded: Boolean,
+    /** This device's advertisement; GateClosed means browse-only (ADR-0013 D5). */
+    val advertising: AdvertiseState = AdvertiseState.GateClosed,
 ) {
     /** The prompt to show now. */
     val currentPrompt: Prompt? get() = prompts.firstOrNull()
@@ -154,6 +158,9 @@ val Prompt.promptId: ULong
  *
  * @param scope where state changes and event handling run (the main thread in the app).
  * @param io where core calls and file work run.
+ * @param advertising the advertiser's gate and state; closed means the
+ *   receiver is started with `advertise = false` (browse-only).
+ * @param localAddresses this device's IPv4 addresses on local networks.
  */
 class AppModel(
     private val core: CoreClient,
@@ -162,6 +169,8 @@ class AppModel(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val advertising: Advertising = Advertising.CLOSED,
+    private val localAddresses: () -> List<String> = { emptyList() },
 ) {
     private val _state = MutableStateFlow(
         AppState(
@@ -170,6 +179,7 @@ class AppModel(
             appearance = settings.appearance,
             onboarded = settings.onboarded,
             history = historyStore.load(),
+            advertising = advertising.state.value,
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -192,6 +202,8 @@ class AppModel(
     suspend fun start() {
         if (eventJob != null) return
         eventJob = scope.launch { core.events.collect { apply(it) } }
+        // Late advertising failures cannot reach the core; the adapter reports them here.
+        scope.launch { advertising.state.collect { update { copy(advertising = it) } } }
         refreshIdentity()
         refreshTrusted()
         if (_state.value.onboarded) applyVisibility()
@@ -380,10 +392,10 @@ class AppModel(
                 val info = work { core.setReceivePolicy(policy, accept) }
                 update { copy(receiver = info) }
             } else if (!s.receiverStopping) {
-                // Not advertised: advertising needs the NSD adapter and its
-                // host-label gate (ADR-0013 D5), which are not part of this
-                // model yet. Peers reach this device by address or after pairing.
-                val options = ReceiveOptions(policy, accept, null, false)
+                // Advertised only where the R21 gate is open (ADR-0013 D5);
+                // elsewhere the core never calls advertise, and peers reach
+                // this device by address or after pairing.
+                val options = ReceiveOptions(policy, accept, null, advertising.gateOpen)
                 val info = work { core.startReceiving(options) }
                 update { copy(receiver = info) }
             }
@@ -399,6 +411,12 @@ class AppModel(
         quietly { core.stopReceiving() }
         update { copy(receiver = null, receiverStopping = true) }
         withTimeoutOrNull(STOP_WAIT_MS) { _state.first { !it.receiverStopping } }
+    }
+
+    /** Addresses other devices can type to reach this one ("ip:port"); empty when not receiving. */
+    fun connectionDetails(): List<String> {
+        val port = _state.value.receiver?.port ?: return emptyList()
+        return localAddresses().map { "$it:$port" }
     }
 
     // Discovery

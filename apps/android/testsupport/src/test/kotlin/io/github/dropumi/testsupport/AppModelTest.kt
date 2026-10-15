@@ -16,6 +16,12 @@ import io.github.dropumi.appstate.PeerLabel
 import io.github.dropumi.appstate.PromptArming
 import io.github.dropumi.appstate.ReceiveVisibility
 import io.github.dropumi.appstate.promptId
+import io.github.dropumi.core.discovery.AdvertiseState
+import io.github.dropumi.core.discovery.Advertising
+import io.github.dropumi.core.discovery.HostLabelGate
+import io.github.dropumi.core.discovery.NsdAdapterCore
+import io.github.dropumi.core.discovery.NsdPort
+import io.github.dropumi.core.discovery.NsdService
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.ConfigProblem
 import io.github.dropumi.ffi.Direction
@@ -27,6 +33,7 @@ import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
 import io.github.dropumi.ffi.ReceiverStopReason
 import io.github.dropumi.ffi.SendTarget
+import io.github.dropumi.ffi.ServiceAd
 import io.github.dropumi.ffi.TransferStatus
 import java.io.File
 import java.nio.file.Files
@@ -40,6 +47,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -593,5 +601,87 @@ class AppModelTest {
         assertNull(s.model.state.value.suggestedDeviceName)
         s.model.refreshIdentity()
         assertEquals("Dropumi-1A2B", s.model.state.value.suggestedDeviceName)
+    }
+
+    // Android: the NSD host-label gate (ADR-0013 D5)
+
+    /** Records registrations so a test can answer for NSD. */
+    private class RegistrationPort : NsdPort {
+        val registrations = mutableListOf<NsdPort.RegistrationListener>()
+        override val hasServiceInfoCallback = false
+        override fun register(service: NsdService, listener: NsdPort.RegistrationListener) {
+            registrations += listener
+        }
+        override fun unregister(listener: NsdPort.RegistrationListener) = Unit
+        override fun discover(type: String, listener: NsdPort.DiscoveryListener) = Unit
+        override fun stopDiscovery(listener: NsdPort.DiscoveryListener) = Unit
+        override fun resolve(service: NsdService, listener: NsdPort.ResolveListener) = Unit
+        override fun registerInfoCallback(service: NsdService, callback: NsdPort.InfoCallback) = Unit
+        override fun unregisterInfoCallback(callback: NsdPort.InfoCallback) = Unit
+    }
+
+    private fun TestScope.makeModel(advertising: Advertising): Setup {
+        val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
+        val core = FakeCoreClient()
+        val model = AppModel(
+            core,
+            MemorySettingsStore(sdkInt = 36),
+            HistoryStore(File(root, "app/history.json")),
+            modelScope(),
+            StandardTestDispatcher(testScheduler),
+            clock = { testScheduler.currentTime },
+            advertising = advertising,
+        )
+        return Setup(model, core, root)
+    }
+
+    /** Where the gate is closed, the core is told not to advertise, and the UI says browse-only. */
+    @Test
+    fun gateClosedReceivesWithAdvertiseFalse() = runTest {
+        val adapter = NsdAdapterCore(RegistrationPort(), HostLabelGate.OBSERVED, 36, null, { listOf("192.168.1.5") })
+        val s = makeModel(adapter)
+        s.model.start()
+        s.model.finishOnboarding()
+        val start = s.core.starts().single()
+        assertFalse(start.options.advertise)
+        assertEquals(AdvertiseState.GateClosed, s.model.state.value.advertising)
+    }
+
+    /** A rename after advertise() returned cannot reach the core; it reaches the model's state. */
+    @Test
+    fun nsdLateRegistrationFailureReachesAppModel() = runTest {
+        val port = RegistrationPort()
+        val gate = HostLabelGate(listOf(HostLabelGate.Observed(36, 100L..100L)))
+        val adapter = NsdAdapterCore(port, gate, 36, 100L, { listOf("192.168.1.5") })
+        val s = makeModel(adapter)
+        s.model.start()
+        s.model.finishOnboarding()
+        assertTrue(s.core.starts().single().options.advertise)
+        // What the core does inside startReceiving.
+        adapter.advertise(ServiceAd("_dropumi._tcp", "dropumi-11111111", 47321u, emptyList()))
+        adapter.awaitIdle()
+        runCurrent()
+        assertEquals(AdvertiseState.Registering, s.model.state.value.advertising)
+        port.registrations.single().registered("dropumi-11111111 (2)")
+        adapter.awaitIdle()
+        runCurrent()
+        assertEquals(AdvertiseState.Failed(AdvertiseState.Reason.RENAMED), s.model.state.value.advertising)
+    }
+
+    @Test
+    fun connectionDetailsListEveryLanAddressWithThePort() = runTest {
+        val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
+        val core = FakeCoreClient()
+        val model = AppModel(
+            core,
+            MemorySettingsStore(sdkInt = 36),
+            HistoryStore(File(root, "app/history.json")),
+            modelScope(),
+            StandardTestDispatcher(testScheduler),
+            localAddresses = { listOf("192.168.1.5", "10.0.0.7") },
+        )
+        assertTrue("not receiving", model.connectionDetails().isEmpty())
+        model.finishOnboarding()
+        assertEquals(listOf("192.168.1.5:47321", "10.0.0.7:47321"), model.connectionDetails())
     }
 }

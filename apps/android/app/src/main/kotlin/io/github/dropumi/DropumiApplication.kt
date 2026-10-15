@@ -13,6 +13,8 @@ import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.HistoryStore
 import io.github.dropumi.core.AppPaths
 import io.github.dropumi.core.LiveCoreClient
+import io.github.dropumi.core.discovery.LocalAddresses
+import io.github.dropumi.core.discovery.NsdDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,8 +29,18 @@ class DropumiApplication : Application(), AppGraphHost {
         val loader = AppLoader(scope, Dispatchers.IO) {
             paths.prepare()
             paths.clearOutgoing()
-            val core = LiveCoreClient(paths.configDir, paths.receiveDir, discovery = null)
-            AppModel(core, settings, HistoryStore(paths.historyFile), scope, Dispatchers.IO)
+            val addresses = LocalAddresses(this)
+            val nsd = NsdDiscovery.create(this, addresses)
+            val core = LiveCoreClient(paths.configDir, paths.receiveDir, nsd)
+            AppModel(
+                core,
+                settings,
+                HistoryStore(paths.historyFile),
+                scope,
+                Dispatchers.IO,
+                advertising = nsd.adapter,
+                localAddresses = addresses::ipv4,
+            )
         }
         return AppGraph(loader)
     }
