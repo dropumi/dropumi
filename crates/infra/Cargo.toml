@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: MPL-2.0
+[package]
+name = "dropumi-infra"
+description = "Dropumi infrastructure adapters: TCP, filesystem, identity and trust stores, mDNS discovery."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["mdns"]
+# mDNS / DNS-SD discovery (desktop). Mobile builds use native discovery.
+mdns = ["dep:mdns-sd"]
+
+[dependencies]
+dirs.workspace = true
+dropumi-application.workspace = true
+dropumi-domain.workspace = true
+dropumi-protocol.workspace = true
+mdns-sd = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "rt", "sync", "time"] }
+tracing.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
