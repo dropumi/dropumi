@@ -38,7 +38,7 @@
 | `identity.key` | 8-byte magic `DRPMKEY1` + 32-byte secret (exactly 40 bytes; anything else is reported as corrupt) | 0600. First creation: a 0600 temp file, fsync, then `persist_noclobber` (and a directory fsync on Unix), so concurrent first runs end with one identity. If only that directory fsync fails, the key is already in place: startup goes on with it and logs a warning (the error kind only, never the path). `identity reset` replaces it atomically under the lock, as its last step: it first loads and checks `device.json` (or creates a missing one) and derives the new public key, so a reset that fails for any reason other than the final directory sync leaves the old key in place (a missing default `device.json` may already have been created, as the next start would create it anyway). |
 | `device.json` | `{"version":1,"name":"…"}` | 0600, atomic replace |
 | `trusted_devices.json` | `{"version":1,"devices":[…]}` (ADR-0004) | 0600, atomic replace, re-read from disk on every lookup |
-| `.lock` | Empty lock file | 0600; std `File::lock` (exclusive) around every read-modify-write and around identity creation |
+| `.lock` | Empty lock file | 0600; an exclusive `flock` around every read-modify-write and around identity creation: std `File::lock` where std implements it, and `rustix::fs::flock` on Android, where std does not ("lock() not supported"; found on the Android 8, 9 and 16 arm64 emulators, 2026-10-15) |
 
 Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename over the target (Windows: retried on errors 5 and 32), then a directory fsync on Unix.
 
