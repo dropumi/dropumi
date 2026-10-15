@@ -34,7 +34,7 @@ One Kotlin and Jetpack Compose code base for phones and tablets, under `apps/and
 
 - Material 3 is used for its components only; dynamic colour is off and the design.md tokens are mapped onto it.
 - Not used: navigation-compose, Hilt or Dagger, Room or DataStore, core-splashscreen, Accompanist, Coil, Material icons, Firebase, Play Services, and any analytics or crash SDK.
-- Icons are Lucide icons converted to VectorDrawables, under the ISC licence. The font is the same Plus Jakarta Sans variable file as on Apple, under the OFL.
+- Icons are Lucide icons converted to VectorDrawables, under the ISC licence; the Feather-derived ones are also under MIT (`docs/dependencies.md`). The font is the same Plus Jakarta Sans variable file as on Apple, under the OFL.
 - The Compose compiler plugin version must equal AGP's bundled Kotlin version. Dependabot ignores it; it is bumped by hand together with AGP (`docs/dependencies.md`).
 - The merged manifest is network-silent: the EmojiCompat initializer (which could request a downloadable font) and the exported `ProfileInstallReceiver` are removed.
 
