@@ -412,8 +412,13 @@ but it may not survive a crash or power loss. Dropumi then treats the change as 
 
 - `identity set-name`, `identity reset`, `trust add` and `trust remove` print a `warning` whose message starts with
   `the change was saved but could not be confirmed on disk:` followed by the local detail (path and OS error), then
-  their normal output, and exit **0**. The identity and the trusted-device list are re-read from disk for that
-  output; `trust_removed` has `existed` `null`, because whether the device was trusted before is not known then;
+  their normal output, and exit **0**. The `identity` commands re-read the identity and `trust add` re-reads the
+  trusted-device list from disk for that output, after the warning. `trust remove` re-reads nothing: `trust_removed`
+  has `existed` `null`, because whether the device was trusted before is not known then;
+- if a change was saved (with or without a confirmed directory sync) but reading the new identity or trusted-device
+  list back for the output fails, the command reports `failed` (`storage`, exit 9) with a message that contains
+  `the change was saved, but it could not be read back:` and the local detail. The change is in place; the
+  `warning` above, if any, has already been printed;
 - `pair` reports `paired` (exit 0) after a `warning` (see [`pair`](#pair));
 - the first run that creates the identity goes on with the new files and logs a warning on stderr (without the path);
 - a last-seen update after a transfer is never reported as a failure; its errors are only logged (the kind, without

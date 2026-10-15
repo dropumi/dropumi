@@ -33,17 +33,13 @@ pub fn run(cmd: TrustCmd, ctx: &Ctx) -> u8 {
                 &SystemClock,
                 fp,
                 name.as_deref().map(DeviceName::sanitize),
-            )
-            .and_then(|_| uc::list(&trust));
-            match settle(added, || uc::list(&trust)) {
-                Ok((list, warning)) => {
-                    if let Some(w) = &warning {
-                        ctx.out.warning(w);
-                    }
+            );
+            match settle(added, |w| ctx.out.warning(w), |_| uc::list(&trust)) {
+                Ok(list) => {
                     ctx.out.trusted(&list);
                     code::OK
                 }
-                Err(e) => ctx.store_error(&e),
+                Err(e) => ctx.settle_error(&e),
             }
         }
         TrustCmd::Remove { fingerprint } => {
@@ -53,11 +49,8 @@ pub fn run(cmd: TrustCmd, ctx: &Ctx) -> u8 {
             // After a removal saved without a confirmed directory sync the
             // removal itself is the applied state; whether the device was
             // trusted before is not known then (`existed` is null).
-            match settle(uc::remove(&trust, &fp).map(Some), || Ok(None)) {
-                Ok((existed, warning)) => {
-                    if let Some(w) = &warning {
-                        ctx.out.warning(w);
-                    }
+            match settle(uc::remove(&trust, &fp), |w| ctx.out.warning(w), Ok) {
+                Ok(existed) => {
                     ctx.out.event(
                         "trust_removed",
                         serde_json::json!({"fingerprint": fp.to_full(), "existed": existed}),
@@ -69,7 +62,7 @@ pub fn run(cmd: TrustCmd, ctx: &Ctx) -> u8 {
                     });
                     code::OK
                 }
-                Err(e) => ctx.store_error(&e),
+                Err(e) => ctx.settle_error(&e),
             }
         }
     }
