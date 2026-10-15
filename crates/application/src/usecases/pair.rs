@@ -21,7 +21,8 @@ use super::UseCaseError;
 use super::connect::{ResolveParams, dial, resolve};
 use super::send::remote_error;
 use crate::channel::{
-    EstablishedSession, InitiateParams, RespondParams, ResponderDecision, initiate, respond,
+    EstablishedSession, InitiateParams, RecvError, RespondParams, ResponderDecision, initiate,
+    respond,
 };
 use crate::config::Timeouts;
 use crate::events::{AppEvent, EventSink, PeerView};
@@ -29,6 +30,10 @@ use crate::identity::LocalIdentity;
 use crate::ports::{
     Clock, Connector, Discovery, Interaction, Listener, SasPrompt, SasPurpose, TrustStore,
 };
+
+/// How long past the code timeout the peer is still read while the local
+/// prompt is open (the prompt's own timeout ends it first).
+const PROMPT_READ_GRACE: Duration = Duration::from_secs(5);
 
 /// How pairing ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,55 +209,91 @@ where
         code: sas,
         purpose: SasPurpose::Pairing,
     };
-    let local = tokio::select! {
-        biased;
-        () = cancel.cancelled() => None,
-        r = timeout(deps.timeouts.sas, deps.interaction.confirm_sas(&prompt)) => Some(r.unwrap_or(false)),
+    // While the local user decides, the peer is read too: its answer is
+    // kept, and its "no", Cancel, Error or departure ends the prompt at once
+    // (the prompt is dropped, which withdraws it). Otherwise this side would
+    // write its answer to a peer that is gone, and on Windows the reset that
+    // follows discards the peer's unread "no".
+    let mut ignored = 0usize;
+    let mut remote: Option<bool> = None;
+    let asked = {
+        let confirm = timeout(deps.timeouts.sas, deps.interaction.confirm_sas(&prompt));
+        tokio::pin!(confirm);
+        let deadline =
+            tokio::time::Instant::now() + deps.timeouts.sas.saturating_add(PROMPT_READ_GRACE);
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => break Asked::Cancelled,
+                r = &mut confirm => break Asked::Answered(r.unwrap_or(false)),
+                f = reader.recv_within(left, Phase::Sas) => match peer_step(f, peer_role, &mut ignored) {
+                    PeerStep::Ignored => {}
+                    PeerStep::Answer(confirmed) if remote.is_none() => {
+                        remote = Some(confirmed);
+                        if !confirmed {
+                            break Asked::PeerSaidNo;
+                        }
+                        // A known message ends a run of ignorable ones (§8.4).
+                        ignored = 0;
+                    }
+                    PeerStep::Answer(_) => {
+                        break Asked::PeerFailed(TransferError::ProtocolViolation("second PairResult"));
+                    }
+                    PeerStep::Cancel => break Asked::PeerCancelled,
+                    PeerStep::Failed(e) => break Asked::PeerFailed(e),
+                },
+            }
+        }
     };
-    let Some(local) = local else {
-        let _ = writer.send(&Message::PairResult { confirmed: false }).await;
-        writer.shutdown().await;
-        reader.drain(deps.timeouts.drain).await;
-        return PairOutcome::Cancelled;
+    let local = match asked {
+        Asked::Answered(local) => local,
+        Asked::Cancelled => {
+            let _ = writer.send(&Message::PairResult { confirmed: false }).await;
+            writer.shutdown().await;
+            reader.drain(deps.timeouts.drain).await;
+            return PairOutcome::Cancelled;
+        }
+        Asked::PeerSaidNo => {
+            // The withdrawn prompt counts as this side's "no".
+            let _ = writer.send(&Message::PairResult { confirmed: false }).await;
+            writer.shutdown().await;
+            reader.drain(deps.timeouts.drain).await;
+            return PairOutcome::Failed(TransferError::PairingRejected);
+        }
+        Asked::PeerCancelled => {
+            // A Cancel gets no reply (§16.1); it still counts as "no".
+            writer.shutdown().await;
+            reader.drain(deps.timeouts.drain).await;
+            return PairOutcome::Failed(TransferError::PairingRejected);
+        }
+        Asked::PeerFailed(e) => {
+            writer.shutdown().await;
+            reader.drain(deps.timeouts.drain).await;
+            return PairOutcome::Failed(e);
+        }
     };
     if let Err(e) = writer.send(&Message::PairResult { confirmed: local }).await {
         return PairOutcome::Failed(e);
     }
-    // Wait for the peer's answer: ignorable messages are skipped (bounded),
-    // and the local user can still cancel.
+    // Wait for the peer's answer unless it came during the prompt: ignorable
+    // messages are skipped (bounded), and the local user can still cancel.
     let deadline = tokio::time::Instant::now() + deps.timeouts.sas;
-    let mut ignored = 0usize;
     let remote = loop {
+        if let Some(r) = remote {
+            break Ok(r);
+        }
         let left = deadline.saturating_duration_since(tokio::time::Instant::now());
         let frame = tokio::select! {
             biased;
             () = cancel.cancelled() => break Err(None),
             f = reader.recv_within(left, Phase::Sas) => f,
         };
-        let step = match frame {
-            Ok(Frame::Control(body)) => match decode(body, peer_role) {
-                Ok(Decoded::Message(Message::PairResult { confirmed })) => Some(Ok(confirmed)),
-                Ok(Decoded::Message(Message::Error { code, .. })) => Some(Err(remote_error(code))),
-                Ok(Decoded::Message(Message::Cancel { .. })) => Some(Ok(false)),
-                Ok(Decoded::Ignored(_)) if ignored < MAX_CONSECUTIVE_IGNORABLE => {
-                    ignored += 1;
-                    None
-                }
-                Ok(Decoded::Ignored(_)) => Some(Err(TransferError::LimitExceeded(
-                    "consecutive ignorable messages",
-                ))),
-                Ok(_) => Some(Err(TransferError::ProtocolViolation("expected PairResult"))),
-                Err(p) => Some(Err(p.to_transfer_error())),
-            },
-            Ok(Frame::Data(_)) => {
-                Some(Err(TransferError::ProtocolViolation("data during pairing")))
-            }
-            Err(e) => Some(Err(e.into())),
-        };
-        match step {
-            None => {}
-            Some(Ok(r)) => break Ok(r),
-            Some(Err(e)) => break Err(Some(e)),
+        match peer_step(frame, peer_role, &mut ignored) {
+            PeerStep::Ignored => {}
+            PeerStep::Answer(r) => remote = Some(r),
+            PeerStep::Cancel => remote = Some(false),
+            PeerStep::Failed(e) => break Err(Some(e)),
         }
     };
     writer.shutdown().await;
@@ -287,4 +328,59 @@ where
         })
         .await;
     PairOutcome::Paired(paired)
+}
+
+/// How the local code prompt ended.
+enum Asked {
+    /// The local user answered (a timeout is a "no").
+    Answered(bool),
+    /// The local user cancelled.
+    Cancelled,
+    /// The peer said "no" before the local user answered.
+    PeerSaidNo,
+    /// The peer cancelled before the local user answered.
+    PeerCancelled,
+    /// The peer sent an error, broke the protocol or left.
+    PeerFailed(TransferError),
+}
+
+/// One message from the peer during pairing.
+enum PeerStep {
+    /// An ignorable message, within the limit.
+    Ignored,
+    /// The peer's PairResult.
+    Answer(bool),
+    /// The peer cancelled (counts as "no").
+    Cancel,
+    /// An error, a violation or the end of the session.
+    Failed(TransferError),
+}
+
+fn peer_step(
+    frame: Result<Frame<'_>, RecvError>,
+    peer_role: Role,
+    ignored: &mut usize,
+) -> PeerStep {
+    match frame {
+        Ok(Frame::Control(body)) => match decode(body, peer_role) {
+            Ok(Decoded::Message(Message::PairResult { confirmed })) => PeerStep::Answer(confirmed),
+            Ok(Decoded::Message(Message::Error { code, .. })) => {
+                PeerStep::Failed(remote_error(code))
+            }
+            Ok(Decoded::Message(Message::Cancel { .. })) => PeerStep::Cancel,
+            Ok(Decoded::Ignored(_)) if *ignored < MAX_CONSECUTIVE_IGNORABLE => {
+                *ignored = ignored.saturating_add(1);
+                PeerStep::Ignored
+            }
+            Ok(Decoded::Ignored(_)) => PeerStep::Failed(TransferError::LimitExceeded(
+                "consecutive ignorable messages",
+            )),
+            Ok(_) => PeerStep::Failed(TransferError::ProtocolViolation("expected PairResult")),
+            Err(p) => PeerStep::Failed(p.to_transfer_error()),
+        },
+        Ok(Frame::Data(_)) => {
+            PeerStep::Failed(TransferError::ProtocolViolation("data during pairing"))
+        }
+        Err(e) => PeerStep::Failed(e.into()),
+    }
 }

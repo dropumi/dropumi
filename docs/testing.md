@@ -57,7 +57,7 @@ contain no tests.
 | `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits, path-free store-error log text | 3 | 0 |
 | `dropumi-application` | `tests/channel.rs` | Handshake over in-memory streams: pinning before msg3, busy and incompatible replies, oversized pre-auth input | 8 | 0 |
 | `dropumi-application` | `tests/failures.rs` | Cancellation on both sides (synchronized on bytes written, not on sleeps), consent timeout, absolute offer deadline, idle timeout, write stall, storage errors not leaked, `discard` on every failure path, candidate order, CompleteAck deadline restarted by each FileAck and still firing without one, trust-store errors (lookup and last-seen update) logged without paths | 13 | 0 |
-| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result | 4 | 0 |
+| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result; while the code prompt is open, the peer's "no", Cancel, Error, departure or second PairResult ends it at once, an early "yes" is kept, and an early "yes" followed by a local "no" or timeout stores nothing | 12 | 0 |
 | `dropumi-application` | `tests/policy.rs` | Trusted-only refuses unknown senders, pair intent refused by `receive`, receiver declines, Everyone expiry, unverified offers always prompt, unverified senders must confirm the SAS | 6 | 0 |
 | `dropumi-application` | `tests/receiver_control.rs` | Cancel one incoming transfer by id; a reused active transfer id rejected BUSY (also concurrently); accept errors back off and stop after 8; a policy change applies to new sessions only; `stop_accepting` lets running transfers finish and refuses new connections | 14 | 0 |
 | `dropumi-application` | `tests/transfer.rs` | Round trip, collisions, progress, source changed, write failure | 5 | 0 |
@@ -81,7 +81,7 @@ End-to-end tests by module (`crates/cli/tests/e2e/`):
 |---|---|---|
 | `transfer` | 6 | Single file (SHA-256 equal); Unicode names, an empty file and duplicate names; 64 MiB streaming; 300 small files; existing files never overwritten; Everyone mode with matching codes on both sides |
 | `policy` | 9 | Trusted-only refuses an unknown sender; receiver declines; `--accept never`; consent timeout; sender refuses an unverified receiver; `--expect-fingerprint` mismatch; sending by IP reports the actual authenticated peer and its local alias; a late `accept` never approves a later offer and a decision for another `transfer_id` is ignored; Ctrl-C (SIGINT) exits 130 (Unix) |
-| `pairing` | 4 | Both confirm: mutual trust, then a trusted transfer; one denies: nothing stored; cancel during the code comparison: exit 4, nothing stored; a name target with `--no-mdns` explains why it cannot be found (exit 2) |
+| `pairing` | 5 | Both confirm: mutual trust, then a trusted transfer; one denies: nothing stored; cancel during the code comparison: exit 4, and the other side's prompt ends with exit 6 without an answer, nothing stored; a name target with `--no-mdns` explains why it cannot be found (exit 2); ignorable messages around an early "yes" are skipped within the limit, and the peer's Cancel ends the prompt without a reply |
 | `failure` | 7 | Cancel from either side; kill either side (`connection_lost`, partial files removed); connection refused (exit 5); a dead candidate is skipped; stale `.part` files cleaned at start |
 | `security` | 11 | Wire capture has no plaintext (file content, file name, both device names, both static public keys); incompatible version; preamble tamper; recorded-session replay; ciphertext bit flip; malformed traffic matrix; wrong file hash; MitM relay refused by pinned trust; traversal and reserved names forged on the wire; an ignorable message during the consent prompt is skipped; a peer Error before the offer is reported with its own code |
 | `discovery` | 0 (+1 ignored) | mDNS discovery and send by fingerprint prefix (opt-in) |
@@ -114,7 +114,7 @@ replaced.
 | `MemSource`, `StallingReader` | `FileSource` | In-memory files; a reader that stops after N bytes |
 | `MemSink`, `MemFile` | `FileSink`, `IncomingFile` | Fault injection (fail after N bytes with a chosen message, block writes); counts begin, commit, discard and directory syncs |
 | `MemTrust`, `MemIdentity` | `TrustStore`, `IdentityStore` | |
-| `Scripted` | `Interaction` | Fixed decisions, or never answers (consent and SAS timeouts) |
+| `Scripted` | `Interaction` | Fixed decisions, never answers (consent and SAS timeouts), or answers the code after a delay (paused time) |
 | `ManualClock` | `Clock` | Advanced by hand (Everyone expiry) |
 
 Timeout tests use tokio's paused clock (`#[tokio::test(start_paused = true)]`), so they take no real time. Tests that
