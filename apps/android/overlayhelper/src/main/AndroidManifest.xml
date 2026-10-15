@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Test only (threat model R23). The service is exported because the shell
+     user starts it with `am start-foreground-service`; it is guarded with the
+     DUMP permission, which the shell holds and third-party apps cannot get,
+     and it draws only with the per-run token the test script writes into
+     this app's files. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Declared so the `appops set ... SYSTEM_ALERT_WINDOW allow` grant lets it
+         add the overlay window. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Dropumi test overlay">
+
+        <service
+            android:name=".OverlayService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.DUMP">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Test-only overlay window for Dropumi's overlay-protection tests" />
+        </service>
+    </application>
+</manifest>

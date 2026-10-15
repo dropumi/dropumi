@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<resources>
+    <!-- design.md: the launcher background and the splash are Deep Navy. -->
+    <color name="ic_launcher_background">#0B1F3A</color>
+    <color name="navy">#0B1F3A</color>
+    <!-- design.md `bg`, the window behind the Compose content. -->
+    <color name="window_background">#F4F8FA</color>
+</resources>

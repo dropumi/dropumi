@@ -42,6 +42,11 @@ updates:
     cooldown: { default-days: 7, semver-major-days: 14 }
     open-pull-requests-limit: 5
     commit-message: { prefix: chore, include: scope }
+    ignore:
+      # The Compose compiler plugin must equal the Kotlin version AGP bundles;
+      # it is bumped by hand together with AGP. See docs/dependencies.md.
+      - dependency-name: org.jetbrains.kotlin.plugin.compose
+      - dependency-name: org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin
     groups:
       gradle-minor-and-patch:
         applies-to: version-updates

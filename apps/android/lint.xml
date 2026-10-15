@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Lint configuration for every module. These checks are errors (ADR-0013 D2). -->
+<lint>
+    <issue id="NewApi" severity="error" />
+    <issue id="InlinedApi" severity="error" />
+    <issue id="ExportedService" severity="error" />
+    <issue id="ExportedReceiver" severity="error" />
+    <issue id="ExportedContentProvider" severity="error" />
+    <issue id="UnsafeIntentLaunch" severity="error" />
+    <issue id="MissingPermission" severity="error" />
+    <issue id="SetJavaScriptEnabled" severity="error" />
+</lint>

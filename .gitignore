@@ -41,5 +41,9 @@ xcuserdata/
 /apps/android/.kotlin/
 /apps/android/**/build/
 /apps/android/local.properties
+# Android app: release signing (never committed)
+/apps/android/keystore.properties
+*.jks
+*.keystore
 *.apk
 *.aab
