@@ -40,6 +40,7 @@ jobs:
           # Remove ASTRO_BASE if the site moves to a repo named dropumi.github.io.
           ASTRO_SITE: https://dropumi.github.io
           ASTRO_BASE: /dropumi
+          ASTRO_EDIT_URL: https://github.com/dropumi/dropumi/edit/main/website/
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: website/dist
