@@ -197,7 +197,8 @@ pub trait IdentityStore: Send + Sync {
     ///
     /// # Errors
     /// [`StoreError`] for I/O, corruption or unsafe permissions (the old key
-    /// is then unchanged); [`StoreError::NotDurable`] if the new key is in
+    /// is then unchanged, although a missing default device name may already
+    /// have been created); [`StoreError::NotDurable`] if the new key is in
     /// place but the directory sync failed.
     fn reset(&self) -> Result<LocalIdentity, StoreError>;
 
