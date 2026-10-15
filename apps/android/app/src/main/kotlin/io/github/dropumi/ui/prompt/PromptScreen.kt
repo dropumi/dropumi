@@ -9,8 +9,9 @@
 //   PromptClosed. At zero it reads "Expired" and Accept is off; nothing is
 //   answered by itself.
 // - No default action: nothing is focused when it opens, and Enter, NumPad
-//   Enter and DPAD centre act only on a button the user moved focus to
-//   (MainActivity, PromptKeys). On the code screen both choices are
+//   Enter, DPAD centre and Space act only on a button the user moved focus
+//   to with Tab or an arrow (MainActivity, KeyGate), never on focus Android
+//   gave a button by itself. On the code screen both choices are
 //   equal-weight outline buttons.
 // - Accept and "Codes match" are enabled 600 ms after the prompt appears,
 //   and again 600 ms after the activity resumes or its window regains focus
@@ -84,9 +85,12 @@ import io.github.dropumi.appstate.promptId
 import io.github.dropumi.ffi.CodePurpose
 import io.github.dropumi.ffi.OfferedFile
 import io.github.dropumi.ffi.Prompt
+import io.github.dropumi.ui.KeySurface
+import io.github.dropumi.ui.LocalKeyGate
 import io.github.dropumi.ui.LocalTouchGuard
 import io.github.dropumi.ui.OverlayNotice
 import io.github.dropumi.ui.OverlayNoticeText
+import io.github.dropumi.ui.gatedButton
 import io.github.dropumi.ui.design.DSIcons
 import io.github.dropumi.ui.design.DSMetrics
 import io.github.dropumi.ui.design.DSPalette
@@ -136,10 +140,15 @@ fun PromptHost(state: AppState, focus: FocusRequester) {
     LaunchedEffect(id) { focusManager.clearFocus(force = true) }
 
     val answer: (Boolean) -> Unit = { yes -> scope.launch { model.answer(prompt, yes) } }
+    // Each button reports its focus, so an activation key acts only on one
+    // the user moved focus to (MainActivity, KeyGate).
+    val gate = LocalKeyGate.current
+    val surface = KeySurface.Prompt(id)
+    val button: (String) -> Modifier = { name -> Modifier.gatedButton(gate, surface, name).testTag(name) }
     DropumiTheme(darkTheme = true) {
         when (prompt) {
-            is Prompt.Offer -> OfferPrompt(prompt, armed, waiting, focus, answer)
-            is Prompt.Code -> CodePrompt(prompt, armed, waiting, focus, answer)
+            is Prompt.Offer -> OfferPrompt(prompt, armed, waiting, focus, button, answer)
+            is Prompt.Code -> CodePrompt(prompt, armed, waiting, focus, button, answer)
         }
     }
 }
@@ -233,7 +242,14 @@ private fun PromptLayout(
 }
 
 @Composable
-private fun OfferPrompt(offer: Prompt.Offer, armed: Boolean, waiting: Boolean, focus: FocusRequester, answer: (Boolean) -> Unit) {
+private fun OfferPrompt(
+    offer: Prompt.Offer,
+    armed: Boolean,
+    waiting: Boolean,
+    focus: FocusRequester,
+    button: (String) -> Modifier,
+    answer: (Boolean) -> Unit,
+) {
     val label = PeerLabel.of(offer.peer)
     val left = secondsLeft(offer.expiresAtMs)
     PromptLayout(
@@ -248,7 +264,7 @@ private fun OfferPrompt(offer: Prompt.Offer, armed: Boolean, waiting: Boolean, f
                 enabled = !waiting,
                 color = Color.White,
                 outline = DSReceive.outline,
-                modifier = m.testTag("offer.decline"),
+                modifier = m.then(button("offer.decline")),
             )
         },
         second = { m ->
@@ -257,7 +273,7 @@ private fun OfferPrompt(offer: Prompt.Offer, armed: Boolean, waiting: Boolean, f
                 { answer(true) },
                 enabled = armed && !waiting && left > 0,
                 icon = DSIcons.check,
-                modifier = m.testTag("offer.accept"),
+                modifier = m.then(button("offer.accept")),
             )
         },
     ) {
@@ -289,7 +305,14 @@ private fun OfferPrompt(offer: Prompt.Offer, armed: Boolean, waiting: Boolean, f
 }
 
 @Composable
-private fun CodePrompt(prompt: Prompt.Code, armed: Boolean, waiting: Boolean, focus: FocusRequester, answer: (Boolean) -> Unit) {
+private fun CodePrompt(
+    prompt: Prompt.Code,
+    armed: Boolean,
+    waiting: Boolean,
+    focus: FocusRequester,
+    button: (String) -> Modifier,
+    answer: (Boolean) -> Unit,
+) {
     val label = PeerLabel.of(prompt.peer)
     val left = secondsLeft(prompt.expiresAtMs)
     val pairing = prompt.purpose == CodePurpose.PAIRING
@@ -307,7 +330,7 @@ private fun CodePrompt(prompt: Prompt.Code, armed: Boolean, waiting: Boolean, fo
                 enabled = !waiting,
                 color = Color.White,
                 outline = DSReceive.outline,
-                modifier = m.testTag("code.mismatch"),
+                modifier = m.then(button("code.mismatch")),
             )
         },
         second = { m ->
@@ -317,7 +340,7 @@ private fun CodePrompt(prompt: Prompt.Code, armed: Boolean, waiting: Boolean, fo
                 enabled = armed && !waiting && left > 0,
                 color = DSReceive.accent,
                 outline = DSReceive.accent,
-                modifier = m.testTag("code.match"),
+                modifier = m.then(button("code.match")),
             )
         },
     ) {

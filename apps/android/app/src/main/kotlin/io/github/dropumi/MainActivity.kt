@@ -18,13 +18,14 @@ import androidx.lifecycle.lifecycleScope
 import io.github.dropumi.appstate.promptId
 import io.github.dropumi.ui.Confirmations
 import io.github.dropumi.ui.DropumiApp
+import io.github.dropumi.ui.GateAction
+import io.github.dropumi.ui.GateKey
+import io.github.dropumi.ui.KeyGate
+import io.github.dropumi.ui.KeySurface
 import io.github.dropumi.ui.Router
 import io.github.dropumi.ui.TouchDecision
 import io.github.dropumi.ui.TouchGuard
 import io.github.dropumi.ui.TouchPhase
-import io.github.dropumi.ui.prompt.PromptKey
-import io.github.dropumi.ui.prompt.PromptKeyAction
-import io.github.dropumi.ui.prompt.PromptKeys
 import kotlinx.coroutines.launch
 
 /**
@@ -36,10 +37,11 @@ import kotlinx.coroutines.launch
  * - every touch passes [touchGuard] first (overlay protection, R23); while a
  *   prompt or a confirmation shows, the Compose root also filters obscured
  *   touches and, on API 31+, other apps' overlay windows are hidden;
- * - while a prompt shows, Escape declines it and an activation key acts only
- *   after the user moved focus ([PromptKeys]), before any key reaches Compose;
+ * - while a prompt or a confirmation shows, Escape declines or cancels it,
+ *   and an activation key acts only on a button the user moved focus to
+ *   ([keyGate]), before any key reaches Compose;
  * - the prompt on screen re-arms when the activity resumes and when its
- *   window regains focus.
+ *   window regains focus, and the user's focus move is forgotten then.
  * It never shows over the lock screen and never turns the screen on.
  */
 class MainActivity : ComponentActivity() {
@@ -51,7 +53,9 @@ class MainActivity : ComponentActivity() {
     /** Overlay protection: what happens to touches that came through another app's window. */
     val touchGuard = TouchGuard()
 
-    private val promptKeys = PromptKeys()
+    /** Escape and activation keys on a prompt or a confirmation. */
+    private val keyGate = KeyGate()
+
     private var protecting = false
     private var darkBars: Boolean? = null
 
@@ -67,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 router,
                 confirmations,
                 touchGuard,
+                keyGate,
                 onDarkTheme = ::applySystemBars,
                 onProtecting = ::protect,
             )
@@ -75,6 +80,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // A key meant for what was in front cannot land on a button.
+        keyGate.reset()
         val model = graph.loader.model ?: return
         // A prompt on screen re-arms: a tap meant for what was in front cannot land on it.
         model.promptResumed()
@@ -85,6 +92,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        // Another window took the keys, or gave them back: the user moves focus again.
+        keyGate.reset()
         // Back from the notification shade, a system dialog or another window: re-arm.
         if (hasFocus) graph.loader.model?.promptFocused()
     }
@@ -114,20 +123,36 @@ class MainActivity : ComponentActivity() {
     // contract, so only that check is suppressed, only here.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val model = graph.loader.model
-        val prompt = model?.state?.value?.currentPrompt
-        if (model != null && prompt != null) {
-            val down = event.action == KeyEvent.ACTION_DOWN
-            when (promptKeys.onKey(prompt.promptId, event.promptKey(), down, event.isCanceled)) {
-                PromptKeyAction.PASS -> Unit
-                PromptKeyAction.CONSUME -> return true
-                PromptKeyAction.DECLINE -> {
-                    lifecycleScope.launch { model.back() }
-                    return true
-                }
+        val surface = keySurface() ?: return super.dispatchKeyEvent(event)
+        val down = event.action == KeyEvent.ACTION_DOWN
+        return when (keyGate.onKey(surface, GateKey.of(event.keyCode), down, event.isCanceled)) {
+            GateAction.PASS -> super.dispatchKeyEvent(event)
+            // A button that gains focus during this dispatch is the user's move.
+            GateAction.NAVIGATE -> keyGate.navigating { super.dispatchKeyEvent(event) }
+            GateAction.CONSUME -> true
+            GateAction.DISMISS -> {
+                dismiss(surface)
+                true
             }
         }
-        return super.dispatchKeyEvent(event)
+    }
+
+    /** What keys act on: the prompt on screen, or else the confirmation on screen. */
+    private fun keySurface(): KeySurface? {
+        val prompt = graph.loader.model?.state?.value?.currentPrompt
+        if (prompt != null) return KeySurface.Prompt(prompt.promptId)
+        return confirmations.current?.let { KeySurface.Panel(it) }
+    }
+
+    /** Escape: declines the prompt (ignored while an answer is in flight) or cancels the confirmation. */
+    private fun dismiss(surface: KeySurface) {
+        when (surface) {
+            is KeySurface.Prompt -> {
+                val model = graph.loader.model ?: return
+                lifecycleScope.launch { model.back() }
+            }
+            is KeySurface.Panel -> if (confirmations.current === surface.confirmation) confirmations.cancel()
+        }
     }
 
     /** A prompt or a confirmation is on screen (or no longer is). */
@@ -185,26 +210,6 @@ class MainActivity : ComponentActivity() {
             if (flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED != 0) return true
             return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                 flags and MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED != 0
-        }
-
-        fun KeyEvent.promptKey(): PromptKey = when (keyCode) {
-            KeyEvent.KEYCODE_ESCAPE -> PromptKey.ESCAPE
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_SPACE,
-            -> PromptKey.ACTIVATE
-            KeyEvent.KEYCODE_TAB,
-            KeyEvent.KEYCODE_DPAD_UP,
-            KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_PAGE_UP,
-            KeyEvent.KEYCODE_PAGE_DOWN,
-            KeyEvent.KEYCODE_MOVE_HOME,
-            KeyEvent.KEYCODE_MOVE_END,
-            -> PromptKey.NAVIGATE
-            else -> PromptKey.OTHER
         }
     }
 }

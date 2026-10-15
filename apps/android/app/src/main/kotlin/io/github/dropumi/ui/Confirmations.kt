@@ -10,9 +10,11 @@
 // is dropped whole, with "Close it to answer", and on API 31+ other apps'
 // overlay windows are hidden.
 //
-// The panel has no default action: nothing is focused when it opens, Enter
-// does nothing until the user moves focus to a button, and Back or a tap
-// outside the card cancels it.
+// The panel has no default action: nothing is focused when it opens, and
+// Enter, NumPad Enter, DPAD centre and Space act only on a button the user
+// moved focus to with Tab or an arrow (MainActivity, KeyGate), never on
+// focus Android gave a button by itself. Back, Escape or a tap outside the
+// card cancels it.
 package io.github.dropumi.ui
 
 import androidx.activity.compose.BackHandler
@@ -100,6 +102,8 @@ fun ConfirmationPanel(confirmations: Confirmations, backEnabled: Boolean = true,
     val confirmation = confirmations.current ?: return
     val c = DS.colors
     val guard = LocalTouchGuard.current
+    val gate = LocalKeyGate.current
+    val surface = KeySurface.Panel(confirmation)
     BackHandler(enabled = backEnabled) { confirmations.cancel() }
     Box(
         contentAlignment = Alignment.Center,
@@ -153,7 +157,7 @@ fun ConfirmationPanel(confirmations: Confirmations, backEnabled: Boolean = true,
                     OutlineButton(
                         confirmation.confirmLabel,
                         { confirmations.confirm(confirmation) },
-                        modifier = m.semantics { testTag = "confirmation.confirm" },
+                        modifier = m.gatedButton(gate, surface, CONFIRM).semantics { testTag = CONFIRM },
                         color = c.danger,
                         outline = c.danger,
                     )
@@ -161,12 +165,16 @@ fun ConfirmationPanel(confirmations: Confirmations, backEnabled: Boolean = true,
                     PrimaryButton(
                         confirmation.confirmLabel,
                         { confirmations.confirm(confirmation) },
-                        modifier = m.semantics { testTag = "confirmation.confirm" },
+                        modifier = m.gatedButton(gate, surface, CONFIRM).semantics { testTag = CONFIRM },
                     )
                 }
             }
             val cancel: @Composable (Modifier) -> Unit = { m ->
-                OutlineButton("Cancel", { confirmations.cancel() }, modifier = m.semantics { testTag = "confirmation.cancel" })
+                OutlineButton(
+                    "Cancel",
+                    { confirmations.cancel() },
+                    modifier = m.gatedButton(gate, surface, CANCEL).semantics { testTag = CANCEL },
+                )
             }
             if (largeText()) {
                 cancel(Modifier)
@@ -180,3 +188,6 @@ fun ConfirmationPanel(confirmations: Confirmations, backEnabled: Boolean = true,
         }
     }
 }
+
+private const val CONFIRM = "confirmation.confirm"
+private const val CANCEL = "confirmation.cancel"

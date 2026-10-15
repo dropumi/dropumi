@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.requestFocus
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -40,6 +41,7 @@ import io.github.dropumi.testsupport.Scenario
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -87,6 +89,30 @@ class PromptScreenTest {
     /** The test tag of the focused node, if any. */
     private fun focusedTag(): String? = compose.onAllNodes(isFocused()).fetchSemanticsNodes()
         .firstOrNull()?.config?.getOrNull(SemanticsProperties.TestTag)
+
+    /** Enter, NumPad Enter, DPAD centre and Space, twice each; then the window is idle. */
+    private fun pressActivationKeys() {
+        for (code in ACTIVATION_KEYS) repeat(2) { key(code) }
+        instrumentation.waitForIdleSync()
+        compose.waitForIdle()
+    }
+
+    private fun assertNothingAnswered(why: String) {
+        assertTrue(why, answers().isEmpty())
+        assertTrue(why, model.state.value.answering.isEmpty())
+    }
+
+    /** Tab until [done] holds for the focused node's tag (bounded). */
+    private fun tabUntil(what: String, done: (String?) -> Boolean) {
+        val seen = mutableListOf<String?>()
+        repeat(MAX_TABS) {
+            key(KeyEvent.KEYCODE_TAB)
+            compose.waitForIdle()
+            seen += focusedTag()
+            if (done(seen.last())) return
+        }
+        fail("$what: focus went $seen")
+    }
 
     @Test
     @UseScenario(Scenario.OFFER_UNVERIFIED)
@@ -300,6 +326,68 @@ class PromptScreenTest {
         }
     }
 
+    /**
+     * Outside touch mode Android can focus a button by itself (leaving
+     * touch mode, the window regaining focus). [button] gets focus the user
+     * did not give it, and then:
+     * - no activation key answers;
+     * - nor after Page Down, Page Up, Home or End (not navigation keys
+     *   here; Compose moves focus up for Page Up, which still does not
+     *   count), each pressed with [button] focused that way;
+     * - nor after an arrow down, which leaves focus on [button] (the
+     *   buttons are at the bottom).
+     * Then the user Tabs off the button and back onto it, and Enter answers:
+     * the keys do reach the window.
+     */
+    private fun activationNeedsTheUsersFocusMove(tag: String, button: String, answer: Call) {
+        launchShowing(tag).use {
+            instrumentation.setInTouchMode(false)
+            arm()
+            val focusAsTheSystemMay = {
+                compose.onNodeWithTag(button).assertIsEnabled().requestFocus()
+                compose.waitForIdle()
+                assertEquals(button, focusedTag())
+            }
+            focusAsTheSystemMay()
+            pressActivationKeys()
+            assertNothingAnswered("answered on focus the user did not move")
+
+            for (code in NON_NAVIGATION_KEYS) {
+                focusAsTheSystemMay()
+                key(code)
+                compose.waitForIdle()
+                val focus = focusedTag()
+                pressActivationKeys()
+                assertNothingAnswered("answered after ${KeyEvent.keyCodeToString(code)} (focus on $focus)")
+            }
+
+            focusAsTheSystemMay()
+            key(KeyEvent.KEYCODE_DPAD_DOWN)
+            compose.waitForIdle()
+            assertEquals("an arrow down moved focus", button, focusedTag())
+            pressActivationKeys()
+            assertNothingAnswered("answered after an arrow that moved no focus")
+
+            tabUntil("Tab off $button") { it != button }
+            tabUntil("Tab back to $button") { it == button }
+            key(KeyEvent.KEYCODE_ENTER)
+            waitForCall(answer)
+            assertEquals(listOf(answer), answers())
+        }
+    }
+
+    @Test
+    @UseScenario(Scenario.OFFER_UNVERIFIED)
+    fun enterNeverAcceptsOnFocusTheUserDidNotMove() {
+        activationNeedsTheUsersFocusMove("prompt.offer", "offer.accept", Call.AnswerOffer(1u, true))
+    }
+
+    @Test
+    @UseScenario(Scenario.CODE_PAIRING)
+    fun enterNeverConfirmsACodeOnFocusTheUserDidNotMove() {
+        activationNeedsTheUsersFocusMove("prompt.code", "code.match", Call.AnswerCode(2u, true))
+    }
+
     /** Both choices on the code screen are the same size and kind; neither is the default. */
     @Test
     @UseScenario(Scenario.CODE_PAIRING)
@@ -428,5 +516,19 @@ class PromptScreenTest {
         const val ARMED_AFTER_MS = 700L
         const val MAX_TABS = 12
         const val MAX_PAGE_ROUNDS = 6
+
+        val ACTIVATION_KEYS = listOf(
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_SPACE,
+        )
+
+        val NON_NAVIGATION_KEYS = listOf(
+            KeyEvent.KEYCODE_PAGE_DOWN,
+            KeyEvent.KEYCODE_PAGE_UP,
+            KeyEvent.KEYCODE_MOVE_HOME,
+            KeyEvent.KEYCODE_MOVE_END,
+        )
     }
 }

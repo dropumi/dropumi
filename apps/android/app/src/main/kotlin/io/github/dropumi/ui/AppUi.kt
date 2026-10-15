@@ -119,6 +119,7 @@ fun DropumiApp(
     router: Router,
     confirmations: Confirmations,
     touchGuard: TouchGuard,
+    keyGate: KeyGate,
     onDarkTheme: (Boolean) -> Unit,
     onProtecting: (Boolean) -> Unit,
 ) {
@@ -139,7 +140,7 @@ fun DropumiApp(
             }
             DropumiTheme(dark) { StartupFailed(s.message) { graph.loader.retry() } }
         }
-        is AppLoader.State.Ready -> Ready(graph, s.model, router, confirmations, touchGuard, onDarkTheme, onProtecting)
+        is AppLoader.State.Ready -> Ready(graph, s.model, router, confirmations, touchGuard, keyGate, onDarkTheme, onProtecting)
     }
 }
 
@@ -178,6 +179,7 @@ private fun Ready(
     router: Router,
     confirmations: Confirmations,
     touchGuard: TouchGuard,
+    keyGate: KeyGate,
     onDarkTheme: (Boolean) -> Unit,
     onProtecting: (Boolean) -> Unit,
 ) {
@@ -208,6 +210,7 @@ private fun Ready(
             LocalFileActions provides graph.receivedFiles,
             LocalAppScope provides graph.scope,
             LocalTouchGuard provides touchGuard,
+            LocalKeyGate provides keyGate,
         ) {
             // While a confirmation or a prompt shows, TalkBack and the
             // keyboard reach only that: keyboard focus that would enter the
