@@ -35,6 +35,7 @@ import io.github.dropumi.ffi.IdentityInfo
 import io.github.dropumi.ffi.NearbyPeer
 import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.NodeSnapshot
+import io.github.dropumi.ffi.OfferedFile
 import io.github.dropumi.ffi.OperationResult
 import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.PeerInfo
@@ -139,7 +140,10 @@ data class AppState(
     val visibility: ReceiveVisibility,
     val autoAcceptPaired: Boolean,
     val prompts: List<Prompt> = emptyList(),
+    /** Prompts whose answer is on its way to the core. */
     val answering: Set<ULong> = emptySet(),
+    /** Prompts the core took an answer for; they show "Waiting…" until the core closes them. */
+    val answered: Set<ULong> = emptySet(),
     val arming: PromptArming = PromptArming(),
     val active: List<TransferRecord> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
@@ -763,12 +767,12 @@ class AppModel(
     /**
      * Answers [prompt]. An Accept for a prompt that is not on screen and armed
      * is ignored (the UI never sends one; this keeps it so). The prompt stays
-     * until the core closes it.
+     * until the core closes it, and takes no second answer meanwhile.
      */
     suspend fun answer(prompt: Prompt, yes: Boolean) {
         val id = prompt.promptId
         val s = _state.value
-        if (id in s.answering) return
+        if (id in s.answering || id in s.answered) return
         if (yes && !s.arming.canAccept(id)) return
         update { copy(answering = answering + id) }
         try {
@@ -776,6 +780,8 @@ class AppModel(
                 is Prompt.Offer -> work { core.answerOffer(id, yes) }
                 is Prompt.Code -> work { core.answerCode(id, yes) }
             }
+            // Waiting for PromptClosed; a prompt closed meanwhile is not marked.
+            update { if (prompts.any { it.promptId == id }) copy(answered = answered + id) else this }
         } catch (_: DropumiException.PromptNotFound) {
             setPrompts { filterNot { it.promptId == id } }
         } catch (e: CancellationException) {
@@ -787,11 +793,24 @@ class AppModel(
         }
     }
 
-    /** Back (or Escape) while a prompt shows: declines it; ignored while an answer is in flight. */
+    /** Back (or Escape) while a prompt shows: declines it; ignored while an answer is in flight or given. */
     suspend fun back() {
-        val prompt = _state.value.currentPrompt ?: return
-        if (prompt.promptId in _state.value.answering) return
+        val s = _state.value
+        val prompt = s.currentPrompt ?: return
+        if (prompt.promptId in s.answering || prompt.promptId in s.answered) return
         answer(prompt, false)
+    }
+
+    /**
+     * A page of [promptId]'s offered files from [offset] (the prompt itself
+     * carries the first 200). At most [OFFER_PAGE] files per call, as the
+     * core caps it. Null when the core no longer holds the prompt or the page
+     * could not be read; nothing is shown for that.
+     */
+    suspend fun offerFiles(promptId: ULong, offset: Int, limit: Int): List<OfferedFile>? {
+        val count = limit.coerceAtMost(OFFER_PAGE)
+        if (offset < 0 || count <= 0) return emptyList()
+        return quietly { core.offerFiles(promptId, offset.toUInt(), count.toUInt()) }
     }
 
     /** The activity resumed: the prompt on screen re-arms. */
@@ -807,7 +826,12 @@ class AppModel(
     /** Changes the prompt list; arming follows the prompt on screen. */
     private fun setPrompts(change: List<Prompt>.() -> List<Prompt>) = update {
         val prompts = prompts.change()
-        copy(prompts = prompts, arming = arming.shown(prompts.firstOrNull()?.promptId))
+        val ids = prompts.mapTo(HashSet()) { it.promptId }
+        copy(
+            prompts = prompts,
+            answered = answered.filterTo(HashSet()) { it in ids },
+            arming = arming.shown(prompts.firstOrNull()?.promptId),
+        )
     }
 
     // Pairing
@@ -1462,6 +1486,9 @@ class AppModel(
         const val SAVE_NOTE = "Saved files can be opened by other apps that can see your Downloads."
         const val MAX_EARLY_OPERATIONS = 16
         const val MAX_EARLY_EVENTS = 64
+
+        /** The most offered files the core returns per offerFiles call. */
+        const val OFFER_PAGE = 1_000
 
         /**
          * The operation (send, pair or pairing window) an event reports on;

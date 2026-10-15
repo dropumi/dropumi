@@ -165,6 +165,8 @@ dependencies {
     androidTestImplementation(project(":testsupport"))
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
+    // ui-test-junit4's espresso-core 3.5.0 fails on API 36 (InputManager.getInstance).
+    androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.runner)

@@ -24,6 +24,7 @@ import io.github.dropumi.appstate.AppState
 import io.github.dropumi.appstate.Formatting
 import io.github.dropumi.appstate.TargetInput
 import io.github.dropumi.ffi.SendTarget
+import io.github.dropumi.ui.LocalTouchGuard
 import io.github.dropumi.ui.design.Caption
 import io.github.dropumi.ui.design.DS
 import io.github.dropumi.ui.design.DSTextField
@@ -40,6 +41,7 @@ fun ConnectByAddressScreen(state: AppState, picking: DocumentPicking) {
     val model = LocalModel.current
     val router = LocalRouter.current
     val scope = LocalAppScope.current
+    val guard = LocalTouchGuard.current
     val c = DS.colors
     var address by rememberSaveable { mutableStateOf("") }
     var pin by rememberSaveable { mutableStateOf("") }
@@ -95,6 +97,8 @@ fun ConnectByAddressScreen(state: AppState, picking: DocumentPicking) {
                 {
                     val t = sendTarget() ?: return@PrimaryButton
                     val name = target ?: return@PrimaryButton
+                    // R23: a click that came through another app's window never sends.
+                    if (!guard.allowSend()) return@PrimaryButton
                     sending = true
                     scope.launch {
                         model.sendDraft(t, name, allowUnverified = true)

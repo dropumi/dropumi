@@ -80,6 +80,7 @@ class FakeCoreClient : CoreClient {
         data class SetReceivePolicy(val policy: ReceivePolicy, val accept: AcceptMode) : Call
         data class AnswerOffer(val promptId: ULong, val accept: Boolean) : Call
         data class AnswerCode(val promptId: ULong, val confirmed: Boolean) : Call
+        data class OfferFiles(val promptId: ULong, val offset: UInt, val limit: UInt) : Call
         data class Send(val target: SendTarget, val items: List<SendItem>, val allowUnverified: Boolean) : Call {
             /** The path items, in order. */
             val paths: List<String> get() = items.filterIsInstance<SendItem.Path>().map { it.path }
@@ -293,8 +294,11 @@ class FakeCoreClient : CoreClient {
     override fun pendingPrompts(): List<Prompt> = emptyList()
 
     /** Offers built with [Fixtures.offer] list `file-<n>.bin` of 1 byte each. */
-    override fun offerFiles(promptId: ULong, offset: UInt, limit: UInt): List<OfferedFile> =
-        (offset until offset + limit).map { OfferedFile("file-$it.bin", 1uL) }
+    override fun offerFiles(promptId: ULong, offset: UInt, limit: UInt): List<OfferedFile> {
+        fail("offerFiles")
+        note(Call.OfferFiles(promptId, offset, limit))
+        return (offset until offset + limit).map { OfferedFile("file-$it.bin", 1uL) }
+    }
 
     override fun send(target: SendTarget, items: List<SendItem>, allowUnverified: Boolean): CoreOperation {
         fail("send")

@@ -38,6 +38,7 @@ import io.github.dropumi.ffi.FileStatus
 import io.github.dropumi.ffi.ForeignFile
 import io.github.dropumi.ffi.ForeignReader
 import io.github.dropumi.ffi.NodeEvent
+import io.github.dropumi.ffi.OfferedFile
 import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.PromptCloseReason
 import io.github.dropumi.ffi.ReceiveOptions
@@ -654,6 +655,63 @@ class AppModelTest {
         val s = makeModel()
         s.model.back()
         assertTrue(s.core.calls.isEmpty())
+    }
+
+    /**
+     * ADR-0013 D8: once an answer reached the core, the prompt shows "Waiting…"
+     * until the core closes it; it takes no second answer and Back does nothing.
+     */
+    @Test
+    fun answeredPromptWaitsUntilTheCoreClosesIt() = runTest {
+        val s = makeModel()
+        s.model.apply(listOf(NodeEvent.PromptOpened(Fixtures.offer())))
+        s.model.answer(Fixtures.offer(), yes = false)
+        assertEquals(setOf(1uL), s.model.state.value.answered)
+        assertEquals("still shown until PromptClosed", 1, s.model.state.value.prompts.size)
+        s.model.back()
+        s.model.armCurrentPrompt()
+        s.model.answer(Fixtures.offer(), yes = true)
+        assertEquals(listOf(FakeCoreClient.Call.AnswerOffer(1u, false)), s.core.calls)
+        s.model.apply(listOf(NodeEvent.PromptClosed(1u, PromptCloseReason.ANSWERED)))
+        assertTrue(s.model.state.value.prompts.isEmpty())
+        assertTrue(s.model.state.value.answered.isEmpty())
+    }
+
+    /** An answer the core did not take can be given again; the prompt is not marked answered. */
+    @Test
+    fun answerThatFailedCanBeGivenAgain() = runTest {
+        val s = makeModel()
+        s.model.apply(listOf(NodeEvent.PromptOpened(Fixtures.code())))
+        s.core.failures["answerCode"] = DropumiException.Internal("test")
+        s.model.answer(Fixtures.code(), yes = false)
+        assertTrue(s.model.state.value.answered.isEmpty())
+        assertNotNull(s.model.state.value.banner)
+        s.model.back()
+        assertEquals(listOf(FakeCoreClient.Call.AnswerCode(2u, false)), s.core.calls)
+        assertEquals(setOf(2uL), s.model.state.value.answered)
+    }
+
+    /** Offers past the 200 files a prompt carries are read in pages of at most 1000 (the core's cap). */
+    @Test
+    fun offerFilesArePagedAtMostAThousandAtATime() = runTest {
+        val s = makeModel()
+        val inline = (0 until 200).map { OfferedFile("file-$it.bin", 1u) }
+        s.model.apply(listOf(NodeEvent.PromptOpened(Fixtures.offer(files = inline, fileCount = 1500u))))
+        val page = s.model.offerFiles(1u, offset = 200, limit = 5000)
+        assertEquals(1000, page?.size)
+        assertEquals("file-200.bin", page?.first()?.name)
+        assertEquals(listOf(FakeCoreClient.Call.OfferFiles(1u, 200u, 1000u)), s.core.calls)
+        assertEquals(emptyList<OfferedFile>(), s.model.offerFiles(1u, offset = 1200, limit = 0))
+        assertEquals("nothing asked for nothing", 1, s.core.calls.size)
+    }
+
+    /** A page of a prompt the core no longer holds is null, never an error banner. */
+    @Test
+    fun offerFilesOfAClosedPromptAreNull() = runTest {
+        val s = makeModel()
+        s.core.failures["offerFiles"] = DropumiException.PromptNotFound()
+        assertNull(s.model.offerFiles(9u, offset = 200, limit = 10))
+        assertNull(s.model.state.value.banner)
     }
 
     /** ADR-0013 D3: the name onboarding suggests is only the core's own `Dropumi-XXXX`. */

@@ -25,6 +25,7 @@ object Fixtures {
         code: String? = "123456",
         files: List<OfferedFile> = listOf(OfferedFile("Beach-trip.mov", 18_200_000u)),
         fileCount: UInt = files.size.toUInt(),
+        expiresAtMs: ULong = inTwoMinutes(),
     ): Prompt = Prompt.Offer(
         id = id,
         transferId = transferId,
@@ -33,17 +34,27 @@ object Fixtures {
         files = files,
         fileCount = fileCount,
         totalBytes = files.fold(0uL) { sum, f -> sum + f.size },
-        expiresAtMs = (System.currentTimeMillis() + 120_000).toULong(),
+        expiresAtMs = expiresAtMs,
     )
 
-    fun code(id: ULong = 2u, operation: ULong? = 1u, code: String = "654321"): Prompt = Prompt.Code(
+    fun code(
+        id: ULong = 2u,
+        operation: ULong? = 1u,
+        code: String = "654321",
+        purpose: CodePurpose = CodePurpose.PAIRING,
+        peer: PeerInfo = peer(),
+        expiresAtMs: ULong = inTwoMinutes(),
+    ): Prompt = Prompt.Code(
         id = id,
         operation = operation,
-        peer = peer(),
+        peer = peer,
         code = code,
-        purpose = CodePurpose.PAIRING,
-        expiresAtMs = (System.currentTimeMillis() + 120_000).toULong(),
+        purpose = purpose,
+        expiresAtMs = expiresAtMs,
     )
+
+    /** A prompt's expiry two minutes from now (wall clock, as the core sets it). */
+    fun inTwoMinutes(): ULong = (System.currentTimeMillis() + 120_000).toULong()
 
     fun result(status: TransferStatus, transferId: String? = "aa"): TransferResult = TransferResult(
         status = status,

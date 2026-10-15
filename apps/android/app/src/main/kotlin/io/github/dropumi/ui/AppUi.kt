@@ -4,12 +4,16 @@
 // Loading, "Dropumi could not start" with Try again, onboarding, or the
 // tabs. Under 600 dp the tabs are a bottom NavigationBar; wider windows use
 // a NavigationRail and the wide layouts (design.md "Layout"). Banners show
-// at the top; confirmations are drawn over everything in this window.
+// at the top; confirmations are drawn over the screens, and a prompt over
+// everything, all in this window (ADR-0013 D8). While either shows, the
+// screens below are hidden from TalkBack and keyboard focus, and
+// MainActivity protects it from overlays.
 package io.github.dropumi.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +35,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -46,8 +51,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -75,6 +85,7 @@ import io.github.dropumi.ui.design.DSType
 import io.github.dropumi.ui.design.DropumiTheme
 import io.github.dropumi.ui.design.PrimaryButton
 import io.github.dropumi.ui.design.Wordmark
+import io.github.dropumi.ui.prompt.PromptHost
 import io.github.dropumi.ui.screens.ConnectByAddressScreen
 import io.github.dropumi.ui.screens.DocumentPicking
 import io.github.dropumi.ui.screens.LicenceText
@@ -99,22 +110,36 @@ import kotlinx.coroutines.launch
 
 /**
  * The whole content of MainActivity. [onDarkTheme] reports the theme in use,
- * so the activity can match the system bars to it.
+ * so the activity can match the system bars to it; [onProtecting] reports
+ * whether a prompt or a confirmation is on screen (overlay protection).
  */
 @Composable
-fun DropumiApp(graph: AppGraph, router: Router, confirmations: Confirmations, onDarkTheme: (Boolean) -> Unit) {
+fun DropumiApp(
+    graph: AppGraph,
+    router: Router,
+    confirmations: Confirmations,
+    touchGuard: TouchGuard,
+    onDarkTheme: (Boolean) -> Unit,
+    onProtecting: (Boolean) -> Unit,
+) {
     val loaderState by graph.loader.state.collectAsStateWithLifecycle()
     when (val s = loaderState) {
         AppLoader.State.Loading -> {
-            SideEffect { onDarkTheme(true) }
+            SideEffect {
+                onDarkTheme(true)
+                onProtecting(false)
+            }
             LaunchScreen()
         }
         is AppLoader.State.Failed -> {
             val dark = isSystemInDarkTheme()
-            SideEffect { onDarkTheme(dark) }
+            SideEffect {
+                onDarkTheme(dark)
+                onProtecting(false)
+            }
             DropumiTheme(dark) { StartupFailed(s.message) { graph.loader.retry() } }
         }
-        is AppLoader.State.Ready -> Ready(graph, s.model, router, confirmations, onDarkTheme)
+        is AppLoader.State.Ready -> Ready(graph, s.model, router, confirmations, touchGuard, onDarkTheme, onProtecting)
     }
 }
 
@@ -152,7 +177,9 @@ private fun Ready(
     model: AppModel,
     router: Router,
     confirmations: Confirmations,
+    touchGuard: TouchGuard,
     onDarkTheme: (Boolean) -> Unit,
+    onProtecting: (Boolean) -> Unit,
 ) {
     val state by model.state.collectAsStateWithLifecycle()
     val dark = when (state.appearance) {
@@ -160,7 +187,13 @@ private fun Ready(
         Appearance.LIGHT -> false
         Appearance.DARK -> true
     }
-    SideEffect { onDarkTheme(dark) }
+    val prompting = state.currentPrompt != null
+    val protecting = prompting || confirmations.showing
+    SideEffect {
+        // The prompt is navy in both themes.
+        onDarkTheme(dark || prompting)
+        onProtecting(protecting)
+    }
     LaunchedEffect(state.route) {
         if (state.route == Route.SEND) {
             router.openSend()
@@ -174,15 +207,28 @@ private fun Ready(
             LocalConfirmations provides confirmations,
             LocalFileActions provides graph.receivedFiles,
             LocalAppScope provides graph.scope,
+            LocalTouchGuard provides touchGuard,
         ) {
+            // While a confirmation or a prompt shows, TalkBack and the
+            // keyboard reach only that: keyboard focus that would enter the
+            // screens below goes to the prompt or the panel instead.
+            val promptFocus = remember { FocusRequester() }
+            val panelFocus = remember { FocusRequester() }
             Box(Modifier.fillMaxSize().background(DS.colors.bg)) {
-                // While a confirmation shows, TalkBack reads only the panel.
-                val behind = if (confirmations.showing) Modifier.clearAndSetSemantics {} else Modifier
-                Box(Modifier.fillMaxSize().then(behind)) {
+                val contentRedirect = when {
+                    prompting -> promptFocus
+                    confirmations.showing -> panelFocus
+                    else -> null
+                }
+                Box(Modifier.fillMaxSize().covered(contentRedirect)) {
                     if (state.onboarded) MainShell(state) else OnboardingScreen(state)
                     BannerHost(state)
                 }
-                ConfirmationPanel(confirmations)
+                Box(Modifier.fillMaxSize().covered(if (prompting) promptFocus else null)) {
+                    ConfirmationPanel(confirmations, backEnabled = !prompting, focus = panelFocus)
+                }
+                if (!protecting) OverlayNoticeHost(touchGuard)
+                PromptHost(state, promptFocus)
             }
         }
     }
@@ -196,7 +242,8 @@ private fun MainShell(state: AppState) {
     val router = LocalRouter.current
     val scope = LocalAppScope.current
     val picking = rememberDocumentPicking(model, router, scope)
-    BackHandler(enabled = router.current != null || router.tab != Tab.NEARBY) {
+    // A prompt's own Back (decline) is the only one while it shows.
+    BackHandler(enabled = (router.current != null || router.tab != Tab.NEARBY) && state.currentPrompt == null) {
         if (!router.pop()) router.select(Tab.NEARBY)
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -370,6 +417,48 @@ private fun BannerHost(state: AppState) {
                 .widthIn(max = 560.dp)
                 .semantics { liveRegion = LiveRegionMode.Polite }
                 .testTag("banner"),
+        )
+    }
+}
+
+/**
+ * While something is drawn over it ([redirect] is not null): hidden from
+ * TalkBack, and keyboard focus that would enter it goes to [redirect]
+ * instead (or nowhere).
+ */
+private fun Modifier.covered(redirect: FocusRequester?): Modifier = if (redirect == null) {
+    this
+} else {
+    this
+        .clearAndSetSemantics {}
+        .focusProperties { onEnter = { if (!redirect.requestFocus()) cancelFocusChange() } }
+        .focusGroup()
+}
+
+/**
+ * The overlay notices that never block anything (R23): another app's window
+ * lies over Dropumi, or a Send button ignored a click because of it. Drawn
+ * above the bottom bar; it takes no touches.
+ */
+@Composable
+private fun OverlayNoticeHost(guard: TouchGuard) {
+    val notice = guard.notice ?: return
+    if (notice == OverlayNotice.ANSWER) return
+    BoxWithConstraints(
+        contentAlignment = Alignment.BottomCenter,
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
+        val clearOfBar = if (maxWidth >= DSMetrics.wideLayoutMinWidth) 24.dp else 96.dp
+        OverlayNoticeText(
+            guard,
+            notice,
+            color = Color.White,
+            modifier = Modifier
+                .padding(start = 16.dp, end = 16.dp, bottom = clearOfBar)
+                .widthIn(max = 480.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(DS.colors.navy)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
         )
     }
 }

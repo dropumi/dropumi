@@ -7,7 +7,8 @@
 // it; no intent or exported component of an app APK can.
 //
 // - absent or `fake`: the fake core (`:testsupport`) on temporary folders,
-//   for UI state tests ("UI state test (fake core)").
+//   for UI state tests ("UI state test (fake core)"). FakeScenarioRule
+//   replaces it with a fresh one before each such test.
 // Any other value fails the run.
 
 package io.github.dropumi
@@ -28,6 +29,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 class TestApplication : Application(), AppGraphHost {
     /** The fake core behind the graph, for tests that push events. */
@@ -38,23 +40,50 @@ class TestApplication : Application(), AppGraphHost {
     lateinit var documents: RecordingDocuments
         private set
 
-    override val graph: AppGraph by lazy {
-        when (val choice = InstrumentationRegistry.getArguments().getString(APP_ARGUMENT) ?: FAKE) {
-            FAKE -> fakeGraph()
-            else -> throw IllegalArgumentException("unknown $APP_ARGUMENT: $choice")
+    /** The fake graph's settings (in memory). */
+    lateinit var settings: MemorySettingsStore
+        private set
+
+    private val choice: String by lazy { InstrumentationRegistry.getArguments().getString(APP_ARGUMENT) ?: FAKE }
+
+    @Volatile
+    private var current: AppGraph? = null
+    private var currentRoot: File? = null
+
+    override val graph: AppGraph
+        get() = current ?: synchronized(this) {
+            current ?: when (choice) {
+                FAKE -> fakeGraph { _, _ -> }
+                else -> throw IllegalArgumentException("unknown $APP_ARGUMENT: $choice")
+            }.also { current = it }
         }
+
+    /**
+     * Replaces the fake graph with a fresh one (a new fake core, settings and
+     * temporary folders) set up by [configure] before anything uses it. The
+     * old graph's scope is cancelled and its folders deleted. Call it before
+     * launching MainActivity, with no activity of an earlier test alive.
+     */
+    fun resetFakeGraph(configure: (FakeCoreClient, MemorySettingsStore) -> Unit): AppGraph = synchronized(this) {
+        check(choice == FAKE) { "resetFakeGraph needs the fake core ($APP_ARGUMENT=$FAKE)" }
+        current?.scope?.cancel()
+        currentRoot?.deleteRecursively()
+        fakeGraph(configure).also { current = it }
     }
 
-    private fun fakeGraph(): AppGraph {
-        val paths = AppPaths.under(File(noBackupFilesDir, "uitest-" + UUID.randomUUID()))
+    private fun fakeGraph(configure: (FakeCoreClient, MemorySettingsStore) -> Unit): AppGraph {
+        val root = File(noBackupFilesDir, "uitest-" + UUID.randomUUID()).also { currentRoot = it }
+        val paths = AppPaths.under(root)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val core = FakeCoreClient().also { fakeCore = it }
         val docs = RecordingDocuments().also { documents = it }
+        val store = MemorySettingsStore(Build.VERSION.SDK_INT).also { settings = it }
+        configure(core, store)
         val pendingShare = PendingShare()
         val loader = AppLoader(scope, Dispatchers.IO) {
             AppModel(
                 core,
-                MemorySettingsStore(Build.VERSION.SDK_INT),
+                store,
                 HistoryStore(paths.historyFile),
                 scope,
                 Dispatchers.IO,

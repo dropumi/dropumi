@@ -44,6 +44,7 @@ import io.github.dropumi.appstate.AppState
 import io.github.dropumi.appstate.Formatting
 import io.github.dropumi.ffi.NearbyPeer
 import io.github.dropumi.ffi.SendTarget
+import io.github.dropumi.ui.LocalTouchGuard
 import io.github.dropumi.ui.Screen
 import io.github.dropumi.ui.design.Caption
 import io.github.dropumi.ui.design.DS
@@ -65,6 +66,7 @@ fun SendScreen(state: AppState, preselected: String?, picking: DocumentPicking) 
     val model = LocalModel.current
     val router = LocalRouter.current
     val scope = LocalAppScope.current
+    val guard = LocalTouchGuard.current
     var selected by remember(preselected) { mutableStateOf(preselected) }
     var sending by remember { mutableStateOf(false) }
     BrowseWhileVisible(model)
@@ -85,6 +87,8 @@ fun SendScreen(state: AppState, preselected: String?, picking: DocumentPicking) 
                 text = if (peer != null) "Send to ${peer.name}" else "Choose a device",
                 onClick = {
                     val target = peer ?: return@PrimaryButton
+                    // R23: a click that came through another app's window never sends.
+                    if (!guard.allowSend()) return@PrimaryButton
                     sending = true
                     scope.launch {
                         model.sendDraft(

@@ -5,8 +5,10 @@
 // fingerprint, Remove a paired device, Reset identity, and Delete of
 // received files. Each is a panel drawn inside MainActivity's own window,
 // never a Dialog, AlertDialog or bottom sheet (each of those is a separate
-// window that the activity's touch filtering cannot see). The activity
-// reads [Confirmations.showing] to protect the panel from overlays.
+// window that the activity's touch filtering cannot see). While one shows,
+// MainActivity protects it from overlays (TouchGuard): an obscured gesture
+// is dropped whole, with "Close it to answer", and on API 31+ other apps'
+// overlay windows are hidden.
 //
 // The panel has no default action: nothing is focused when it opens, Enter
 // does nothing until the user moves focus to a button, and Back or a tap
@@ -39,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.heading
@@ -86,12 +91,16 @@ class Confirmations {
     }
 }
 
-/** The panel, drawn over everything else in the window while a confirmation shows. */
+/**
+ * The panel, drawn over the screens while a confirmation shows. [backEnabled]
+ * is off while a prompt is drawn over the panel: Back is the prompt's then.
+ */
 @Composable
-fun ConfirmationPanel(confirmations: Confirmations) {
+fun ConfirmationPanel(confirmations: Confirmations, backEnabled: Boolean = true, focus: FocusRequester? = null) {
     val confirmation = confirmations.current ?: return
     val c = DS.colors
-    BackHandler { confirmations.cancel() }
+    val guard = LocalTouchGuard.current
+    BackHandler(enabled = backEnabled) { confirmations.cancel() }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -128,11 +137,17 @@ fun ConfirmationPanel(confirmations: Confirmations) {
                     }
                 }
                 .verticalScroll(rememberScrollState())
+                // Where keyboard focus lands when it would enter the screens
+                // below; not a button, so Enter does nothing there.
+                .then(if (focus != null) Modifier.focusRequester(focus).focusTarget() else Modifier)
                 .padding(20.dp)
                 .semantics { paneTitle = confirmation.title; testTag = "confirmation" },
         ) {
             Text(confirmation.title, style = DSType.sectionHeading, color = c.textPrimary, modifier = Modifier.semantics { heading() })
             Text(confirmation.message, style = DSType.body, color = c.textSecondary)
+            if (guard.notice == OverlayNotice.ANSWER) {
+                OverlayNoticeText(guard, OverlayNotice.ANSWER, color = c.danger, modifier = Modifier.fillMaxWidth())
+            }
             val confirm: @Composable (Modifier) -> Unit = { m ->
                 if (confirmation.destructive) {
                     OutlineButton(

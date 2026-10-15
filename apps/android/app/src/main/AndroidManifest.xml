@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- This device's Wi-Fi and Ethernet addresses (LocalAddresses, ADR-0013 D5). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- API 31+: other apps' overlay windows are hidden while a prompt or a
+         trust/policy confirmation shows (ADR-0013 D8, R23). A normal permission. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <!-- Nothing is backed up or moved to a new device (ADR-0013 D3). -->
     <application
@@ -20,6 +23,8 @@
         android:theme="@style/Theme.Dropumi"
         tools:targetApi="31">
 
+        <!-- Never shown over the lock screen (no showWhenLocked or turnScreenOn):
+             prompts appear only in the unlocked app (ADR-0013 D8). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
