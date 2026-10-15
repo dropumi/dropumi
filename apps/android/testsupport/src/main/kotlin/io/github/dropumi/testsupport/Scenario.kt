@@ -9,12 +9,33 @@
 package io.github.dropumi.testsupport
 
 import io.github.dropumi.appstate.SettingsStore
+import io.github.dropumi.core.discovery.AdvertiseState
+import io.github.dropumi.core.discovery.Advertising
+import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.OfferedFile
+import io.github.dropumi.ffi.Progress
+import io.github.dropumi.ffi.TransferStatus
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Every scenario but [ADVERTISING_OFF] runs with advertising allowed and
+ * registered, so its screens show no "Not listed nearby" card.
+ */
 enum class Scenario {
+    /** First launch: onboarding, nothing received or paired. */
+    ONBOARDING,
+
     /** Onboarded, receiving from paired devices, nothing nearby. */
     NEARBY_EMPTY,
+
+    /** Three devices nearby: one not paired, one whose name hints at a paired alias, one more not paired. */
+    NEARBY,
+
+    /** As NEARBY_EMPTY, but advertising is not allowed on this Android version (the R21 gate is closed). */
+    ADVERTISING_OFF,
 
     /** An offer from a device that is not paired, with a code to compare. */
     OFFER_UNVERIFIED,
@@ -27,13 +48,31 @@ enum class Scenario {
 
     /** An offer of 1500 files: the prompt carries 200, the rest are paged from the core. */
     OFFER_1500_FILES,
+
+    /** A finished receive in the history and a receive in progress. */
+    TRANSFERS,
+
+    /** Two documents handed over by the share target ([sharedItems]), waiting for a device. */
+    SHARED_ITEMS,
     ;
+
+    /** Content URIs waiting in the share hand-off when the model starts. */
+    val sharedItems: List<String>
+        get() = if (this == SHARED_ITEMS) listOf(SHARED_PHOTO, SHARED_NOTES) else emptyList()
+
+    /** The advertiser the model starts with. */
+    fun advertising(): Advertising = if (this == ADVERTISING_OFF) Advertising.CLOSED else RegisteredAdvertising()
 
     /** Sets up [core] and [settings]; the events wait in the fake core for the model's start. */
     fun configure(core: FakeCoreClient, settings: SettingsStore) {
-        settings.onboarded = true
+        settings.onboarded = this != ONBOARDING
         when (this) {
-            NEARBY_EMPTY -> Unit
+            ONBOARDING, NEARBY_EMPTY, ADVERTISING_OFF, SHARED_ITEMS -> Unit
+            NEARBY -> core.emit(
+                NodeEvent.PeerFound(Fixtures.nearby("Maya's phone", "dropumi-00000001")),
+                NodeEvent.PeerFound(Fixtures.nearby("Studio Mac", "dropumi-00000002", hintAlias = "Studio Mac")),
+                NodeEvent.PeerFound(Fixtures.nearby("Pixel 8", "dropumi-00000003")),
+            )
             OFFER_UNVERIFIED -> {
                 val offer = Fixtures.offer(
                     files = listOf(
@@ -67,11 +106,34 @@ enum class Scenario {
                 val inline = (0 until INLINE_FILES).map { OfferedFile("file-$it.bin", 1u) }
                 core.emit(NodeEvent.PromptOpened(Fixtures.offer(files = inline, fileCount = 1_500u)))
             }
+            TRANSFERS -> {
+                val paired = Fixtures.peer(name = "MacBook", trusted = true, alias = "Studio Mac")
+                core.emit(
+                    NodeEvent.OfferReceived("cc", paired, 1u, 4_100_000u),
+                    NodeEvent.TransferAccepted(null, "cc"),
+                    NodeEvent.FileSaved("cc", 0u, "IMG_2041.heic", 4_100_000u, "00"),
+                    NodeEvent.TransferFinished(null, Direction.INCOMING, Fixtures.result(TransferStatus.COMPLETED, "cc")),
+                    NodeEvent.OfferReceived("dd", paired, 1u, 18_200_000u),
+                    NodeEvent.TransferAccepted(null, "dd"),
+                    NodeEvent.TransferProgress(null, "dd", Progress(11_300_000u, 18_200_000u, 0u, 1u)),
+                )
+            }
         }
+    }
+
+    /** Advertising allowed by the gate and registered. */
+    private class RegisteredAdvertising : Advertising {
+        override val gateOpen = true
+        override val state: StateFlow<AdvertiseState> =
+            MutableStateFlow<AdvertiseState>(AdvertiseState.Registered).asStateFlow()
     }
 
     companion object {
         /** The files an offer prompt carries; the core lists the rest through offerFiles. */
         const val INLINE_FILES = 200
+
+        /** The documents SHARED_ITEMS hands over. */
+        const val SHARED_PHOTO = "content://io.github.dropumi.test.documents/document/photo"
+        const val SHARED_NOTES = "content://io.github.dropumi.test.documents/document/notes"
     }
 }

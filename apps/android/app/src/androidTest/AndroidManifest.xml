@@ -12,5 +12,24 @@
         <uses-library
             android:name="android.test.runner"
             android:required="false" />
+
+        <!-- Another app for uriGrantSurvivesShareActivityFinish: components of
+             the test APK run under the test package's UID, not the app's, in
+             their own process (":foreign", away from androidx.test's
+             activities). The provider is not exported (the app reads it only
+             through a grant); the sharer is exported so the test can start
+             it, and shares only that provider's one document. -->
+        <provider
+            android:name="io.github.dropumi.foreign.ForeignProvider"
+            android:authorities="${applicationId}.foreign"
+            android:exported="false"
+            android:grantUriPermissions="true"
+            android:process=":foreign" />
+
+        <activity
+            android:name="io.github.dropumi.foreign.ForeignSharer"
+            android:exported="true"
+            android:process=":foreign"
+            android:theme="@android:style/Theme.NoDisplay" />
     </application>
 </manifest>

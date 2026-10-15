@@ -43,6 +43,6 @@ class FakeScenarioRule(
         // Key presses in an earlier test leave the display out of touch mode
         // (it is global per display); each test starts as a touch user would.
         InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
-        app.resetFakeGraph(realServices) { core, settings -> scenario.configure(core, settings) }
+        app.resetFakeGraph(scenario, realServices)
     }
 }

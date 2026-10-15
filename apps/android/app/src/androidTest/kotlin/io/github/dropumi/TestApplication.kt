@@ -10,6 +10,11 @@
 //   for UI state tests ("UI state test (fake core)"). FakeScenarioRule
 //   replaces it with a fresh one before each such test. Services are
 //   recorded by a fake starter unless a test asks for the real ones.
+// - `interop`: the app's own live graph (LiveGraph: the real Rust core,
+//   NSD, UriGuard and the real services) on temporary folders under
+//   noBackupFilesDir/interop-<uuid>, with settings in memory. It never
+//   builds DropumiApplication and never opens the app's configuration
+//   (noBackupFilesDir/dropumi). Tests that need it carry @InteropApp.
 // Any other value fails the run.
 //
 // As in the app, the process's foreground and background drive whichever
@@ -27,9 +32,11 @@ import io.github.dropumi.appstate.MemorySettingsStore
 import io.github.dropumi.appstate.PendingShare
 import io.github.dropumi.appstate.ServiceStarter
 import io.github.dropumi.core.AppPaths
+import io.github.dropumi.core.discovery.Advertising
 import io.github.dropumi.core.files.UriGuard
 import io.github.dropumi.testsupport.FakeCoreClient
 import io.github.dropumi.testsupport.FakeServiceStarter
+import io.github.dropumi.testsupport.Scenario
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +61,10 @@ class TestApplication : Application(), AppGraphHost {
     lateinit var services: ServiceStarter
         private set
 
+    /** The interop graph's folders (`dropumi_app interop` only). */
+    lateinit var interopPaths: AppPaths
+        private set
+
     private val choice: String by lazy { InstrumentationRegistry.getArguments().getString(APP_ARGUMENT) ?: FAKE }
 
     @Volatile
@@ -68,33 +79,30 @@ class TestApplication : Application(), AppGraphHost {
     override val graph: AppGraph
         get() = current ?: synchronized(this) {
             current ?: when (choice) {
-                FAKE -> fakeGraph { _, _ -> }
+                FAKE -> fakeGraph(scenario = null)
+                INTEROP -> interopGraph()
                 else -> throw IllegalArgumentException("unknown $APP_ARGUMENT: $choice")
             }.also { current = it }
         }
 
     /**
      * Replaces the fake graph with a fresh one (a new fake core, settings and
-     * temporary folders) set up by [configure] before anything uses it. The
-     * old graph's scope is cancelled and its folders deleted. Call it before
-     * launching MainActivity, with no activity of an earlier test alive.
+     * temporary folders) set up for [scenario] before anything uses it: its
+     * events, settings, advertiser and shared items. The old graph's scope
+     * is cancelled and its folders deleted. Call it before launching
+     * MainActivity, with no activity of an earlier test alive.
      * [realServices]: the model starts the app's real services
      * (AndroidServiceStarter) instead of recording the starts.
      */
-    fun resetFakeGraph(
-        realServices: Boolean = false,
-        configure: (FakeCoreClient, MemorySettingsStore) -> Unit,
-    ): AppGraph = synchronized(this) {
+    fun resetFakeGraph(scenario: Scenario, realServices: Boolean = false): AppGraph = synchronized(this) {
         check(choice == FAKE) { "resetFakeGraph needs the fake core ($APP_ARGUMENT=$FAKE)" }
         current?.scope?.cancel()
         currentRoot?.deleteRecursively()
-        fakeGraph(realServices, configure).also { current = it }
+        fakeGraph(scenario, realServices).also { current = it }
     }
 
-    private fun fakeGraph(
-        realServices: Boolean = false,
-        configure: (FakeCoreClient, MemorySettingsStore) -> Unit,
-    ): AppGraph {
+    /** [scenario] null: nothing configured (not onboarded, no events, advertising closed). */
+    private fun fakeGraph(scenario: Scenario?, realServices: Boolean = false): AppGraph {
         val root = File(noBackupFilesDir, "uitest-" + UUID.randomUUID()).also { currentRoot = it }
         val paths = AppPaths.under(root)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -102,8 +110,10 @@ class TestApplication : Application(), AppGraphHost {
         val docs = RecordingDocuments().also { documents = it }
         val store = MemorySettingsStore(Build.VERSION.SDK_INT).also { settings = it }
         val starter = (if (realServices) AndroidServiceStarter(this) else FakeServiceStarter()).also { services = it }
-        configure(core, store)
+        scenario?.configure(core, store)
         val pendingShare = PendingShare()
+        scenario?.sharedItems?.let(pendingShare::put)
+        val advertising = scenario?.advertising() ?: Advertising.CLOSED
         val loader = AppLoader(scope, Dispatchers.IO) {
             AppModel(
                 core,
@@ -111,6 +121,7 @@ class TestApplication : Application(), AppGraphHost {
                 HistoryStore(paths.historyFile),
                 scope,
                 Dispatchers.IO,
+                advertising = advertising,
                 documents = docs,
                 pendingShare = pendingShare,
                 services = starter,
@@ -125,8 +136,21 @@ class TestApplication : Application(), AppGraphHost {
         )
     }
 
+    /**
+     * The interop graph on a fresh noBackupFilesDir/interop-<uuid>. Folders
+     * an earlier interop run left (each holds only a test identity) are
+     * deleted first.
+     */
+    private fun interopGraph(): AppGraph {
+        noBackupFilesDir.listFiles { file -> file.name.startsWith(INTEROP_PREFIX) }?.forEach { it.deleteRecursively() }
+        val paths = AppPaths.under(File(noBackupFilesDir, INTEROP_PREFIX + UUID.randomUUID())).also { interopPaths = it }
+        return LiveGraph.build(this, paths, MemorySettingsStore(Build.VERSION.SDK_INT))
+    }
+
     companion object {
         const val APP_ARGUMENT = "dropumi_app"
         const val FAKE = "fake"
+        const val INTEROP = "interop"
+        const val INTEROP_PREFIX = "interop-"
     }
 }
