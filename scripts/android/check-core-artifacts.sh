@@ -12,6 +12,8 @@
 # - a library is missing, does not match its stamped hash, or belongs to an
 #   ABI the stamp does not list (a library copied in by hand);
 # - an ABI given with --abis was not built.
+# Outside a git checkout (a source archive) only the source comparison is
+# skipped, with a warning; the library and ABI checks still run.
 # A dev-profile core with --build-type release is only a warning.
 #
 # Usage: bash scripts/android/check-core-artifacts.sh [--abis arm64-v8a,x86_64]
@@ -30,6 +32,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "usage: $0 [--abis LIST] [--build-type debug|release] [--out DIR]" >&2; exit 2 ;;
   esac
 done
+case "${build_type}" in
+  "" | debug | release) ;;
+  *) echo "error: --build-type must be debug or release" >&2; exit 2 ;;
+esac
 stamp="$(dirname "${out}")/core-stamp.txt"
 fix="run: bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile dev"
 
@@ -38,16 +44,24 @@ if [[ ! -f "${stamp}" ]]; then
   exit 1
 fi
 
-if ! command -v git >/dev/null 2>&1 || ! git -C "${root}" rev-parse --git-dir >/dev/null 2>&1; then
-  echo "warning: not a git checkout; cannot check whether the Rust core is up to date" >&2
-  exit 0
-fi
-
+# The source hash needs git (core-sources-hash.sh hashes the tracked files).
+# Outside a git checkout only that comparison is skipped; every check below
+# still runs.
 built="$(sed -n 's/^sources //p' "${stamp}")"
-now="$(bash "${root}/scripts/ffi/core-sources-hash.sh")"
-if [[ -z "${built}" || "${built}" != "${now}" ]]; then
-  echo "error: the Rust core is older than the Rust sources; ${fix}" >&2
+if [[ -z "${built}" ]]; then
+  echo "error: the Rust core stamp has no source hash; ${fix}" >&2
   exit 1
+fi
+sources_checked=no
+if command -v git >/dev/null 2>&1 && git -C "${root}" rev-parse --git-dir >/dev/null 2>&1; then
+  sources_checked=yes
+  now="$(bash "${root}/scripts/ffi/core-sources-hash.sh")"
+  if [[ "${built}" != "${now}" ]]; then
+    echo "error: the Rust core is older than the Rust sources; ${fix}" >&2
+    exit 1
+  fi
+else
+  echo "warning: not a git checkout; cannot check whether the Rust core is up to date with the sources" >&2
 fi
 
 stamped_abis=()
@@ -93,4 +107,8 @@ if [[ "${build_type}" == "release" && "${profile}" != "release" ]]; then
   echo "warning: release build with a ${profile}-profile Rust core; for a release core run: bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile release" >&2
 fi
 
-echo "Rust core up to date (${profile}; ${stamped_abis[*]})"
+if [[ "${sources_checked}" == yes ]]; then
+  echo "Rust core up to date (${profile}; ${stamped_abis[*]})"
+else
+  echo "Rust core libraries match their stamp (${profile}; ${stamped_abis[*]}); sources not compared"
+fi
