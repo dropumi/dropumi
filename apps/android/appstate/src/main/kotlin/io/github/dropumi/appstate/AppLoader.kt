@@ -71,4 +71,26 @@ class AppLoader(
     fun retry() {
         if (_state.value is State.Failed) load()
     }
+
+    /**
+     * The app came to the front (ProcessLifecycleOwner's ON_START):
+     * receiving matches the settings again. Call on [scope]'s thread.
+     */
+    fun processStarted() {
+        isInBackground = false
+        val model = model ?: return
+        scope.launch { model.becomeActive() }
+    }
+
+    /**
+     * The app left the screen (ProcessLifecycleOwner's ON_STOP, sent a
+     * moment after the last activity stops, and never for a rotation or
+     * another configuration change): new connections are refused; running
+     * transfers finish. A model still loading starts in the background.
+     * Call on [scope]'s thread.
+     */
+    fun processStopped() {
+        isInBackground = true
+        model?.enterBackground()
+    }
 }

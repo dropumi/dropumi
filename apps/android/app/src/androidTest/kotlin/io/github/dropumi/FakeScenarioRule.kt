@@ -21,7 +21,11 @@ import org.junit.runners.model.Statement
 @Retention(AnnotationRetention.RUNTIME)
 annotation class UseScenario(val value: Scenario)
 
-class FakeScenarioRule(private val default: Scenario = Scenario.NEARBY_EMPTY) : ExternalResource() {
+/** [realServices]: the model starts the app's real services instead of recording the starts. */
+class FakeScenarioRule(
+    private val default: Scenario = Scenario.NEARBY_EMPTY,
+    private val realServices: Boolean = false,
+) : ExternalResource() {
     private var scenario = default
 
     val app: TestApplication
@@ -39,6 +43,6 @@ class FakeScenarioRule(private val default: Scenario = Scenario.NEARBY_EMPTY) : 
         // Key presses in an earlier test leave the display out of touch mode
         // (it is global per display); each test starts as a touch user would.
         InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
-        app.resetFakeGraph { core, settings -> scenario.configure(core, settings) }
+        app.resetFakeGraph(realServices) { core, settings -> scenario.configure(core, settings) }
     }
 }

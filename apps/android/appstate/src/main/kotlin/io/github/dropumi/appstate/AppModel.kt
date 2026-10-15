@@ -14,6 +14,10 @@
 //   a nearby name that matches a paired device's hint is only "looks like".
 // - Every core call runs on the io dispatcher, never on the main thread.
 //   State changes happen on the model's scope (the main thread in the app).
+// - Services start only while Dropumi is visible (ADR-0013 D7): the
+//   transfer service on Send and Accept, on OfferSent and TransferAccepted
+//   while in front, and when the activity leaves. A refused start keeps the
+//   transfer; its card says it may pause.
 
 package io.github.dropumi.appstate
 
@@ -166,9 +170,21 @@ data class AppState(
     val renaming: Boolean = false,
     /** The onboarding page on screen; kept here so a recreated screen shows the same one. */
     val onboardingPage: Int = 0,
+    /** The transfer service: whether running transfers go on after the user leaves (ADR-0013 D7). */
+    val transferService: TransferServiceState = TransferServiceState.OFF,
+    /**
+     * Show the card that asks to allow notifications: a transfer started
+     * while Dropumi's notifications could not be seen, and the user has not
+     * dismissed the card.
+     */
+    val askNotifications: Boolean = false,
 ) {
     /** The prompt to show now. */
     val currentPrompt: Prompt? get() = prompts.firstOrNull()
+
+    /** The transfer service was refused: running transfers may pause while Dropumi is in the background. */
+    val transfersMayPause: Boolean
+        get() = transferService == TransferServiceState.REFUSED && active.isNotEmpty()
 
     /**
      * The name onboarding suggests: only the core's own `Dropumi-XXXX`, never
@@ -198,6 +214,7 @@ val Prompt.promptId: ULong
  * @param pendingShare items the share target handed over.
  * @param receiveDir the app-private folder the core saves received files in.
  * @param exporter saves received files to shared storage, on request only.
+ * @param services starts the transfer service; without it every start is refused.
  */
 class AppModel(
     private val core: CoreClient,
@@ -212,6 +229,7 @@ class AppModel(
     private val pendingShare: PendingShare = PendingShare(),
     private val receiveDir: File? = null,
     private val exporter: ReceivedExporter? = null,
+    private val services: ServiceStarter = ServiceStarter.NONE,
 ) {
     private val _state = MutableStateFlow(
         AppState(
@@ -278,6 +296,9 @@ class AppModel(
     private var lastUnpairedNoticeMs: Long? = null
     private val historyWrites = Mutex()
 
+    /** The user dismissed the notification card; it does not come back until the next launch. */
+    private var notificationHintDismissed = false
+
     private inline fun update(crossinline change: AppState.() -> AppState) = _state.update { it.change() }
 
     // Lifecycle
@@ -310,9 +331,11 @@ class AppModel(
      * closes and the advertisement is withdrawn); running transfers finish.
      * Queued behind receiver changes already under way, so a receiver that is
      * still starting stops accepting once it is up. Called before [start],
-     * it keeps [start] from receiving.
+     * it keeps [start] from receiving. A second call while in the background
+     * does nothing: accepting stops once.
      */
     fun enterBackground() {
+        if (_state.value.isInBackground) return
         update { copy(isInBackground = true) }
         chainReceiver { stopAcceptingInBackground() }
     }
@@ -321,6 +344,12 @@ class AppModel(
         val s = _state.value
         // Back in front meanwhile: becomeActive() keeps the receiver.
         if (!s.isInBackground || s.receiver == null) return
+        // The core's receiver is stopping from now on: it takes no new
+        // connections and ends (ReceiverStopped) once its running transfers
+        // are done. Coming back to the front waits for that, then starts a
+        // new one; a stopping receiver cannot be changed. Marked before the
+        // call, so a ReceiverStopped that comes at once is never overwritten.
+        update { copy(receiver = null, receiverStopping = true) }
         quietly { core.stopAccepting() }
     }
 
@@ -329,6 +358,10 @@ class AppModel(
         update { copy(isInBackground = false) }
         if (_state.value.onboarded) applyVisibility()
         takeSharedItems()
+        // In front, a service start is allowed: running transfers get the
+        // service a refused start left them without.
+        keepTransfersRunning()
+        refreshNotifications()
     }
 
     // Identity and trust
@@ -710,6 +743,7 @@ class AppModel(
         val files = _state.value.draft
         if (files.isEmpty()) return
         val staged = mutableListOf<String>()
+        var recordId: String? = null
         try {
             val items = files.map { file ->
                 when (val source = file.source) {
@@ -729,6 +763,7 @@ class AppModel(
                     startedAtMs = clock(),
                 )
                 held[record.id] = Held(files, staged.toList())
+                recordId = record.id
                 update { copy(active = listOf(record) + active, draft = emptyList()) }
             }
         } catch (e: CancellationException) {
@@ -737,6 +772,16 @@ class AppModel(
         } catch (e: Exception) {
             deleteFolders(staged)
             show(e, "Not sent")
+            return
+        }
+        // Send was the user's tap, so Dropumi is in front. The transfer
+        // service keeps the send going after the user leaves, and its start
+        // carries the documents' read grants, which outlive the activity
+        // that received them (ADR-0013 D6). Not for a send that already
+        // ended (a refused connection can end it before send returns).
+        if (_state.value.active.any { it.id == recordId }) {
+            val grants = files.mapNotNull { (it.source as? OutgoingFile.Source.Document)?.uri }.map { GrantSpec(it) }
+            startTransferService(grants)
         }
     }
 
@@ -774,6 +819,11 @@ class AppModel(
         val s = _state.value
         if (id in s.answering || id in s.answered) return
         if (yes && !s.arming.canAccept(id)) return
+        // Accept was the user's tap, so Dropumi is in front: the transfer
+        // service keeps the receive going after the user leaves.
+        if (yes && prompt is Prompt.Offer && s.active.any(incoming(prompt.transferId))) {
+            startTransferServiceIfNeeded()
+        }
         update { copy(answering = answering + id) }
         try {
             when (prompt) {
@@ -1094,19 +1144,25 @@ class AppModel(
             is NodeEvent.SessionCode -> event.operation?.let { op ->
                 updateRecord({ it.operation == op }) { copy(peer = event.peer, sessionCode = event.code) }
             }
-            is NodeEvent.OfferSent -> updateRecord({ it.operation == event.operation }) {
-                copy(
-                    transferId = event.transferId,
-                    peer = event.peer,
-                    totalBytes = event.totalBytes,
-                    phase = TransferPhase.WaitingForAcceptance,
-                )
+            is NodeEvent.OfferSent -> {
+                updateRecord({ it.operation == event.operation }) {
+                    copy(
+                        transferId = event.transferId,
+                        peer = event.peer,
+                        totalBytes = event.totalBytes,
+                        phase = TransferPhase.WaitingForAcceptance,
+                    )
+                }
+                transferMovingInFront()
             }
             is NodeEvent.OfferReceived -> offerReceived(event)
             is NodeEvent.PromptOpened -> promptOpened(event.prompt)
             is NodeEvent.PromptClosed -> setPrompts { filterNot { it.promptId == event.id } }
-            is NodeEvent.TransferAccepted -> updateRecord(matching(event.operation, event.transferId)) {
-                copy(phase = TransferPhase.Transferring)
+            is NodeEvent.TransferAccepted -> {
+                updateRecord(matching(event.operation, event.transferId)) {
+                    copy(phase = TransferPhase.Transferring)
+                }
+                transferMovingInFront()
             }
             is NodeEvent.TransferProgress -> {
                 val now = clock()
@@ -1306,12 +1362,93 @@ class AppModel(
             savedSizes = if (stored.all { it.size != null }) stored.mapNotNull { it.size } else emptyList(),
         )
         update {
+            val remaining = active.filterNot { it.id == record.id }
             copy(
-                active = active.filterNot { it.id == record.id },
+                active = remaining,
                 history = (listOf(entry) + history).take(historyStore.limit),
+                // The last transfer ended: the service stops itself.
+                transferService = if (remaining.isEmpty()) TransferServiceState.OFF else transferService,
             )
         }
         saveHistory()
+    }
+
+    // Transfers after the user leaves (ADR-0013 D7)
+
+    /**
+     * Starts the transfer service for running transfers that do not have
+     * it yet. Only while Dropumi is visible: MainActivity calls this when it
+     * pauses (never for a configuration change), and coming to the front
+     * does too. A transfer still waiting for this user's answer does not
+     * start it.
+     */
+    fun keepTransfersRunning() {
+        val s = _state.value
+        if (s.transferService == TransferServiceState.RUNNING) return
+        if (s.active.none { it.phase != TransferPhase.WaitingForAnswer }) return
+        startTransferService(emptyList())
+    }
+
+    /** OfferSent or TransferAccepted: data is about to move. In front, the transfer service starts for it. */
+    private fun transferMovingInFront() {
+        if (!_state.value.isInBackground) startTransferServiceIfNeeded()
+    }
+
+    private fun startTransferServiceIfNeeded() {
+        if (_state.value.transferService != TransferServiceState.RUNNING) startTransferService(emptyList())
+    }
+
+    /**
+     * Starts the transfer service (again: a new start also carries new
+     * [grants]). Refused, the transfers go on without it and their cards say
+     * they may pause; nothing is cancelled. A refused start does not stop a
+     * service that already runs.
+     */
+    private fun startTransferService(grants: List<GrantSpec>) {
+        if (_state.value.active.isEmpty()) return
+        val result = services.start(ServiceKind.TRANSFER, grants)
+        update {
+            copy(
+                transferService = when {
+                    active.isEmpty() -> TransferServiceState.OFF
+                    result == ServiceStart.STARTED -> TransferServiceState.RUNNING
+                    transferService == TransferServiceState.RUNNING -> TransferServiceState.RUNNING
+                    else -> TransferServiceState.REFUSED
+                },
+            )
+        }
+        // After the first transfer starts, and only on Transfers (never over
+        // a prompt): ask to allow notifications if they cannot be seen.
+        if (!notificationHintDismissed && !services.notificationsVisible) update { copy(askNotifications = true) }
+    }
+
+    /**
+     * The transfer service could not go to the foreground and stopped
+     * itself. The transfers go on without it.
+     */
+    fun transferServiceRefused() = update {
+        copy(transferService = if (active.isEmpty()) TransferServiceState.OFF else TransferServiceState.REFUSED)
+    }
+
+    /**
+     * The system's time limit for the transfer service ran out (API 35+):
+     * every running transfer is cancelled, as the user would. Offers still
+     * waiting for this user's answer stay.
+     */
+    fun transfersTimedOut() {
+        transferServiceRefused()
+        _state.value.active.filter { it.phase != TransferPhase.WaitingForAnswer }.forEach(::cancel)
+    }
+
+    /** Whether notifications can be seen now (after the permission request, or back from Settings). */
+    fun refreshNotifications() {
+        if (_state.value.askNotifications && services.notificationsVisible) update { copy(askNotifications = false) }
+    }
+
+    /** "Not now" on the notification card: it stays away until the next launch. */
+    fun dismissNotificationHint() {
+        notificationHintDismissed = true
+        update { copy(askNotifications = false) }
     }
 
     /**

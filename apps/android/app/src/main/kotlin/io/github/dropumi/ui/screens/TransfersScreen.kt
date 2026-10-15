@@ -5,13 +5,21 @@
 // TransferFinished(COMPLETED); a partial transfer says so. Received files
 // stay inside Dropumi (ADR-0013 D4) and leave only through an explicit
 // Open, Share or Save on their row; Delete removes Dropumi's copies after a
-// confirmation.
+// confirmation. Running transfers continue after the user leaves through
+// the transfer service (ADR-0013 D7); where the system refused it, their
+// cards say they may pause. After a transfer starts while notifications
+// cannot be seen, a card asks to allow them (API 33+: the permission, in
+// context; otherwise the system's notification settings).
 package io.github.dropumi.ui.screens
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -45,6 +53,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import io.github.dropumi.ReceivedFileActions
 import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.AppState
@@ -52,6 +61,7 @@ import io.github.dropumi.appstate.HistoryEntry
 import io.github.dropumi.appstate.TransferRecord
 import io.github.dropumi.ui.Confirmation
 import io.github.dropumi.ui.design.DS
+import io.github.dropumi.ui.design.DSCard
 import io.github.dropumi.ui.design.DSIcons
 import io.github.dropumi.ui.design.DSMetrics
 import io.github.dropumi.ui.design.DSProgressBar
@@ -86,9 +96,31 @@ fun TransfersScreen(state: AppState) {
         }
     }
     val now = rememberNowMs(ticking = false)
+    val context = LocalContext.current
+    // Once refused, Android may not show the permission dialog again: the
+    // next tap opens the notification settings instead.
+    var permissionRefused by rememberSaveable { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) permissionRefused = true
+        model.refreshNotifications()
+    }
 
     ScreenColumn {
         ScreenHeader("Transfers", ScreenText.transfersSubtitle(state, now))
+        if (state.askNotifications) {
+            NotificationsCard(
+                onAllow = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !permissionRefused &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        openNotificationSettings(context, model)
+                    }
+                },
+                onDismiss = model::dismissNotificationHint,
+            )
+        }
         if (state.active.isEmpty() && state.history.isEmpty()) {
             EmptyState(
                 DSIcons.transfers,
@@ -97,7 +129,7 @@ fun TransfersScreen(state: AppState) {
                 modifier = Modifier.testTag("transfers.empty"),
             )
         }
-        for (record in state.active) TransferCard(record) { model.cancel(record) }
+        for (record in state.active) TransferCard(record, mayPause = state.transfersMayPause) { model.cancel(record) }
         if (state.history.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,6 +204,25 @@ private fun share(files: ReceivedFileActions, entry: HistoryEntry, model: AppMod
     start(context, intent, model, "No app on this device can take these files.")
 }
 
+/** The system's notification settings for Dropumi (API 26+). */
+private fun openNotificationSettings(context: Context, model: AppModel) {
+    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    start(context, intent, model, "Open the system settings and allow notifications for Dropumi there.")
+}
+
+/** Asks to allow notifications, so progress shows after the user leaves. Never over a prompt: it is part of Transfers. */
+@Composable
+private fun NotificationsCard(onAllow: () -> Unit, onDismiss: () -> Unit) {
+    val c = DS.colors
+    DSCard(modifier = Modifier.testTag("transfers.notifications")) {
+        Text(ScreenText.NOTIFICATIONS_CARD, style = DSType.body, color = c.textPrimary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SoftPill("Allow", onAllow, modifier = Modifier.testTag("transfers.notifications.allow"))
+            LinkButton("Not now", onDismiss, modifier = Modifier.testTag("transfers.notifications.dismiss"))
+        }
+    }
+}
+
 private fun start(context: Context, intent: Intent, model: AppModel, failure: String) {
     try {
         context.startActivity(intent)
@@ -180,9 +231,9 @@ private fun start(context: Context, intent: Intent, model: AppModel, failure: St
     }
 }
 
-/** One running transfer. */
+/** One running transfer. [mayPause]: the transfer service was refused, so it may pause in the background. */
 @Composable
-fun TransferCard(record: TransferRecord, onCancel: () -> Unit) {
+fun TransferCard(record: TransferRecord, mayPause: Boolean = false, onCancel: () -> Unit) {
     val c = DS.colors
     val shape = RoundedCornerShape(DSMetrics.cardRadius)
     val large = largeText()
@@ -214,6 +265,14 @@ fun TransferCard(record: TransferRecord, onCancel: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics(mergeDescendants = true) {}) {
             Text(ScreenText.transferStatus(record), style = DSType.meta, color = c.textSecondary, modifier = Modifier.weight(1f))
             Text(ScreenText.transferRate(record), style = DSType.smallButton, color = c.accentText)
+        }
+        if (mayPause) {
+            Text(
+                ScreenText.TRANSFER_MAY_PAUSE,
+                style = DSType.meta,
+                color = c.textSecondary,
+                modifier = Modifier.testTag("transfer.mayPause"),
+            )
         }
     }
 }

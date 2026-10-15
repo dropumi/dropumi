@@ -10,6 +10,15 @@
     <!-- API 31+: other apps' overlay windows are hidden while a prompt or a
          trust/policy confirmation shows (ADR-0013 D8, R23). A normal permission. -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- Running transfers finish after the user leaves (ADR-0013 D7): the
+         dataSync transfer service, and a partial wake lock held only while
+         it runs. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- API 33+: the transfer progress notification. Asked for in context, from
+         a card on Transfers after a transfer starts, never over a prompt. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Nothing is backed up or moved to a new device (ADR-0013 D3). -->
     <application
@@ -55,6 +64,13 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- Lets running transfers finish after the user leaves (ADR-0013 D7).
+             Not exported: only the app's own model starts it, while visible. -->
+        <service
+            android:name=".TransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Open and Share of received files (ADR-0013 D4): not exported; it
              grants read access to one received file per explicit action. -->

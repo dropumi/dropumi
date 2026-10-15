@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //
 // The composition root: the folders (ADR-0013 D3/D4), the Rust core with the
-// NSD adapter, UriGuard and the app model. Opening the core reads or creates
-// the identity, so the loader does it off the main thread when the main
-// screen first asks.
+// NSD adapter, UriGuard, the transfer service starter (D7) and the app
+// model. Opening the core reads or creates the identity, so the loader does
+// it off the main thread when the main screen first asks. The process's
+// foreground and background drive receiving (ProcessVisibility).
 
 package io.github.dropumi
 
@@ -31,6 +32,11 @@ import kotlinx.coroutines.SupervisorJob
 
 class DropumiApplication : Application(), AppGraphHost {
     override val graph: AppGraph by lazy { build() }
+
+    override fun onCreate() {
+        super.onCreate()
+        ProcessVisibility.install(this)
+    }
 
     private fun build(): AppGraph {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -63,6 +69,7 @@ class DropumiApplication : Application(), AppGraphHost {
                     sharedFreeSpace = ::sharedStorageFreeBytes,
                     mimeLookup = { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) },
                 ),
+                services = AndroidServiceStarter(this),
             )
         }
         return AppGraph(scope, loader, pendingShare, guard, ReceivedFileActions(this, paths.receiveDir))

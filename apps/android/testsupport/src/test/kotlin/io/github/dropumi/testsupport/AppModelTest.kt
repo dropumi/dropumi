@@ -395,11 +395,14 @@ class AppModelTest {
         s.model.enterBackground()
         gate.open()
         onboarding.await()
-        assertNotNull(s.model.state.value.receiver)
+        assertEquals("the receiver started", 1, s.core.starts().size)
         // Receiver changes run one after another; this one runs last.
         s.model.applyVisibility()
         assertTrue(FakeCoreClient.Call.StopAccepting in s.core.calls)
         assertFalse(FakeCoreClient.Call.StopReceiving in s.core.calls)
+        // Not accepting: the receiver is stopping until its transfers end.
+        assertNull(s.model.state.value.receiver)
+        assertTrue(s.model.state.value.receiverStopping)
     }
 
     @Test

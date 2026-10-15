@@ -25,6 +25,7 @@ import io.github.dropumi.ffi.Prompt
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
 import io.github.dropumi.ffi.ReceiverInfo
+import io.github.dropumi.ffi.ReceiverStopReason
 import io.github.dropumi.ffi.SendItem
 import io.github.dropumi.ffi.SendTarget
 import io.github.dropumi.ffi.TrustMethod
@@ -117,6 +118,14 @@ class FakeCoreClient : CoreClient {
      * change was saved but could not be read back.
      */
     val appliedButUnreadable: MutableSet<String> = mutableSetOf()
+
+    /**
+     * When true, stopAccepting ends the receiver at once, as the core does
+     * when no transfer is running, and reports it (ReceiverStopped) before
+     * the call returns: the earliest the event can come.
+     */
+    @Volatile
+    var stopAcceptingEndsReceiver = false
 
     /** Delivers events as the core would. Found and lost devices also update [nearbyPeers]. */
     fun emit(vararg batch: NodeEvent) {
@@ -262,6 +271,10 @@ class FakeCoreClient : CoreClient {
 
     override fun stopAccepting() {
         note(Call.StopAccepting)
+        if (stopAcceptingEndsReceiver) {
+            synchronized(lock) { receiving = null }
+            emit(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED))
+        }
     }
 
     override fun stopReceiving() {

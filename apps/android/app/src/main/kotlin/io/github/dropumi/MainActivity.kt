@@ -42,7 +42,10 @@ import kotlinx.coroutines.launch
  *   ([keyGate]), before any key reaches Compose;
  * - the prompt on screen re-arms when the activity resumes and when its
  *   window regains focus, and the user's focus move is forgotten then.
- * It never shows over the lock screen and never turns the screen on.
+ * It never shows over the lock screen and never turns the screen on. When it
+ * pauses (not for a configuration change) running transfers get the
+ * transfer service; ProcessVisibility, not the activity, decides foreground
+ * and background.
  */
 class MainActivity : ComponentActivity() {
     private val graph: AppGraph get() = (application as AppGraphHost).graph
@@ -88,6 +91,14 @@ class MainActivity : ComponentActivity() {
         // Shared items handed over while the activity was away (singleTask:
         // a share brings this instance back instead of starting a new one).
         lifecycleScope.launch { model.takeSharedItems() }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Leaving, not rotating: while Dropumi is still visible, the transfer
+        // service starts for running transfers that do not have it yet, so
+        // they finish after the user has left (ADR-0013 D7).
+        if (!isChangingConfigurations) graph.loader.model?.keepTransfersRunning()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

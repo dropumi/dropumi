@@ -22,6 +22,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 object ScreenText {
+    /** On a running transfer's card when the transfer service was refused (ADR-0013 D7). */
+    const val TRANSFER_MAY_PAUSE = "May pause while Dropumi is in the background"
+
+    /** The card on Transfers that asks to allow notifications. */
+    const val NOTIFICATIONS_CARD = "Allow notifications to see progress when you leave Dropumi"
+
     /**
      * A nearby device's second line. A hint that matches a paired device only
      * means "looks like" until the handshake checks the key, so a nearby
