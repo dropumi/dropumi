@@ -871,6 +871,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      * Renames a paired device; returns whether it is paired. Never adds a
      * device.
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
      */
@@ -878,6 +881,10 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
     
     /**
      * Replaces this device's key. Every paired device must pair again.
+     *
+     * A key saved without a confirmed directory sync is applied: the call
+     * succeeds with the new identity and a `Warning` event says it may not
+     * survive a crash.
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
@@ -895,6 +902,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
     
     /**
      * Renames this device (sanitized; at most 64 bytes).
+     *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
@@ -962,6 +972,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      * Trusts a device by its full fingerprint (52 characters), compared
      * with the other device out of band.
      *
+     * A device saved without a confirmed directory sync is trusted: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
      */
@@ -977,6 +990,11 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
     
     /**
      * Forgets a paired device; returns whether it was paired.
+     *
+     * A removal saved without a confirmed directory sync is applied: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     * Whether the device was paired is then the state read just before the
+     * removal.
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
@@ -1211,6 +1229,9 @@ open func pendingPrompts() -> [Prompt]  {
      * Renames a paired device; returns whether it is paired. Never adds a
      * device.
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
      */
@@ -1227,6 +1248,10 @@ open func renameTrusted(fingerprint: String, alias: String)throws  -> Bool  {
     
     /**
      * Replaces this device's key. Every paired device must pair again.
+     *
+     * A key saved without a confirmed directory sync is applied: the call
+     * succeeds with the new identity and a `Warning` event says it may not
+     * survive a crash.
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
@@ -1261,6 +1286,9 @@ open func send(target: SendTarget, items: [SendItem], options: SendOptions)throw
     
     /**
      * Renames this device (sanitized; at most 64 bytes).
+     *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
@@ -1390,6 +1418,9 @@ open func stopReceiving()  {try! rustCall() {
      * Trusts a device by its full fingerprint (52 characters), compared
      * with the other device out of band.
      *
+     * A device saved without a confirmed directory sync is trusted: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
      */
@@ -1421,6 +1452,11 @@ open func trustedDevices()throws  -> [TrustedDeviceInfo]  {
     
     /**
      * Forgets a paired device; returns whether it was paired.
+     *
+     * A removal saved without a confirmed directory sync is applied: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     * Whether the device was paired is then the state read just before the
+     * removal.
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
@@ -7621,16 +7657,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_pending_prompts() != 54466) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() != 56308) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() != 44601) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() != 19542) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() != 16042) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_send() != 40109) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() != 19961) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() != 3861) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_receive_policy() != 206) {
@@ -7657,13 +7693,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_stop_receiving() != 13397) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() != 6655) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() != 12960) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_trusted_devices() != 1585) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_untrust() != 36547) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_untrust() != 4923) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_operationhandle_cancel() != 15377) {

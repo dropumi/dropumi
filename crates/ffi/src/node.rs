@@ -16,7 +16,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dropumi_application::config::{AdmissionLimits, ReceiveConfig, SendRequest, Timeouts};
-use dropumi_application::error::DiscoveryError;
+use dropumi_application::error::{DiscoveryError, StoreError};
 use dropumi_application::events::{AppEvent, EventSink};
 use dropumi_application::identity::LocalIdentity;
 use dropumi_application::ports::{
@@ -48,7 +48,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::discovery::{PeerTable, PlatformDiscovery, service_ad, single_trust_match};
-use crate::error::{DropumiError, ErrorCode};
+use crate::error::{DropumiError, ErrorCode, settle};
 use crate::mailbox::{EventListener, Mailbox, spawn_dispatcher};
 use crate::prompts::{AnswerKind, PromptRegistry, UiInteraction};
 use crate::runtime::{Runtime, lock, on_app_thread};
@@ -279,26 +279,39 @@ impl DropumiNode {
 
     /// Renames this device (sanitized; at most 64 bytes).
     ///
+    /// A name saved without a confirmed directory sync is applied: the call
+    /// succeeds and a `Warning` event says it may not survive a crash.
+    ///
     /// # Errors
     /// `Busy` while receiving or while an operation runs; storage errors.
     pub fn set_device_name(&self, name: String) -> Result<IdentityInfo, DropumiError> {
         self.engine.check_open()?;
         self.engine.check_quiet()?;
+        let store = &self.engine.identity;
         let id = self
             .engine
-            .identity
-            .set_name(&DeviceName::sanitize(&name))?;
+            .applied(store.set_name(&DeviceName::sanitize(&name)), || {
+                store.load_or_create()
+            })?;
         Ok(identity_info(&id))
     }
 
     /// Replaces this device's key. Every paired device must pair again.
+    ///
+    /// A key saved without a confirmed directory sync is applied: the call
+    /// succeeds with the new identity and a `Warning` event says it may not
+    /// survive a crash.
     ///
     /// # Errors
     /// `Busy` while receiving or while an operation runs; storage errors.
     pub fn reset_identity(&self) -> Result<IdentityInfo, DropumiError> {
         self.engine.check_open()?;
         self.engine.check_quiet()?;
-        Ok(identity_info(&self.engine.identity.reset()?))
+        let store = &self.engine.identity;
+        let id = self
+            .engine
+            .applied(store.reset(), || store.load_or_create())?;
+        Ok(identity_info(&id))
     }
 
     /// Paired devices.
@@ -316,6 +329,9 @@ impl DropumiNode {
     /// Trusts a device by its full fingerprint (52 characters), compared
     /// with the other device out of band.
     ///
+    /// A device saved without a confirmed directory sync is trusted: the
+    /// call succeeds and a `Warning` event says it may not survive a crash.
+    ///
     /// # Errors
     /// An invalid fingerprint, or storage errors.
     pub fn trust_fingerprint(
@@ -325,38 +341,59 @@ impl DropumiNode {
     ) -> Result<TrustedDeviceInfo, DropumiError> {
         self.engine.check_open()?;
         let fp = parse_full(&fingerprint)?;
-        let device = trust::add_manual(
-            &self.engine.trust,
+        let store = &self.engine.trust;
+        let added = trust::add_manual(
+            store,
             &SystemClock,
             fp,
             alias.as_deref().map(DeviceName::sanitize),
-        )?;
+        );
+        let device = self
+            .engine
+            .applied(added.map(Some), || store.get(&fp))?
+            // Forgotten again by another call before the re-read.
+            .ok_or_else(|| DropumiError::NotFound {
+                detail: "the device was forgotten again before it could be read back".into(),
+            })?;
         Ok(TrustedDeviceInfo::from(&device))
     }
 
     /// Renames a paired device; returns whether it is paired. Never adds a
     /// device.
     ///
+    /// A name saved without a confirmed directory sync is applied: the call
+    /// succeeds and a `Warning` event says it may not survive a crash.
+    ///
     /// # Errors
     /// An invalid fingerprint, or storage errors.
     pub fn rename_trusted(&self, fingerprint: String, alias: String) -> Result<bool, DropumiError> {
         self.engine.check_open()?;
         let fp = parse_full(&fingerprint)?;
-        Ok(trust::rename(
-            &self.engine.trust,
-            &fp,
-            DeviceName::sanitize(&alias),
-        )?)
+        let store = &self.engine.trust;
+        self.engine.applied(
+            trust::rename(store, &fp, DeviceName::sanitize(&alias)),
+            || Ok(store.get(&fp)?.is_some()),
+        )
     }
 
     /// Forgets a paired device; returns whether it was paired.
+    ///
+    /// A removal saved without a confirmed directory sync is applied: the
+    /// call succeeds and a `Warning` event says it may not survive a crash.
+    /// Whether the device was paired is then the state read just before the
+    /// removal.
     ///
     /// # Errors
     /// An invalid fingerprint, or storage errors.
     pub fn untrust(&self, fingerprint: String) -> Result<bool, DropumiError> {
         self.engine.check_open()?;
         let fp = parse_full(&fingerprint)?;
-        Ok(trust::remove(&self.engine.trust, &fp)?)
+        let store = &self.engine.trust;
+        // After a removal saved without a confirmed directory sync the store
+        // cannot say whether the device existed, so read it first.
+        let was_paired = store.get(&fp)?.is_some();
+        self.engine
+            .applied(trust::remove(store, &fp), || Ok(was_paired))
     }
 
     /// Starts browsing for nearby devices (`PeerFound`, `PeerLost`). Browse
@@ -890,6 +927,23 @@ impl Engine {
             ));
         }
         Ok(())
+    }
+
+    /// The result of a configuration write ([`settle`]). A change saved
+    /// without a confirmed directory sync is applied: the re-read state is
+    /// returned and a `Warning` event with fixed text is published.
+    fn applied<T>(
+        &self,
+        written: Result<T, StoreError>,
+        reread: impl FnOnce() -> Result<T, StoreError>,
+    ) -> Result<T, DropumiError> {
+        let (state, warning) = settle(written, reread)?;
+        if let Some(message) = warning {
+            self.mailbox.push(NodeEvent::Warning {
+                message: message.to_owned(),
+            });
+        }
+        Ok(state)
     }
 
     /// Dropumi's own configuration files, which are never sent.

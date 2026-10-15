@@ -633,6 +633,71 @@ fn identity_mutation_busy_while_receiving() {
     b.node.stop_receiving();
 }
 
+/// Regression: a configuration change saved without a confirmed directory
+/// sync (`StoreError::NotDurable`) is applied. Each call returns the
+/// applied state and publishes a warning (fixed text, no path) instead of
+/// failing.
+#[test]
+fn change_saved_without_dir_sync_is_applied_with_warning() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut n = node();
+    let before = n.node.identity().unwrap();
+    let fp = dropumi_domain::identity::Fingerprint::from_digest([7; 32]).to_full();
+    let mode = |m| std::fs::set_permissions(&n.config, std::fs::Permissions::from_mode(m));
+    // Write and search but no read: files can still be replaced, but the
+    // directory cannot be opened for its fsync.
+    mode(0o300).unwrap();
+    if std::fs::read_dir(&n.config).is_ok() {
+        // Skipped: directory permissions are bypassed (root).
+        mode(0o700).unwrap();
+        return;
+    }
+    let renamed = n.node.set_device_name("Desk".into());
+    let trusted = n.node.trust_fingerprint(fp.clone(), Some("Laptop".into()));
+    let alias_changed = n.node.rename_trusted(fp.clone(), "Studio".into());
+    let listed = n.node.trusted_devices();
+    let removed = n.node.untrust(fp.clone());
+    let removed_again = n.node.untrust(fp.clone());
+    let reset = n.node.reset_identity();
+    mode(0o700).unwrap();
+
+    assert_eq!(renamed.unwrap().name, "Desk");
+    let trusted = trusted.unwrap();
+    assert_eq!(
+        (trusted.fingerprint.as_str(), trusted.alias.as_deref()),
+        (fp.as_str(), Some("Laptop"))
+    );
+    assert!(alias_changed.unwrap());
+    assert_eq!(listed.unwrap()[0].alias.as_deref(), Some("Studio"));
+    assert!(removed.unwrap(), "the device was paired before the call");
+    assert!(!removed_again.unwrap(), "the device was no longer paired");
+    let reset = reset.unwrap();
+    assert_ne!(reset.fingerprint, before.fingerprint);
+    // The applied state is what the store holds.
+    let now = n.node.identity().unwrap();
+    assert_eq!(
+        (now.name.as_str(), &now.fingerprint),
+        ("Desk", &reset.fingerprint)
+    );
+    assert!(n.node.trusted_devices().unwrap().is_empty());
+
+    // One warning per change, with a fixed message that names no path.
+    let config = n.config.to_string_lossy().into_owned();
+    for _ in 0..6 {
+        match n
+            .events
+            .wait("a warning", |e| matches!(e, NodeEvent::Warning { .. }))
+        {
+            NodeEvent::Warning { message } => {
+                assert!(message.contains("could not be synced"), "{message}");
+                assert!(!message.contains(&config), "{message}");
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[test]
 fn answers_bind_to_prompt_ids() {
     let (a, mut b) = (node(), node());

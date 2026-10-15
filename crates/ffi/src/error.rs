@@ -200,6 +200,39 @@ impl From<StoreError> for DropumiError {
     }
 }
 
+/// The warning a node call publishes when its configuration change is in
+/// place but the configuration directory could not be synced (fixed text:
+/// no path, nothing local).
+pub(crate) const SAVED_NOT_DURABLE: &str = "the change was saved, but the configuration \
+    directory could not be synced, so it may not survive a crash or power loss";
+
+/// Settles the result of a configuration write for a node call.
+///
+/// - `Ok(state)`: applied; `(state, None)`.
+/// - [`StoreError::NotDurable`]: the change is in place, only the directory
+///   sync failed. `reread` loads the applied state, which is returned with
+///   [`SAVED_NOT_DURABLE`] for the caller to publish as a warning (the log
+///   names only the error's fixed kind). A failed re-read is reported as an
+///   error.
+/// - Any other error: nothing was changed; a `Config` error.
+pub(crate) fn settle<T>(
+    written: Result<T, StoreError>,
+    reread: impl FnOnce() -> Result<T, StoreError>,
+) -> Result<(T, Option<&'static str>), DropumiError> {
+    match written {
+        Ok(state) => Ok((state, None)),
+        Err(e @ StoreError::NotDurable(_)) => {
+            // Only the fixed kind is logged, never the path.
+            tracing::warn!(
+                kind = e.kind(),
+                "configuration change saved, but the configuration directory could not be synced"
+            );
+            Ok((reread()?, Some(SAVED_NOT_DURABLE)))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl From<TransferError> for DropumiError {
     fn from(e: TransferError) -> Self {
         Self::Transfer {
@@ -278,5 +311,83 @@ mod tests {
         );
         assert_eq!(ErrorCode::from_code("remote_error"), ErrorCode::RemoteError);
         assert_eq!(ErrorCode::from_code("something new"), ErrorCode::Internal);
+    }
+
+    const PATH: &str = "/home/someone/.config/dropumi/device.json";
+
+    /// Regression: a write saved without a confirmed directory sync is
+    /// applied. The call re-reads the state and succeeds with the fixed,
+    /// path-free warning instead of failing.
+    #[test]
+    fn not_durable_write_is_applied_with_a_warning() {
+        let mut reread = false;
+        let (state, warning) = settle(
+            Err::<&str, _>(StoreError::NotDurable(format!("{PATH}: I/O error"))),
+            || {
+                reread = true;
+                Ok("re-read")
+            },
+        )
+        .unwrap();
+        assert!(reread);
+        assert_eq!(state, "re-read");
+        assert_eq!(warning, Some(SAVED_NOT_DURABLE));
+        assert!(!SAVED_NOT_DURABLE.contains('/'), "{SAVED_NOT_DURABLE}");
+    }
+
+    /// A durable write needs no re-read and no warning.
+    #[test]
+    fn durable_write_is_applied_without_a_warning() {
+        let settled = settle(Ok("written"), || -> Result<&str, StoreError> {
+            panic!("no re-read after a durable write")
+        });
+        assert_eq!(settled.unwrap(), ("written", None));
+    }
+
+    /// Every other store error means nothing changed: a `Config` error. So
+    /// is a failed re-read after a not-durable write.
+    #[test]
+    fn store_failure_is_a_config_error() {
+        for (e, expected) in [
+            (StoreError::Io(PATH.into()), ConfigProblem::Io),
+            (
+                StoreError::InsecurePermissions {
+                    path: PATH.into(),
+                    hint: "chmod 600".into(),
+                },
+                ConfigProblem::InsecurePermissions,
+            ),
+            (
+                StoreError::Corrupt {
+                    path: PATH.into(),
+                    reason: "bad JSON".into(),
+                },
+                ConfigProblem::Corrupt,
+            ),
+        ] {
+            let settled = settle(Err::<&str, _>(e), || -> Result<&str, StoreError> {
+                panic!("no re-read after a failed write")
+            });
+            assert!(
+                matches!(settled, Err(DropumiError::Config { problem, .. }) if problem == expected),
+                "{settled:?}"
+            );
+        }
+        let settled = settle(Err::<&str, _>(StoreError::NotDurable(PATH.into())), || {
+            Err(StoreError::Corrupt {
+                path: PATH.into(),
+                reason: "bad JSON".into(),
+            })
+        });
+        assert!(
+            matches!(
+                settled,
+                Err(DropumiError::Config {
+                    problem: ConfigProblem::Corrupt,
+                    ..
+                })
+            ),
+            "{settled:?}"
+        );
     }
 }
