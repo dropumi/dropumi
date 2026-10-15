@@ -403,6 +403,9 @@ pub struct MemTrust {
     pub fail_get: Arc<AtomicBool>,
     /// `touch` fails.
     pub fail_touch: Arc<AtomicBool>,
+    /// `upsert` stores the entry, then reports `NotDurable` (a directory
+    /// sync that failed after the commit point).
+    pub upsert_not_durable: Arc<AtomicBool>,
 }
 
 impl MemTrust {
@@ -472,6 +475,11 @@ impl TrustStore for MemTrust {
         let mut v = self.devices.lock().unwrap();
         v.retain(|d| d.fingerprint != device.fingerprint);
         v.push(device);
+        if self.upsert_not_durable.load(Ordering::SeqCst) {
+            return Err(StoreError::NotDurable(format!(
+                "{BROKEN_TRUST_PATH}: directory sync failed"
+            )));
+        }
         Ok(())
     }
 

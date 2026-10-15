@@ -13,9 +13,10 @@ use crate::paths::io_err;
 /// directory, fsync, rename over the target, then a directory fsync (Unix).
 ///
 /// # Errors
-/// [`StoreError::Io`] on failure (the temp file is removed). A failed
-/// directory fsync is reported after the rename: the new content may
-/// already be in place, but its durability was not confirmed.
+/// [`StoreError::Io`] on a failure before the rename (the temp file is
+/// removed and the target is unchanged). [`StoreError::NotDurable`] if the
+/// directory fsync fails after the rename: the new content is in place,
+/// but its durability was not confirmed.
 pub fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> Result<(), StoreError> {
     let target = dir.join(name);
     let mut tmp = tempfile::Builder::new()
@@ -41,21 +42,23 @@ pub fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> Result<(), StoreErro
             Err(e) => return Err(io_err(&target, &e.error)),
         }
     }
-    sync_dir(dir)
+    sync_dir_after_commit(dir)
 }
 
-/// Fsyncs `dir` so a rename or a new entry in it is durable (Unix).
+/// Fsyncs `dir` so a rename or a new entry in it is durable (Unix). Call
+/// it only after the commit point (the rename or link that made the new
+/// content visible): a failure means the change is in place.
 /// Windows has no portable directory fsync; NTFS journals directory
 /// metadata.
 ///
 /// # Errors
-/// [`StoreError::Io`] if the directory cannot be opened or synced.
-pub(crate) fn sync_dir(dir: &Path) -> Result<(), StoreError> {
+/// [`StoreError::NotDurable`] if the directory cannot be opened or synced.
+pub(crate) fn sync_dir_after_commit(dir: &Path) -> Result<(), StoreError> {
     #[cfg(unix)]
     {
         std::fs::File::open(dir)
             .and_then(|d| d.sync_all())
-            .map_err(|e| io_err(dir, &e))?;
+            .map_err(|e| StoreError::NotDurable(format!("{}: {e}", dir.display())))?;
     }
     #[cfg(not(unix))]
     let _ = dir;
@@ -89,7 +92,8 @@ mod tests {
     }
 
     /// A directory that cannot be opened for the fsync (write and search,
-    /// no read) makes the write fail, after the rename.
+    /// no read) is reported after the rename as `NotDurable`: the new
+    /// content is in place.
     #[cfg(unix)]
     #[test]
     fn dir_sync_failure_reported() {
@@ -104,8 +108,30 @@ mod tests {
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
         let result = write_atomic(d.path(), "a.json", b"two");
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        assert!(
+            matches!(result, Err(StoreError::NotDurable(_))),
+            "{result:?}"
+        );
         // The error comes after the rename: the new content is in place.
         assert_eq!(std::fs::read(d.path().join("a.json")).unwrap(), b"two");
+    }
+
+    /// A failure before the rename (here: the temp file cannot be created
+    /// in a read-only directory) stays `Io`, and nothing changes.
+    #[cfg(unix)]
+    #[test]
+    fn failure_before_rename_is_io() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions.
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        write_atomic(d.path(), "a.json", b"one").unwrap();
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = write_atomic(d.path(), "a.json", b"two");
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        assert_eq!(std::fs::read(d.path().join("a.json")).unwrap(), b"one");
     }
 }

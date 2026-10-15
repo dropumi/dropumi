@@ -16,9 +16,12 @@ use std::time::Duration;
 
 use dropumi_application::channel::{EstablishedSession, InitiateParams, RecvError, initiate};
 use dropumi_application::config::Timeouts;
+use dropumi_application::events::AppEvent;
 use dropumi_application::ports::Connector;
 use dropumi_application::usecases::connect::ResolveParams;
-use dropumi_application::usecases::pair::{PairDeps, PairOutcome, pair_listen, pair_with};
+use dropumi_application::usecases::pair::{
+    PAIRED_NOT_DURABLE, PairDeps, PairOutcome, pair_listen, pair_with,
+};
 use dropumi_domain::connection::PeerExpectation;
 use dropumi_domain::error::{Phase, TransferError};
 use dropumi_domain::peer::Intent;
@@ -60,26 +63,39 @@ async fn run_with(
     Scripted,
     Scripted,
 ) {
+    let a_trust = MemTrust::default();
+    let b_trust = MemTrust::default();
+    let (a, b, _, _) = run_on(&a_ui, &b_ui, a_cancel, &a_trust, &b_trust).await;
+    (a, b, a_trust, b_trust, a_ui, b_ui)
+}
+
+/// Alice (`a_ui`, `a_trust`, cancelled by `a_cancel`) pairs with Bob
+/// (`b_ui`, `b_trust`); also returns the events each side emitted.
+async fn run_on(
+    a_ui: &Scripted,
+    b_ui: &Scripted,
+    a_cancel: CancellationToken,
+    a_trust: &MemTrust,
+    b_trust: &MemTrust,
+) -> (PairOutcome, PairOutcome, Vec<AppEvent>, Vec<AppEvent>) {
     let net = Net::new();
     let alice = identity(1, "Alice");
     let bob = identity(2, "Bob");
     let listener = net.listen(addr(9300));
-    let a_trust = MemTrust::default();
-    let b_trust = MemTrust::default();
     let clock = ManualClock::at(5);
-    let (ae, _arx) = events();
-    let (be, _brx) = events();
+    let (ae, mut arx) = events();
+    let (be, mut brx) = events();
     let a_deps = PairDeps {
-        trust: &a_trust,
-        interaction: &a_ui,
+        trust: a_trust,
+        interaction: a_ui,
         clock: &clock,
         identity: &alice,
         timeouts: Default::default(),
         events: ae,
     };
     let b_deps = PairDeps {
-        trust: &b_trust,
-        interaction: &b_ui,
+        trust: b_trust,
+        interaction: b_ui,
         clock: &clock,
         identity: &bob,
         timeouts: Default::default(),
@@ -107,7 +123,7 @@ async fn run_with(
             CancellationToken::new()
         )
     );
-    (a.unwrap(), b.unwrap(), a_trust, b_trust, a_ui, b_ui)
+    (a.unwrap(), b.unwrap(), drain(&mut arx), drain(&mut brx))
 }
 
 /// Bob listens with a code prompt nobody answers, while `peer` drives a raw
@@ -365,6 +381,52 @@ async fn both_confirm_store_trust() {
     assert_eq!(
         *a_ui.sas_seen.lock().unwrap(),
         *b_ui.sas_seen.lock().unwrap()
+    );
+}
+
+/// Regression: a trust entry saved without a confirmed directory sync is
+/// in place, so the pairing succeeded. It used to be reported as failed
+/// although the device was stored as trusted.
+#[tokio::test]
+async fn pairing_saved_without_dir_sync_is_paired_with_warning() {
+    let (a_ui, b_ui) = (
+        Scripted::with(None, Some(true)),
+        Scripted::with(None, Some(true)),
+    );
+    let (a_trust, b_trust) = (MemTrust::default(), MemTrust::default());
+    b_trust
+        .upsert_not_durable
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let (a, b, a_events, b_events) =
+        run_on(&a_ui, &b_ui, CancellationToken::new(), &a_trust, &b_trust).await;
+
+    assert!(matches!(a, PairOutcome::Paired(_)), "{a:?}");
+    assert!(
+        matches!(b, PairOutcome::Paired(ref v) if v.trusted && v.alias.as_ref().unwrap().as_str() == "Alice"),
+        "{b:?}"
+    );
+    assert!(b_trust.contains(&identity(1, "Alice")));
+    let warning = b_events
+        .iter()
+        .position(|e| matches!(e, AppEvent::Warning { .. }))
+        .expect("a warning event");
+    let paired = b_events
+        .iter()
+        .position(|e| matches!(e, AppEvent::Paired { .. }))
+        .expect("a paired event");
+    assert!(warning < paired, "{b_events:?}");
+    let AppEvent::Warning { message } = &b_events[warning] else {
+        unreachable!()
+    };
+    assert_eq!(message, PAIRED_NOT_DURABLE);
+    assert!(!message.contains('/'), "{message}");
+    // The side whose store synced normally has no warning.
+    assert!(
+        !a_events
+            .iter()
+            .any(|e| matches!(e, AppEvent::Warning { .. })),
+        "{a_events:?}"
     );
 }
 

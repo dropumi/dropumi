@@ -35,12 +35,20 @@
 
 | File | Content | Protection |
 |---|---|---|
-| `identity.key` | 8-byte magic `DRPMKEY1` + 32-byte secret (exactly 40 bytes; anything else is reported as corrupt) | 0600. First creation: a 0600 temp file, fsync, then `persist_noclobber` (and a directory fsync on Unix), so concurrent first runs end with one identity. `identity reset` replaces it atomically under the lock. |
+| `identity.key` | 8-byte magic `DRPMKEY1` + 32-byte secret (exactly 40 bytes; anything else is reported as corrupt) | 0600. First creation: a 0600 temp file, fsync, then `persist_noclobber` (and a directory fsync on Unix), so concurrent first runs end with one identity. If only that directory fsync fails, the key is already in place: startup goes on with it and logs a warning (the error kind only, never the path). `identity reset` replaces it atomically under the lock. |
 | `device.json` | `{"version":1,"name":"…"}` | 0600, atomic replace |
 | `trusted_devices.json` | `{"version":1,"devices":[…]}` (ADR-0004) | 0600, atomic replace, re-read from disk on every lookup |
 | `.lock` | Empty lock file | 0600; std `File::lock` (exclusive) around every read-modify-write and around identity creation |
 
-Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename over the target (Windows: retried on errors 5 and 32), then a directory fsync on Unix. A failed directory fsync is reported as an error even though the new file may already be in place, because its durability was not confirmed.
+Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename over the target (Windows: retried on errors 5 and 32), then a directory fsync on Unix.
+
+**Saved but not confirmed on disk.** The rename (for the first key, the no-clobber link) is the commit point. A failure before it is `StoreError::Io`, and nothing changed. A failed directory fsync comes after it, so it is a separate error, `StoreError::NotDurable`: the change is in place and visible to every later read, but it may not survive a crash or power loss. The store returns `NotDurable` only after the commit point, and its `kind()` for logs is the fixed phrase `saved, directory sync failed`. Callers treat it as applied, never as "nothing changed":
+- pairing reports success (`Paired`) after a `Warning` event with a fixed text;
+- the CLI's `trust add`/`remove` and `identity set-name`/`reset` re-read the state, print their normal output plus a `warning`, and exit 0;
+- a first-run identity creation goes on with the new files and logs a warning;
+- a last-seen update, like any of its failures, is only logged, with the kind.
+
+Before this distinction, a pairing whose trust entry was stored was reported as failed, and these commands reported failures for changes that had been applied (`identity reset` then never printed the new fingerprint).
 
 **Permission checks** run whenever a command opens the identity or trust store (`identity`, `trust`, `pair`, `receive`, `send`), and again on every read of a store file. `discover` does not read the config directory.
 - **Unix:** every checked path must be owned by the effective UID (`rustix::process::geteuid`) and must not be a symbolic link. The config directory, `device.json` and `trusted_devices.json` must have no `0o022` bits (no group or other write). `identity.key` must have no `0o077` bits (no group or other access).
@@ -54,7 +62,7 @@ Atomic replace means: a 0600 temp file in the same directory, `sync_all`, rename
 ## Implementation
 
 - Code: [`crates/protocol/src/identity.rs`](../../crates/protocol/src/identity.rs) (key, fingerprint), [`crates/domain/src/identity.rs`](../../crates/domain/src/identity.rs) (text forms, prefixes), [`crates/domain/src/device.rs`](../../crates/domain/src/device.rs) (names), [`crates/infra/src/store/`](../../crates/infra/src/store/) (`FileIdentityStore`, `TrustFile`, atomic writes, lock), [`crates/infra/src/perms.rs`](../../crates/infra/src/perms.rs), [`crates/infra/src/paths.rs`](../../crates/infra/src/paths.rs), [`crates/cli/src/commands/mod.rs`](../../crates/cli/src/commands/mod.rs) (exit code 9).
-- Tests (all passed in the local run on macOS 27 arm64; CI pending): `fingerprint_kat`, `x25519_rfc7748_vector`, `debug_redacts_secret`, `display_and_parse_roundtrip`, `parse_rejects_bad_input`, `identity_created_0600_in_0700`, `identity_rejects_group_readable`, `identity_bad_magic_rejected`, `concurrent_create_single_identity`, `reset_replaces_key`, `trust_store_rejects_group_writable`, `concurrent_writers_serialized`, `config_dir_rejects_world_writable`, `config_dir_outside_localappdata_detected`.
+- Tests (all passed in the local run on macOS 27 arm64; CI pending): `fingerprint_kat`, `x25519_rfc7748_vector`, `debug_redacts_secret`, `display_and_parse_roundtrip`, `parse_rejects_bad_input`, `identity_created_0600_in_0700`, `identity_rejects_group_readable`, `identity_bad_magic_rejected`, `concurrent_create_single_identity`, `reset_replaces_key`, `trust_store_rejects_group_writable`, `concurrent_writers_serialized`, `config_dir_rejects_world_writable`, `config_dir_outside_localappdata_detected`. Durability (Unix, skipped as root): `dir_sync_failure_reported` and `key_dir_sync_failure_reported` (`NotDurable` after the commit point), `failure_before_rename_is_io`, `first_run_without_dir_sync_loads_the_new_identity`; callers: `pairing_saved_without_dir_sync_is_paired_with_warning` (application) and `commands::tests::{not_durable_write_is_applied_with_a_warning, durable_write_is_applied_without_a_warning, store_failure_is_a_failure}` (CLI).
 - The Unix permission checks were exercised only on macOS in the local run. The Windows warning path has a unit test for the path comparison only; Windows itself is Not tested (pending CI).
 
 ## Consequences

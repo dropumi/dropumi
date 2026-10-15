@@ -174,8 +174,14 @@ pub trait FileSink: Send + Sync {
 }
 
 /// Stores this device's identity.
+///
+/// A write method that returns [`StoreError::NotDurable`] has applied the
+/// change (only its durability is unconfirmed); every other error means
+/// nothing was changed.
 pub trait IdentityStore: Send + Sync {
-    /// Loads the identity, creating one on first use.
+    /// Loads the identity, creating one on first use. A new identity whose
+    /// directory sync fails is still returned (the files are in place);
+    /// the adapter logs a warning.
     ///
     /// # Errors
     /// [`StoreError`] for I/O, corruption or unsafe permissions.
@@ -184,17 +190,23 @@ pub trait IdentityStore: Send + Sync {
     /// Replaces the key with a new one.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// new key is in place but the directory sync failed.
     fn reset(&self) -> Result<LocalIdentity, StoreError>;
 
     /// Changes the device name.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// new name is in place but the directory sync failed.
     fn set_name(&self, name: &DeviceName) -> Result<LocalIdentity, StoreError>;
 }
 
 /// Stores trusted devices.
+///
+/// A write method that returns [`StoreError::NotDurable`] has applied the
+/// change (only its durability is unconfirmed); every other error means
+/// nothing was changed.
 pub trait TrustStore: Send + Sync {
     /// Looks up a fingerprint.
     ///
@@ -211,7 +223,8 @@ pub trait TrustStore: Send + Sync {
     /// Adds or replaces a trusted device.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// entry is stored but the directory sync failed.
     fn upsert(&self, device: TrustedDevice) -> Result<(), StoreError>;
 
     /// Adds or replaces the entry for `fp` with `merge(current entry)`, in
@@ -220,9 +233,16 @@ pub trait TrustStore: Send + Sync {
     /// pairing) is never overwritten with stale data. Returns the stored
     /// entry.
     ///
+    /// `merge` runs while the store's lock is held: it must not call back
+    /// into this store's write methods (`upsert`, `upsert_with`, `remove`,
+    /// `touch`), which take the same lock and would deadlock. It receives
+    /// the current entry, so it has no reason to read the store either.
+    ///
     /// # Errors
     /// [`StoreError`] for I/O, corruption or unsafe permissions, or if the
-    /// merged entry has a fingerprint other than `fp` (nothing is changed).
+    /// merged entry has a fingerprint other than `fp` (nothing is changed);
+    /// [`StoreError::NotDurable`] if the entry is stored but the directory
+    /// sync failed.
     fn upsert_with<F: FnOnce(Option<&TrustedDevice>) -> TrustedDevice>(
         &self,
         fp: &Fingerprint,
@@ -232,13 +252,16 @@ pub trait TrustStore: Send + Sync {
     /// Removes a device; returns whether it existed.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// device is removed but the directory sync failed (whether it existed
+    /// is then not reported).
     fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError>;
 
     /// Records a completed session.
     ///
     /// # Errors
-    /// [`StoreError`] for I/O failures.
+    /// [`StoreError`] for I/O failures; [`StoreError::NotDurable`] if the
+    /// time is stored but the directory sync failed.
     fn touch(&self, fp: &Fingerprint, at: Timestamp) -> Result<(), StoreError>;
 }
 

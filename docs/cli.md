@@ -51,7 +51,10 @@ dropumi identity reset --yes
 | `set-name <NAME>` | Changes the device name. The name is sanitized (Unicode NFC, control, separator and format characters removed, at most 64 bytes); an empty result becomes `Unnamed device`. Other devices see this name only as a claim. |
 | `reset --yes` | Replaces the identity key and keeps the name. Every paired device must pair again. Without `--yes` it refuses (exit 2). The local trust store is not changed. |
 
-All three subcommands create the identity first if it does not exist. Event: [`identity`](#events-reference).
+All three subcommands create the identity first if it does not exist. Event: [`identity`](#events-reference). If
+`set-name` or `reset` saved the change but could not sync the configuration directory, the command prints a `warning`
+and then the identity as it is now on disk, and exits 0
+([saved but not confirmed on disk](#saved-but-not-confirmed-on-disk)).
 
 Fingerprint forms: the **full** form is 52 upper-case base32 characters (A-Z, 2-7); the **display** form is the first
 24 characters in groups of four (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`); the mDNS **hint** is the first 8 characters.
@@ -68,10 +71,12 @@ dropumi trust remove <FINGERPRINT>
 |---|---|
 | `list` | Lists trusted devices: display fingerprint, alias, how trust was created (`sas` or `manual`). |
 | `add <FINGERPRINT>` | Trusts a device by its **full 52-character fingerprint** (case-insensitive; `-` and spaces ignored). Compare it with the other device out of band first. `--name` sets the local alias. If the device is already trusted, its alias is updated when `--name` is given and everything else is kept. Prints the updated list. |
-| `remove <FINGERPRINT>` | Stops trusting a device (full fingerprint). Reports whether it was trusted. |
+| `remove <FINGERPRINT>` | Stops trusting a device (full fingerprint). Reports whether it was trusted (not known when the removal was saved but not confirmed on disk: `existed` is then `null`). |
 
 A shorter prefix is refused (exit 2). There is no trust on first use: trust is created only by `trust add` or by
-[`pair`](#pair). Events: `trusted_devices`, `trust_removed`.
+[`pair`](#pair). Events: `trusted_devices`, `trust_removed`. If `add` or `remove` saved the change but could not sync
+the configuration directory, the command prints a `warning` and its normal output, and exits 0
+([saved but not confirmed on disk](#saved-but-not-confirmed-on-disk)).
 
 ## `pair`
 
@@ -98,7 +103,9 @@ How it works:
 2. Both devices show the same 6-digit code (`sas` event). Each user confirms only if the codes match.
 3. Trust is stored on **both** sides only if **both** users confirmed (method `sas`, alias = the other device's
    claimed name at pairing time, which you can change with `trust add <FP> --name`). Otherwise nothing is stored
-   (`pairing_rejected`, exit 6).
+   (`pairing_rejected`, exit 6). If the trust entry was saved but the configuration directory could not be synced,
+   pairing still succeeds (`paired`, exit 0) after a `warning` event with the fixed message `the paired device was
+   saved, but the configuration directory could not be synced, so the pairing may not survive a crash or power loss`.
 4. If the other device answers no or cancels while this device's code prompt is open, the prompt is withdrawn at
    once and `pair` ends without an answer (`pairing_rejected`, exit 6); if the other device disconnects, it ends with
    `connection_lost` (exit 5). Nothing is stored, and a `confirm` or `deny` written after that is ignored.
@@ -285,7 +292,7 @@ With `--json`, every stdout line is one JSON object:
 |---|---|---|
 | `identity` | `identity *` | `fingerprint`, `fingerprint_display`, `public_key` (64 hex), `name` |
 | `trusted_devices` | `trust list`, `trust add` | `devices`: array of {`fingerprint`, `fingerprint_display`, `alias`, `method` (`sas`/`manual`), `added_at`, `last_seen`} (Unix seconds; `last_seen` may be `null`) |
-| `trust_removed` | `trust remove` | `fingerprint`, `existed` |
+| `trust_removed` | `trust remove` | `fingerprint`, `existed` (`null` when the removal was saved but not confirmed on disk) |
 | `listening` | `receive`, `pair --listen` | `addrs` (bound socket addresses), `port`, `fingerprint`, `fingerprint_display`, `name`, `policy` (`trusted-only`/`everyone`; `pair --listen` always reports `trusted-only`) |
 | `advertising` | `receive`, `pair --listen` | `instance` (random mDNS instance label) |
 | `discovery_unavailable` | `receive`, `pair --listen` | `reason`. Manual addresses still work. |
@@ -307,7 +314,7 @@ With `--json`, every stdout line is one JSON object:
 | `rejected` | `send`, `receive` | `transfer_id`, `reason` |
 | `cancelled` | `send`, `receive`, `pair` | `transfer_id` (or `null`), `by` (`local`/`peer`), `reason`. A locally cancelled pairing reports `transfer_id` `null`, `by` `local`, `reason` `user`. |
 | `failed` | any | `transfer_id` (or `null`), `code`, `phase` (or `null`), `message`. Usage errors have only `code` = `usage` and `message`. |
-| `warning` | any | `message` (for example removed stale partial files, an unknown control command, or an offer rejected for lack of a terminal) |
+| `warning` | any | `message` (for example removed stale partial files, an unknown control command, an offer rejected for lack of a terminal, or a configuration change saved but not confirmed on disk) |
 
 `message` fields are local, human-readable text and may contain local paths. They are never sent to the peer.
 
@@ -351,7 +358,7 @@ From `crates/cli/src/exit.rs`:
 
 | Code | Meaning |
 |---|---|
-| 0 | Success. `receive` also exits 0 when stopped with `quit`. |
+| 0 | Success. `receive` also exits 0 when stopped with `quit`. A configuration change that was saved but not confirmed on disk is a success too, with a `warning` ([details](#saved-but-not-confirmed-on-disk)). |
 | 1 | Internal error |
 | 2 | Usage: invalid arguments (including clap parse errors), invalid or unresolvable target, mDNS not available, `identity reset` without `--yes`, unreadable or non-regular source files |
 | 3 | Rejected by the receiver |
@@ -395,6 +402,21 @@ owned by the current user and must not be symbolic links (`.lock` is not checked
 others at all. The error names the fix (`chmod 700 '<dir>'` or
 `chmod 600 '<file>'`). On Windows, ACLs are not inspected; a `warning` event is shown when the directory is outside
 `%LOCALAPPDATA%`.
+
+#### Saved but not confirmed on disk
+
+The rename is the commit point. A failure before it changes nothing and is reported as a failure (`storage`, exit 9).
+If only the directory fsync after it fails (Unix), the change is already in place and every later command sees it,
+but it may not survive a crash or power loss. Dropumi then treats the change as applied:
+
+- `identity set-name`, `identity reset`, `trust add` and `trust remove` print a `warning` whose message starts with
+  `the change was saved but could not be confirmed on disk:` followed by the local detail (path and OS error), then
+  their normal output, and exit **0**. The identity and the trusted-device list are re-read from disk for that
+  output; `trust_removed` has `existed` `null`, because whether the device was trusted before is not known then;
+- `pair` reports `paired` (exit 0) after a `warning` (see [`pair`](#pair));
+- the first run that creates the identity goes on with the new files and logs a warning on stderr (without the path);
+- a last-seen update after a transfer is never reported as a failure; its errors are only logged (the kind, without
+  the path).
 
 ### Receive directory
 

@@ -108,6 +108,29 @@ impl Ctx {
     }
 }
 
+/// Settles the result of a configuration write for a command.
+///
+/// - `Ok(state)`: applied; `(state, None)`.
+/// - [`StoreError::NotDurable`]: the change is in place, only the directory
+///   sync failed. `reread` loads the applied state, and the warning (the
+///   error's local text) goes with it: the command prints its normal output
+///   plus the warning and exits 0.
+/// - Any other error: nothing was applied; the command reports it (exit 9).
+///   A failed re-read is reported the same way.
+///
+/// # Errors
+/// The store error to report.
+pub fn settle<T>(
+    written: Result<T, StoreError>,
+    reread: impl FnOnce() -> Result<T, StoreError>,
+) -> Result<(T, Option<String>), StoreError> {
+    match written {
+        Ok(state) => Ok((state, None)),
+        Err(e @ StoreError::NotDurable(_)) => reread().map(|state| (state, Some(e.to_string()))),
+        Err(e) => Err(e),
+    }
+}
+
 /// Applies hidden timeout overrides.
 #[must_use]
 pub fn timeouts(t: &TimeoutArgs) -> Timeouts {
@@ -220,5 +243,70 @@ pub async fn dispatch(cli: Cli, root: CancellationToken) -> u8 {
         Command::Receive(a) => receive::run(a, &ctx).await,
         Command::Send(a) => send::run(a, &ctx).await,
         Command::Discover(a) => discover::run(a, &ctx).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PATH: &str = "/home/someone/.config/dropumi/device.json";
+
+    /// Regression: a write saved without a confirmed directory sync is
+    /// applied. The command re-reads the state and reports success with a
+    /// warning (exit 0) instead of a failure.
+    #[test]
+    fn not_durable_write_is_applied_with_a_warning() {
+        let mut reread = false;
+        let (state, warning) = settle(
+            Err::<&str, _>(StoreError::NotDurable(format!("{PATH}: I/O error"))),
+            || {
+                reread = true;
+                Ok("re-read")
+            },
+        )
+        .unwrap();
+        assert!(reread);
+        assert_eq!(state, "re-read");
+        let warning = warning.unwrap();
+        assert!(
+            warning.starts_with("the change was saved but could not be confirmed on disk"),
+            "{warning}"
+        );
+    }
+
+    /// A durable write needs no re-read and no warning.
+    #[test]
+    fn durable_write_is_applied_without_a_warning() {
+        let settled = settle(Ok("written"), || -> Result<&str, StoreError> {
+            panic!("no re-read after a durable write")
+        });
+        assert_eq!(settled.unwrap(), ("written", None));
+    }
+
+    /// Every other store error means nothing changed: a failure (exit 9).
+    /// So is a failed re-read after a not-durable write.
+    #[test]
+    fn store_failure_is_a_failure() {
+        for e in [
+            StoreError::Io(format!("{PATH}: permission denied")),
+            StoreError::InsecurePermissions {
+                path: PATH.into(),
+                hint: "chmod 600".into(),
+            },
+            StoreError::Corrupt {
+                path: PATH.into(),
+                reason: "bad JSON".into(),
+            },
+        ] {
+            let settled = settle(Err::<&str, _>(e), || -> Result<&str, StoreError> {
+                panic!("no re-read after a failed write")
+            });
+            assert!(settled.is_err(), "{settled:?}");
+        }
+        let settled = settle(Err::<&str, _>(StoreError::NotDurable(PATH.into())), || {
+            Err(StoreError::Io(PATH.into()))
+        });
+        assert!(matches!(settled, Err(StoreError::Io(_))), "{settled:?}");
     }
 }

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 //! `dropumi identity`.
 
+use dropumi_application::error::StoreError;
+use dropumi_application::identity::LocalIdentity;
 use dropumi_application::usecases::identity as uc;
 
-use super::Ctx;
+use super::{Ctx, settle};
 use crate::args::IdentityCmd;
 use crate::exit::code;
 
@@ -18,13 +20,10 @@ pub fn run(cmd: IdentityCmd, ctx: &Ctx) -> u8 {
             ctx.out.identity(&id);
             code::OK
         }
-        IdentityCmd::SetName { name } => match uc::set_name(&store, &name) {
-            Ok(id) => {
-                ctx.out.identity(&id);
-                code::OK
-            }
-            Err(e) => ctx.store_error(&e),
-        },
+        IdentityCmd::SetName { name } => settled_identity(
+            ctx,
+            settle(uc::set_name(&store, &name), || uc::show(&store)),
+        ),
         IdentityCmd::Reset { yes } => {
             if !yes {
                 return ctx.usage(
@@ -32,13 +31,22 @@ pub fn run(cmd: IdentityCmd, ctx: &Ctx) -> u8 {
                      pass --yes to confirm",
                 );
             }
-            match uc::reset(&store) {
-                Ok(id) => {
-                    ctx.out.identity(&id);
-                    code::OK
-                }
-                Err(e) => ctx.store_error(&e),
-            }
+            settled_identity(ctx, settle(uc::reset(&store), || uc::show(&store)))
         }
+    }
+}
+
+/// Prints the identity after a change (with the warning if the change was
+/// saved without a confirmed directory sync), or reports the failure.
+fn settled_identity(ctx: &Ctx, settled: Result<(LocalIdentity, Option<String>), StoreError>) -> u8 {
+    match settled {
+        Ok((id, warning)) => {
+            if let Some(w) = &warning {
+                ctx.out.warning(w);
+            }
+            ctx.out.identity(&id);
+            code::OK
+        }
+        Err(e) => ctx.store_error(&e),
     }
 }
