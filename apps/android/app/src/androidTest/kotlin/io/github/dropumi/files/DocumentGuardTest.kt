@@ -2,6 +2,14 @@
 //
 // UriGuard on the device, with the real core's configuration folder
 // (temporary, never the app's own) and in-process providers.
+//
+// UriGuard refuses a descriptor on either of two checks: its (st_dev,
+// st_ino) matches an entry of a protected folder, or /proc/self/fd/<n>
+// resolves under one. A provider that opens the protected file by its own
+// path trips both, so the fd-identity tests below also disguise the
+// descriptor's /proc path as an unrelated one: then only the file identity
+// can refuse it, as it must for a hard link under an innocent name (which
+// these images cannot create: link returns EACCES in app data).
 
 package io.github.dropumi.files
 
@@ -32,6 +40,7 @@ import java.util.Collections
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -69,6 +78,38 @@ class DocumentGuardTest {
             calls += "open $uri"
             return inner.open(uri)
         }
+    }
+
+    /** The real descriptor, with its /proc/self/fd path made to look unrelated. */
+    private class Disguised(private val inner: OpenDocument) : OpenDocument by inner {
+        override fun procPath(): String = UNRELATED_PATH
+    }
+
+    /** Opens documents through [inner] and disguises them. */
+    private class DisguisingSource(private val inner: DocumentSource) : DocumentSource {
+        override fun query(uri: String): DocumentMeta = inner.query(uri)
+        override fun open(uri: String): OpenDocument = Disguised(inner.open(uri))
+    }
+
+    /** What UriGuard says about the descriptor [src] opens for [uri]. */
+    private fun refusal(uri: String, src: DocumentSource = source) = src.open(uri).use { guard.checkOpen(it) }
+
+    /**
+     * Every kind of protected file, in the temporary folders: the identity
+     * key, the lock, a config temp file, a key temp file and the history.
+     */
+    private fun protectedFiles(): List<File> {
+        val config = core.paths.configDir
+        val files = listOf(
+            identityKey,
+            File(config, ".lock"),
+            File(config, ".dropumi-cfg-test01"),
+            File(config, ".dropumi-key-test01"),
+            File(core.paths.appDataDir, "history.json"),
+        )
+        for (file in files.drop(2)) if (!file.exists()) file.writeBytes(ByteArray(8))
+        files.forEach { assertTrue("${it.name} exists", it.isFile) }
+        return files
     }
 
     private fun staging(src: DocumentSource = source) = StagingCopy(src, guard, core.paths.outgoingDir) { Long.MAX_VALUE }
@@ -118,7 +159,37 @@ class DocumentGuardTest {
     @Test
     fun uriGuardRefusesFdOpenedOnIdentityKey() {
         val uri = provider.add("key", TestDocumentsProvider.Doc("holiday.jpg", 32, file = identityKey))
+        assertEquals(UriGuardPolicy.Refusal.PROTECTED_FILE, refusal(uri))
         assertUnreadable(allowed(uri))
+    }
+
+    /**
+     * The (st_dev, st_ino) check on its own: each protected file, opened by
+     * the provider, with its /proc path disguised as an unrelated one. An
+     * unprotected file behind the same disguise is allowed, so the refusals
+     * come from the file identity alone. openReader and staging, wired to the
+     * same disguised source, refuse it too.
+     */
+    @Test
+    fun uriGuardFdIdentityAloneRefusesProtectedFiles() {
+        val disguised = DisguisingSource(source)
+        val plain = File(core.root, "plain.bin").apply { writeBytes(ByteArray(8)) }
+        val plainUri = provider.add("plain", TestDocumentsProvider.Doc("plain.bin", 8, file = plain))
+        assertNull("control: an unprotected file is allowed", refusal(plainUri, disguised))
+        for (file in protectedFiles()) {
+            val uri = provider.add("id-${file.name}", TestDocumentsProvider.Doc("holiday.jpg", 8, file = file))
+            assertEquals(file.name, UNRELATED_PATH, disguised.open(uri).use { it.procPath() })
+            assertEquals(file.name, UriGuardPolicy.Refusal.PROTECTED_FILE, refusal(uri, disguised))
+            val reader = (ContentUriFile.create(disguised, uri, guard) as ContentUriFile.Created.Allowed).file
+            val e = runCatching { reader.openReader() }.exceptionOrNull()
+            assertEquals(file.name, ContentUriFile.UNREADABLE, (e as CallbackException.Failed).detail)
+            assertEquals(
+                file.name,
+                StagingCopy.Failure.Refused(UriGuardPolicy.Refusal.PROTECTED_FILE),
+                stagingFailure(staging(disguised).start(uri, "holiday.jpg")),
+            )
+        }
+        assertTrue("nothing was copied", core.paths.outgoingDir.list().isNullOrEmpty())
     }
 
     @Test
@@ -134,30 +205,25 @@ class DocumentGuardTest {
     @Test
     fun uriGuardRefusesHardLinkToIdentityKey() {
         val uri = provider.add("link", TestDocumentsProvider.Doc("innocent.jpg", 32, file = linkToIdentityKey()))
+        assertEquals(UriGuardPolicy.Refusal.PROTECTED_FILE, refusal(uri))
         assertUnreadable(allowed(uri))
     }
 
     @Test
     fun stagingRunsUriGuard() {
         val uri = provider.add("link", TestDocumentsProvider.Doc("innocent.jpg", null, file = linkToIdentityKey()))
-        assertTrue(stagingFailure(staging().start(uri, "innocent.jpg")) is StagingCopy.Failure.Refused)
+        assertEquals(
+            StagingCopy.Failure.Refused(UriGuardPolicy.Refusal.PROTECTED_FILE),
+            stagingFailure(staging().start(uri, "innocent.jpg")),
+        )
         assertTrue("nothing was copied", core.paths.outgoingDir.list().isNullOrEmpty())
     }
 
     @Test
     fun uriGuardRefusesLockAndTempFiles() {
-        val config = core.paths.configDir
-        assertTrue(".lock exists", File(config, ".lock").isFile)
-        File(config, ".dropumi-cfg-test01").writeBytes(ByteArray(8))
-        File(config, ".dropumi-key-test01").writeBytes(ByteArray(32))
-        File(core.paths.appDataDir, "history.json").writeText("{}")
-        for (file in listOf(
-            File(config, ".lock"),
-            File(config, ".dropumi-cfg-test01"),
-            File(config, ".dropumi-key-test01"),
-            File(core.paths.appDataDir, "history.json"),
-        )) {
+        for (file in protectedFiles().drop(1)) {
             val uri = provider.add(file.name, TestDocumentsProvider.Doc("a.bin", 8, file = file))
+            assertEquals(file.name, UriGuardPolicy.Refusal.PROTECTED_FILE, refusal(uri))
             assertUnreadable(allowed(uri))
         }
     }
@@ -194,5 +260,10 @@ class DocumentGuardTest {
             assertEquals(TransferStatus.COMPLETED, receiver.finished(Direction.INCOMING).status)
             assertArrayEquals(bytes, File(receiver.paths.receiveDir, "From a pipe.txt").readBytes())
         }
+    }
+
+    private companion object {
+        /** Where a disguised descriptor claims to point: outside every protected folder. */
+        const val UNRELATED_PATH = "/storage/emulated/0/Pictures/holiday.jpg"
     }
 }
