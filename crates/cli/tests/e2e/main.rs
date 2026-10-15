@@ -16,6 +16,9 @@
 
 mod support;
 
+// Unix only: it makes the directory sync fail with directory modes.
+#[cfg(unix)]
+mod config;
 mod discovery;
 mod failure;
 mod pairing;
