@@ -120,10 +120,15 @@ impl TrustFile {
         write_atomic(&self.dir, TRUST_FILE, &json)
     }
 
-    fn modify<R>(&self, f: impl FnOnce(&mut Vec<TrustedDevice>) -> R) -> Result<R, StoreError> {
+    /// A locked read-modify-write. If `f` fails, nothing is written and
+    /// its error is returned, so the file is untouched.
+    fn modify<R>(
+        &self,
+        f: impl FnOnce(&mut Vec<TrustedDevice>) -> Result<R, StoreError>,
+    ) -> Result<R, StoreError> {
         let _lock = ConfigLock::acquire(&self.dir)?;
         let mut devices = self.read()?;
-        let r = f(&mut devices);
+        let r = f(&mut devices)?;
         self.write(&devices)?;
         Ok(r)
     }
@@ -142,6 +147,7 @@ impl TrustStore for TrustFile {
         self.modify(|v| {
             v.retain(|d| d.fingerprint != device.fingerprint);
             v.push(device);
+            Ok(())
         })
     }
 
@@ -153,7 +159,7 @@ impl TrustStore for TrustFile {
         self.modify(|v| {
             let device = merge(v.iter().find(|d| &d.fingerprint == fp));
             if &device.fingerprint != fp {
-                // Checked before any change: the rewrite keeps the content.
+                // Rejected before any change; `modify` then writes nothing.
                 return Err(StoreError::Io(
                     "merged trust entry has a different fingerprint".into(),
                 ));
@@ -161,14 +167,14 @@ impl TrustStore for TrustFile {
             v.retain(|d| &d.fingerprint != fp);
             v.push(device.clone());
             Ok(device)
-        })?
+        })
     }
 
     fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError> {
         self.modify(|v| {
             let before = v.len();
             v.retain(|d| &d.fingerprint != fp);
-            v.len() != before
+            Ok(v.len() != before)
         })
     }
 
@@ -177,6 +183,7 @@ impl TrustStore for TrustFile {
             for d in v.iter_mut().filter(|d| &d.fingerprint == fp) {
                 d.last_seen = Some(at);
             }
+            Ok(())
         })
     }
 
@@ -427,6 +434,57 @@ mod tests {
                 "round {round}: a rename brought back a removed device"
             );
         }
+    }
+
+    /// Regression: a merge that returns another fingerprint is rejected
+    /// without writing, so the file is untouched. (The rejected merge used
+    /// to rewrite the unchanged list, here visible as reformatted bytes.)
+    #[test]
+    fn rejected_merge_writes_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let t = TrustFile::open(d.path()).unwrap();
+        t.upsert(device(1, "One")).unwrap();
+        // The same content in compact form: any rewrite changes the bytes.
+        let compact = serde_json::to_vec(
+            &serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(d.path().join(TRUST_FILE)).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        write_atomic(d.path(), TRUST_FILE, &compact).unwrap();
+        let result = t.upsert_with(&Fingerprint::from_digest([1; 32]), |_| device(2, "Two"));
+        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        assert_eq!(
+            String::from_utf8(std::fs::read(d.path().join(TRUST_FILE)).unwrap()).unwrap(),
+            String::from_utf8(compact).unwrap()
+        );
+    }
+
+    /// Regression: a rejected merge is `Io` even where the directory
+    /// cannot be synced; it never comes back as `NotDurable` (which would
+    /// mean the change was applied).
+    #[cfg(unix)]
+    #[test]
+    fn rejected_merge_is_never_not_durable() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the
+            // directory sync cannot be made to fail this way.
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let t = TrustFile::open(d.path()).unwrap();
+        t.upsert(device(1, "One")).unwrap();
+        let before = std::fs::read(d.path().join(TRUST_FILE)).unwrap();
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = t.upsert_with(&Fingerprint::from_digest([1; 32]), |_| device(2, "Two"));
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
+        assert_eq!(
+            String::from_utf8(std::fs::read(d.path().join(TRUST_FILE)).unwrap()).unwrap(),
+            String::from_utf8(before).unwrap()
+        );
     }
 
     #[test]

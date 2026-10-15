@@ -256,4 +256,24 @@ mod tests {
         // Without a deny list nothing is refused.
         assert!(LocalFileSource::default().meta(&f.key).await.is_ok());
     }
+
+    /// Regression: a metadata-only change (here a chmod, which updates the
+    /// inode change time but not the bytes, the size or the modification
+    /// time) is not a source change.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn metadata_only_change_is_not_a_source_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("a.txt");
+        std::fs::write(&path, b"aaaa").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let source = LocalFileSource::default();
+        let meta = source.meta(&path).await.unwrap();
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(source.open(&path, &meta).await.is_ok());
+        assert!(source.unchanged(&path, &meta).await);
+    }
 }

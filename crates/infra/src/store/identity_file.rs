@@ -196,23 +196,34 @@ impl IdentityStore for FileIdentityStore {
         Self::identity(secret, name)
     }
 
+    /// Every step that can fail for any reason other than the final
+    /// directory sync runs before the new key is written (the commit
+    /// point): loading and checking the name, creating a missing default
+    /// name, generating the key and deriving its public key. So an error
+    /// other than [`StoreError::NotDurable`] leaves the old key in place.
     fn reset(&self) -> Result<LocalIdentity, StoreError> {
         check_config_dir(&self.dir)?;
         let _lock = ConfigLock::acquire(&self.dir)?;
-        let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
-        let mut content = Zeroizing::new(Vec::with_capacity(KEY_FILE_LEN));
-        content.extend_from_slice(KEY_MAGIC);
-        content.extend_from_slice(secret.as_storage_bytes());
-        write_atomic(&self.dir, KEY_FILE, &content)?;
         let name = match self.load_name()? {
             Some(n) => n,
             None => {
                 let n = Self::default_name();
-                self.save_name(&n)?;
+                match self.save_name(&n) {
+                    // device.json is in place; the key write below syncs
+                    // the directory again.
+                    Ok(()) | Err(StoreError::NotDurable(_)) => {}
+                    Err(e) => return Err(e),
+                }
                 n
             }
         };
-        Self::identity(secret, name)
+        let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
+        let identity = Self::identity(secret, name)?;
+        let mut content = Zeroizing::new(Vec::with_capacity(KEY_FILE_LEN));
+        content.extend_from_slice(KEY_MAGIC);
+        content.extend_from_slice(identity.secret().as_storage_bytes());
+        write_atomic(&self.dir, KEY_FILE, &content)?;
+        Ok(identity)
     }
 
     fn set_name(&self, name: &DeviceName) -> Result<LocalIdentity, StoreError> {
@@ -342,6 +353,97 @@ mod tests {
             .collect();
         let fps: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         assert!(fps.windows(2).all(|w| w[0] == w[1]));
+    }
+
+    /// Regression: a reset whose device name cannot be loaded fails before
+    /// the new key is written, so the identity is unchanged. (It used to
+    /// write the key first and then fail on `device.json`, reporting a
+    /// failure although the identity had rotated.)
+    #[test]
+    fn reset_with_corrupt_device_file_keeps_the_key() {
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        store.load_or_create().unwrap();
+        let key_before = std::fs::read(base.path().join(KEY_FILE)).unwrap();
+        write_atomic(base.path(), DEVICE_FILE, b"{not json").unwrap();
+        let result = store.reset();
+        assert!(
+            matches!(result, Err(StoreError::Corrupt { .. })),
+            "{result:?}"
+        );
+        // Compared without printing: the bytes are a secret key.
+        assert!(
+            std::fs::read(base.path().join(KEY_FILE)).unwrap() == key_before,
+            "a failed reset replaced the key"
+        );
+    }
+
+    /// Regression: the same for a group-writable `device.json`.
+    #[cfg(unix)]
+    #[test]
+    fn reset_with_insecure_device_file_keeps_the_key() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        store.load_or_create().unwrap();
+        let key_before = std::fs::read(base.path().join(KEY_FILE)).unwrap();
+        std::fs::set_permissions(
+            base.path().join(DEVICE_FILE),
+            std::fs::Permissions::from_mode(0o620),
+        )
+        .unwrap();
+        let result = store.reset();
+        assert!(
+            matches!(result, Err(StoreError::InsecurePermissions { .. })),
+            "{result:?}"
+        );
+        // Compared without printing: the bytes are a secret key.
+        assert!(
+            std::fs::read(base.path().join(KEY_FILE)).unwrap() == key_before,
+            "a failed reset replaced the key"
+        );
+    }
+
+    /// A reset whose directory sync fails has rotated the key: it reports
+    /// `NotDurable`, and the next load returns the new identity.
+    #[cfg(unix)]
+    #[test]
+    fn reset_without_dir_sync_rotates_the_key() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        let before = store.load_or_create().unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.reset();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            matches!(result, Err(StoreError::NotDurable(_))),
+            "{result:?}"
+        );
+        let after = store.load_or_create().unwrap();
+        assert_ne!(after.fingerprint(), before.fingerprint());
+        assert_eq!(after.name(), before.name());
+    }
+
+    /// A reset without `device.json` creates the default name first and
+    /// then the key; both are in place afterwards.
+    #[test]
+    fn reset_without_device_file_creates_a_name() {
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        let before = store.load_or_create().unwrap();
+        std::fs::remove_file(base.path().join(DEVICE_FILE)).unwrap();
+        let after = store.reset().unwrap();
+        assert_ne!(after.fingerprint(), before.fingerprint());
+        assert!(after.name().as_str().starts_with("Dropumi-"));
+        let loaded = store.load_or_create().unwrap();
+        assert_eq!(loaded.fingerprint(), after.fingerprint());
+        assert_eq!(loaded.name(), after.name());
     }
 
     #[test]
