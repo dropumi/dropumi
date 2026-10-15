@@ -36,6 +36,8 @@ import android.system.Os
 import android.system.OsConstants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitor
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import io.github.dropumi.CliInterop
@@ -58,6 +60,7 @@ import io.github.dropumi.foreign.ForeignProvider
 import io.github.dropumi.foreign.ForeignSharer
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -398,17 +401,35 @@ class AndroidInteropTest {
     private fun sourceDir(): File =
         File(app.interopPaths.configDir.parentFile, "sources").apply { check(isDirectory || mkdirs()) }
 
-    /** Finishes MainActivity (opened by the share) and waits until none is left. */
+    /**
+     * Finishes MainActivity (opened by the share) and waits, bounded, until
+     * the last one is destroyed: a lifecycle callback completes the wait
+     * (no polling). Runs on the main thread, where the monitor reports.
+     */
     private suspend fun finishActivities() {
-        val stages = listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED, Stage.CREATED)
-        fun open(): List<Activity> = stages.flatMap { stage ->
-            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage).filterIsInstance<MainActivity>()
+        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+        val gone = CompletableDeferred<Unit>()
+        // The monitor holds callbacks weakly; this reference keeps it until removed.
+        val callback = ActivityLifecycleCallback { activity, stage ->
+            if (activity is MainActivity && stage == Stage.DESTROYED && openMainActivities(monitor).isEmpty()) {
+                gone.complete(Unit)
+            }
         }
-        open().forEach { it.finish() }
-        withTimeout(STEP_MS) {
-            while (open().isNotEmpty()) delay(POLL_MS)
+        monitor.addLifecycleCallback(callback)
+        try {
+            val open = openMainActivities(monitor)
+            if (open.isEmpty()) return
+            open.forEach { it.finish() }
+            withTimeout(STEP_MS) { gone.await() }
+        } finally {
+            monitor.removeLifecycleCallback(callback)
         }
     }
+
+    private fun openMainActivities(monitor: ActivityLifecycleMonitor): List<Activity> =
+        Stage.values().filter { it != Stage.DESTROYED }.flatMap { stage ->
+            monitor.getActivitiesInStage(stage).filterIsInstance<MainActivity>()
+        }
 
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -421,7 +442,6 @@ class AndroidInteropTest {
         const val CLI_ADDR = "dropumi_cli_addr"
         const val CLI_FP = "dropumi_cli_fp"
         const val STEP_MS = 25_000L
-        const val POLL_MS = 50L
 
         /** The two refusal notices AppModel.noticeRefused shows (without and with the peer). */
         val REFUSAL_TITLES = setOf("A device was refused", "A device that isn't paired tried to send")
