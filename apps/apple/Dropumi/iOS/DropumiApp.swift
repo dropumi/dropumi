@@ -20,6 +20,7 @@ struct DropumiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(loader: loader)
+                .task { await loader.load() }
         }
         .commands { DropumiCommands(router: loader.router) }
         .onChange(of: scenePhase) { _, phase in

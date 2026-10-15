@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //
 // Mac notifications, asked for in context (the first time the window is
-// closed, when Dropumi starts working from the menu bar):
+// closed, when Dropumi starts working from the menu bar). They are fed by
+// ReceiverNotifications, which watches the model for the app's lifetime:
 // - "Incoming files" when an offer arrives while the window is closed or
 //   Dropumi is in the background. Its only action is to show Dropumi; there
 //   is no Accept in the notification.
@@ -10,7 +11,7 @@
 import AppKit
 import DropumiAppState
 import DropumiBindings
-import SwiftUI
+import Observation
 import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
@@ -80,25 +81,79 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-/// Mac hooks on the ready app: notifications for offers and finished
-/// transfers.
-struct PlatformHooks: ViewModifier {
-    let model: AppModel
+/// Feeds the notifier from the app model. It observes the model directly,
+/// not through a view: the window's views are gone while the window is
+/// closed, which is exactly when Dropumi runs from the menu bar and these
+/// notifications matter.
+final class ReceiverNotifications {
+    enum Event: Equatable {
+        case offer(Prompt)
+        case closed(promptId: UInt64)
+        case finished(HistoryEntry)
+    }
 
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: model.prompts.map(\.promptId)) { old, new in
-                for prompt in model.prompts where !old.contains(prompt.promptId) {
-                    Notifier.shared.offer(prompt)
-                }
-                for id in old where !new.contains(id) {
-                    Notifier.shared.closed(promptId: id)
-                }
+    private let post: @MainActor (Event) -> Void
+    private var task: Task<Void, Never>?
+
+    init(post: @escaping @MainActor (Event) -> Void = ReceiverNotifications.postToNotifier) {
+        self.post = post
+    }
+
+    /// Follows the current model for as long as the app runs, including a
+    /// model that replaces it (a new receive folder).
+    func follow(_ current: @escaping @MainActor @Sendable () -> AppModel?) {
+        guard task == nil else { return }
+        let snapshots = Observations { Snapshot(current()) }
+        task = Task { [weak self] in
+            var last: Snapshot?
+            for await snapshot in snapshots {
+                guard let self else { return }
+                handle(snapshot, after: last)
+                last = snapshot
             }
-            .onChange(of: model.history.first?.id) {
-                if let entry = model.history.first {
-                    Notifier.shared.finished(entry)
-                }
-            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+    }
+
+    private func handle(_ new: Snapshot, after old: Snapshot?) {
+        // A new model starts with no prompts, and its history was read from
+        // disk: never announce that history.
+        let sameModel = old?.model == new.model
+        let before = sameModel ? old?.prompts ?? [] : []
+        let beforeIds = Set(before.map(\.promptId))
+        let nowIds = Set(new.prompts.map(\.promptId))
+        for prompt in new.prompts where !beforeIds.contains(prompt.promptId) {
+            post(.offer(prompt))
+        }
+        for prompt in before where !nowIds.contains(prompt.promptId) {
+            post(.closed(promptId: prompt.promptId))
+        }
+        if sameModel, let latest = new.latest, latest.id != old?.latest?.id {
+            post(.finished(latest))
+        }
+    }
+
+    static func postToNotifier(_ event: Event) {
+        switch event {
+        case let .offer(prompt): Notifier.shared.offer(prompt)
+        case let .closed(id): Notifier.shared.closed(promptId: id)
+        case let .finished(entry): Notifier.shared.finished(entry)
+        }
+    }
+}
+
+private struct Snapshot: Sendable {
+    let model: ObjectIdentifier?
+    let prompts: [Prompt]
+    let latest: HistoryEntry?
+
+    init(_ model: AppModel?) {
+        self.model = model.map(ObjectIdentifier.init)
+        prompts = model?.prompts ?? []
+        latest = model?.history.first
     }
 }

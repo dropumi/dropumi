@@ -18,7 +18,7 @@ How Dropumi is tested, how to run the tests, and exactly what has been verified 
 | Windows target | Milestone 1 code: for `x86_64-pc-windows-gnu`, with MinGW in the Linux container image, `cargo clippy --workspace --all-targets -D warnings` (both feature sets) clean and `cargo build --workspace --all-targets --all-features` compiled and linked. Milestone 2a: `cargo xwin check -p dropumi-ffi -p dropumi-cli --all-targets --target x86_64-pc-windows-msvc` passed (the FFI's integration tests are Unix only). Nothing was run |
 | Apple app package tests (`swift test --package-path apps/apple/DropumiKit`, milestone 2b) | **38 passed** (`ShareInboxTests` 8, `BindingsTests` 6, `AppModelTests` 24; macOS 27.0.1 arm64, Xcode 27.0, 2026-10-15) |
 | Apple app, hosted and UI state tests (`xcodebuild test -scheme Dropumi-iOS`, iPhone 17 simulator, iOS 27.0) | **3 hosted tests passed, 8 UI state tests passed** (fake core, each with the accessibility audit); the interop suite is skipped outside its harness |
-| Apple app, hosted tests on macOS (`xcodebuild test -scheme Dropumi-macOS`) | **3 passed**. The macOS UI state tests did not run: UI automation needs the user's approval on the machine |
+| Apple app, hosted tests on macOS (`xcodebuild test -scheme Dropumi-macOS -only-testing:DropumiMacTests`) | **5 passed** (2026-10-15), including `MenuBarReceiverTests`: the core opens from the app delegate with no window, and offer and "Files received" notifications are fed with no view. The macOS UI state tests did not run: UI automation needs the user's approval on the machine |
 | Apple app against the CLI (`scripts/apple/interop.sh`, opt-in) | **6 passed** on loopback: transfers both ways after comparing a code, and pairing, each on the iOS 27.0 simulator and on macOS 27. The two macOS Bonjour tests were not run (they ask the macOS Local Network question) |
 | GitHub Actions CI | **Not run yet.** The maintainer pushes the branch; every runner row below stays "Not tested (pending CI)" until its job is green. |
 
@@ -212,7 +212,7 @@ local run"). No platform is ever labelled "supported".
 | Real multi-device LAN or Wi-Fi | Nothing | Not tested |
 | iOS 27.0 simulator (iPhone 17), Xcode 27.0, same machine | Apple app: hosted tests (3), UI state tests with accessibility audit (8), interop with the CLI (3) | Automated test passed (iOS simulator, loopback, local run); UI state tests use the fake core |
 | iOS 27.0 simulator (iPad Air 11-inch (M4)) | Apple app launched on the fake core; the wide two-column Nearby layout checked by screenshot | Manual simulator check only (no automated iPad tests) |
-| macOS 27.0.1 arm64, same machine | Apple Mac app: hosted tests (3), interop with the CLI (3) | Automated test passed (macOS app, loopback, local run) |
+| macOS 27.0.1 arm64, same machine | Apple Mac app: hosted tests (5), interop with the CLI (3) | Automated test passed (macOS app, loopback, local run) |
 | macOS 27.0.1 arm64, same machine | Apple Mac app: UI state tests | Not tested (UI automation approval needed) |
 | Apple app Bonjour (sandboxed Mac app; iPhone and iPad devices) | Opt-in `apple_macos_bonjour_*`; device matrix DISC-1 to DISC-4 | Not tested. On the iOS 27.0 simulator the app's DNS-SD requests are never answered ([`discovery.md`](protocol/discovery.md) §12) |
 | iPhone 15, iPad Air (5th generation), the Mac on a LAN | Device matrix | Not tested |

@@ -14,7 +14,6 @@ import UserNotifications
 @main
 struct DropumiMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var loader = AppLoader()
 
     init() {
         DSFont.register()
@@ -22,16 +21,15 @@ struct DropumiMacApp: App {
 
     var body: some Scene {
         Window("Dropumi", id: MainWindow.id) {
-            RootView(loader: loader)
+            RootView(loader: appDelegate.loader)
                 .frame(minWidth: 860, minHeight: 600)
                 .modifier(MainWindowLifecycle())
-                .onAppear { appDelegate.loader = loader }
         }
         .defaultSize(width: 1120, height: 720)
-        .commands { DropumiCommands(router: loader.router) }
+        .commands { DropumiCommands(router: appDelegate.loader.router) }
 
         MenuBarExtra {
-            MenuBarContent(loader: loader)
+            MenuBarContent(loader: appDelegate.loader)
         } label: {
             MenuBarLabel()
         }
@@ -80,10 +78,19 @@ private struct MenuBarLabel: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var loader: AppLoader?
+    /// Owned here, not by the window: the core opens at launch and keeps
+    /// receiving while the window is closed. A launch at login may show no
+    /// window at all.
+    let loader = AppLoader()
+    let notifications = ReceiverNotifications()
+    /// The load started at launch (tests wait for it).
+    private(set) var launch: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = Notifier.shared
+        let loader = loader
+        notifications.follow { loader.model }
+        launch = Task { await loader.load() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -98,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting stops the receiver and withdraws the advertisement first
     /// (bounded by the core's shutdown).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model = loader?.model else { return .terminateNow }
+        guard let model = loader.model else { return .terminateNow }
         Task { @MainActor in
             await model.shutdownAndWait()
             NSApp.reply(toApplicationShouldTerminate: true)
@@ -108,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            loader?.open(url)
+            loader.open(url)
         }
         MainWindow.show()
     }

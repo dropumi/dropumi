@@ -4,7 +4,9 @@ import DropumiAppState
 import DropumiDesign
 import SwiftUI
 
-/// Loading, a startup failure, onboarding, or the app.
+/// Loading, a startup failure, onboarding, or the app. Each app decides when
+/// the core opens: the iPhone and iPad window, or the Mac's launch (the Mac
+/// receives with no window open).
 struct RootView: View {
     let loader: AppLoader
 
@@ -22,7 +24,6 @@ struct RootView: View {
             }
         }
         .environment(loader)
-        .task { await loader.load() }
         .onOpenURL { loader.open($0) }
     }
 }
@@ -44,7 +45,9 @@ private struct ReadyView: View {
         // accent that keeps 4.5:1 (design.md contrast notes).
         .tint(DS.accentText)
         .modifier(PromptPresenter(model: model))
+        #if os(iOS)
         .modifier(PlatformHooks(model: model))
+        #endif
         .overlay(alignment: .top) { BannerHost(model: model) }
         .onChange(of: model.route) { _, route in
             guard route == .send else { return }
