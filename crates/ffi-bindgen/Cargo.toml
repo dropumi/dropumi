@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MPL-2.0
+[package]
+name = "dropumi-ffi-bindgen"
+description = "Build tool: generates the Swift and Kotlin bindings of dropumi-ffi (UniFFI). Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli", "cargo-metadata"] }

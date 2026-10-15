@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Bug report
+description: Something does not work as documented.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issue?** Do not file it here. Report it privately: https://github.com/dropumi/dropumi/security/advisories/new (see [SECURITY.md](https://github.com/dropumi/dropumi/blob/main/SECURITY.md)).
+
+        **Privacy:** this issue is public.
+        - Never attach personal files, including files you transferred.
+        - Never share `identity.key`, `trusted_devices.json` or `device.json`.
+        - Never include full file-system paths.
+        - Remove user names, host names, real device names, fingerprints, pairing codes, and IP or MAC addresses from logs and screenshots.
+        - If you can, reproduce the bug with a throwaway identity and synthetic files: `dropumi --config-dir "$(mktemp -d)" ...`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands you ran on each device, with personal data removed.
+      placeholder: |
+        1. On device A: `dropumi receive --accept trusted`
+        2. On device B: `dropumi send test.bin --to <address>:47321`
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dropumi version or commit
+      description: The output of `dropumi --version`, or the git commit SHA you built from.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: Select every OS involved (for example, both the sending and the receiving device).
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+        - iOS / iPadOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: For each device involved.
+      placeholder: "sender: Ubuntu 24.04, receiver: macOS 26.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: CPU architecture
+      multiple: true
+      options:
+        - x86_64 / x64
+        - aarch64 / arm64
+        - Other
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (redacted)
+      description: |
+        Logs go to stderr. Re-run the command with `-v` (or `-vv`) for more detail, or with `--json` for machine-readable events on stdout.
+        Remove personal data first: paths, user names, host names, device names, fingerprints, pairing codes, and IP or MAC addresses.
+        This field is rendered as plain text, so you do not need code fences.
+      render: text
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed personal file names, paths and keys.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

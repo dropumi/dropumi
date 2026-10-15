@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# UniFFI binding configuration, read by uniffi-bindgen in library mode.
+
+[bindings.kotlin]
+package_name = "io.github.dropumi.ffi"
+cdylib_name = "dropumi_ffi"
+# One generated file serves the Android app and the host JVM tests: JNA's
+# cleaner works on both, while Android's SystemCleaner needs android.* classes.
+disable_java_cleaner = true
+
+[bindings.swift]
+module_name = "DropumiBindings"
+ffi_module_name = "DropumiFFI"
+ffi_module_filename = "DropumiFFI"

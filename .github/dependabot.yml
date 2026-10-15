@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# Dependabot keeps SHA pins and their "# vX.Y.Z" comments in sync for GitHub
+# Actions. The actionlint Docker image digest in ci.yml is not tracked here and
+# is updated by hand (docs/development.md).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly, day: monday, time: "05:00", timezone: Etc/UTC }
+    cooldown: { default-days: 7, semver-major-days: 14 }
+    open-pull-requests-limit: 5
+    commit-message: { prefix: chore, include: scope }
+    ignore:
+      # snow 0.10 requires getrandom ^0.3 and sha2 ^0.10; newer lines would duplicate them.
+      # Explicit ranges also cover 0.x bumps that Dependabot may classify as "minor". See docs/dependencies.md.
+      - dependency-name: getrandom
+        versions: [">=0.4.0"]
+      - dependency-name: sha2
+        versions: [">=0.11.0"]
+    groups:
+      cargo-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+      cargo-security:
+        applies-to: security-updates
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday, time: "05:00", timezone: Etc/UTC }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: ci, include: scope }
+    groups:
+      github-actions:
+        patterns: ["*"]
+  # The Android app (apps/android): Gradle plugins and libraries pinned in
+  # gradle/libs.versions.toml. A change needs the ffi (android) job to pass.
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule: { interval: weekly, day: monday, time: "05:00", timezone: Etc/UTC }
+    cooldown: { default-days: 7, semver-major-days: 14 }
+    open-pull-requests-limit: 5
+    commit-message: { prefix: chore, include: scope }
+    groups:
+      gradle-minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+      gradle-security:
+        applies-to: security-updates
+        patterns: ["*"]
