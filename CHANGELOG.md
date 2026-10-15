@@ -139,6 +139,7 @@ Milestone 1 (Phase 0 + Phase 1) adds the secure LAN transfer core, a draft of pr
 
 #### Infrastructure adapters (`dropumi-infra`)
 
+- The config lock uses `flock` directly on Android, where std's `File::lock` is not implemented; without it the core could not create an identity on any Android version (found on the arm64 emulators).
 - TCP transport. `receive` and `pair --listen` listen on port 47321 by default and fall back to a free port when it is busy and no `--port` was given.
 - A receive directory: received data goes to a `create_new` temporary `.dropumi-*.part` file and is BLAKE3-hashed while it is written; only a file whose hash matches is fsynced and finalized without overwriting anything (`name (1).ext` on collisions, symlinks never followed). Windows retries transient access-denied and sharing-violation errors; Unix has a placeholder fallback for filesystems without no-replace renames. Received files are created with mode 0600 on Unix.
 - Removal of stale `.dropumi-*.part` files older than 15 minutes when a receiver starts.
