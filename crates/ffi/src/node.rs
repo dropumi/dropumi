@@ -382,9 +382,12 @@ impl DropumiNode {
         self.engine.check_open()?;
         let fp = parse_full(&fingerprint)?;
         let store = &self.engine.trust;
+        // A rename saved without a confirmed directory sync was applied, which
+        // the store does only after it found the device: no re-read (another
+        // call could forget the device meanwhile).
         self.engine.applied(
             trust::rename(store, &fp, DeviceName::sanitize(&alias)),
-            || Ok(store.get(&fp)?.is_some()),
+            || Ok(true),
         )
     }
 
