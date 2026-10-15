@@ -5,10 +5,13 @@
 # main code writes to logcat, so no URI, display name, path, peer string,
 # fingerprint or exception text can reach it.
 #
-# 1. Fails on android.util.Log (and EventLog, LogPrinter), Log., EventLog.,
-#    printStackTrace, dumpStack, System.out, System.err, print/println and
-#    java.util.logging in the main sources of :core-bindings (the generated
-#    bindings ship in the app too), :core, :appstate and :app. There is no
+# 1. Fails on android.util.Log (and EventLog, LogPrinter), any wildcard
+#    import of android.util (it would hide which of those a file uses),
+#    Log. and EventLog. (also with spaces before the dot), the function
+#    references Log:: and EventLog::, printStackTrace, dumpStack,
+#    System.out, System.err, print/println and java.util.logging in the
+#    main sources of :core-bindings (the generated bindings ship in the
+#    app too), :core, :appstate and :app. There is no
 #    exception: the app has no logging helper. (The plan allowed one
 #    SafeLog.kt taking only a fixed event enum; none exists, so none is
 #    allowed. Adding one means adding it here, by name, in a reviewed
@@ -36,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 status=0
-pattern='android\.util\.(Log|EventLog|LogPrinter)\b|\b(Event)?Log\.|printStackTrace|dumpStack|System\.(out|err)\b|\bprintln\b|\bprint\(|java\.util\.logging'
+pattern='android\.util\.(Log|EventLog|LogPrinter)\b|android\.util\.\*|\b(Event)?Log[[:space:]]*(\.|::)|printStackTrace|dumpStack|System\.(out|err)\b|\bprintln\b|\bprint\(|java\.util\.logging'
 for module in core-bindings core appstate app; do
   dir="${root}/apps/android/${module}/src/main"
   # A missing or unreadable folder is reported below, not by set -e.
