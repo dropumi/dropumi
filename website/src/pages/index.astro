@@ -10,33 +10,34 @@ import Apple from '@lucide/astro/icons/apple';
 import Monitor from '@lucide/astro/icons/monitor';
 import Terminal from '@lucide/astro/icons/terminal';
 import Smartphone from '@lucide/astro/icons/smartphone';
-import Download from '@lucide/astro/icons/download';
+import ListChecks from '@lucide/astro/icons/list-checks';
 import AppMockup from '../components/AppMockup.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const steps = [
-	['Open dropumi', 'Both devices just need to be on the same Wi-Fi or hotspot. Nearby devices show up on the radar on their own.'],
-	['Pick a file, tap a device', 'Drop a file or photo onto the app, then tap the device you want to send it to.'],
-	['Accept and done', 'The other person gets a prompt and accepts. The file goes straight across your local network.'],
+	['Open dropumi', 'Both devices need to be on the same Wi-Fi or local network. Nearby devices show up on the radar on their own.'],
+	['Pair once', 'In Settings, choose Pair a device: one device waits, the other asks to pair, and you check that both screens show the same 6-digit code. You do this once per pair of devices.'],
+	['Send', 'Tap Send next to the device, add files or photos, then tap the Send to button. The other person accepts, and the files go straight across your local network, encrypted.'],
 ];
 const features = [
 	['Works offline', WifiOff, 'Everything stays on your local network. No internet, no account, no server in the middle.'],
-	['Ultra lightweight', Feather, 'A tiny app that starts instantly and sips battery and memory.'],
-	['Private by design', ShieldCheck, 'Files go straight from device to device. Nothing is uploaded, stored or tracked.'],
-	['Cross-platform', Layers, 'macOS, Windows, Linux, iOS and Android, all talking to each other.'],
-	['Fast on your Wi-Fi', Zap, 'Large files move at local network speed, not at your internet speed.'],
+	['Ultra lightweight', Feather, 'A small Rust core that streams files instead of loading them into memory. Battery use has not been measured yet.'],
+	['Private by design', ShieldCheck, 'Files go straight from device to device, encrypted on every connection. Nothing is uploaded, stored or tracked.'],
+	['Cross-platform by design', Layers, 'One open protocol for every platform. Today there is a command-line tool and an Apple app in development. Android, Windows and Linux apps are planned.'],
+	['Stays on your Wi-Fi', Zap, 'Files move over your local network, so your internet speed does not matter. Speed on a real Wi-Fi network has not been measured yet.'],
 	['Free and open source', CodeXml, 'Read the code, fork it, improve it. No ads, no paywall, ever.'],
 ];
 const shareSteps = [
-	['share-1-select.png', 'Tap Share', 'Pick a photo, video or any file. Your nearby devices and dropumi appear in the share sheet.', 'The iOS share sheet with nearby devices and dropumi'],
-	['share-2-choose.png', 'Choose a device', 'dropumi finds who is close. Tap a device to send, no internet needed.', 'The dropumi sheet showing nearby devices'],
-	['share-3-sending.png', 'Watch it land', 'The file goes straight across your Wi-Fi, and you see progress as it sends.', 'A file sending to Maya\'s iPhone with a progress bar'],
+	['share-1-select.png', 'Tap Share', 'On iPhone or iPad, pick a photo, video or any file, tap Share and choose dropumi.', 'Design mockup: the iOS share sheet with dropumi'],
+	['share-2-choose.png', 'Open dropumi', 'The share sheet hands the files to dropumi. Open the app: the files wait on the Send screen. Choose a nearby device and tap the Send to button. No internet needed.', 'Design mockup: a list of nearby devices'],
+	['share-3-sending.png', 'Follow the transfer', 'The file goes straight across your Wi-Fi, encrypted, and the Transfers screen shows its progress.', 'Design mockup: a file sending to Maya\'s iPhone with a progress bar'],
 ];
+const repo = 'https://github.com/dropumi/dropumi';
 const platforms = [
-	['macOS', Apple, 'Apple silicon and Intel'],
-	['Windows', Monitor, 'Windows 10 and 11'],
-	['Linux', Terminal, 'AppImage and .deb'],
-	['iOS', Smartphone, 'iPhone and iPad'],
-	['Android', Smartphone, 'Android 8 and up'],
+	['macOS', Apple, 'In development', 'Mac app and command-line tool, tested on one Mac with Apple silicon.', 'Build from source'],
+	['Windows', Monitor, 'Planned', 'No app yet. The command-line tool builds but has never been run.', 'View on GitHub'],
+	['Linux', Terminal, 'Command line only', 'Command-line tool, tested in a container. App planned.', 'Build from source'],
+	['iOS', Smartphone, 'In development', 'iPhone and iPad app with a Share Extension, tested on the simulator only.', 'Build from source'],
+	['Android', Smartphone, 'Planned', 'No app yet.', 'View on GitHub'],
 ];
 ---
 <Page title="dropumi">
@@ -46,17 +47,17 @@ const platforms = [
 			<h1>Send anything to anyone nearby.</h1>
 			<p class="lead">dropumi is an AirDrop-style way to share files between phones and computers on the same Wi-Fi. No accounts, no cloud, no cables. Just drop.</p>
 			<div class="ctas">
-				<a class="btn primary" href="#download"><Download size={20} />Download dropumi</a>
+				<a class="btn primary" href="#platforms"><ListChecks size={20} />See what exists today</a>
 				<a class="btn" href="https://github.com/dropumi/dropumi"><svg class="ghi" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>View source</a>
 			</div>
-			<small>macOS · Windows · Linux · iOS · Android</small>
+			<small>Pre-alpha and unaudited · No releases yet · Command-line tool and Apple app in development</small>
 			<div class="shot"><AppMockup /></div>
-			<img class="hero-phone" src={`${base}/images/app-mobile-light.png`} alt="dropumi on a phone showing nearby devices" width="260" />
+			<img class="hero-phone" src={`${base}/images/app-mobile-light.png`} alt="Design mockup: dropumi on a phone showing nearby devices" width="260" />
 		</section>
 
 		<section id="how" class="dark">
 			<p class="eyebrow light">HOW IT WORKS</p>
-			<h2>Three taps. No setup.</h2>
+			<h2>Three steps. No account.</h2>
 			<div class="grid3">
 				{steps.map(([t, d], i) => (
 					<div class="card dark-card"><span class="num">{i + 1}</span><h3>{t}</h3><p>{d}</p></div>
@@ -76,25 +77,26 @@ const platforms = [
 		<section class="mobile">
 			<div class="mtext">
 				<p class="eyebrow">ON YOUR PHONE</p>
-				<h2>Phone to laptop in a few seconds.</h2>
-				<p>See who is nearby, tap a device and send photos, videos and documents. Receiving is one tap, too. Light and dark themes follow your system.</p>
+				<h2>Phone to Mac, no cable.</h2>
+				<p>See who is nearby, choose a device, add photos, videos and documents, and send them. Receiving is one tap, too. Light and dark themes follow your system.</p>
+				<p>The iPhone and iPad app is in development and has only run on the simulator so far. These screens are design mockups: the app does not show distance or device type, and there is no Android app yet.</p>
 				<ul>
 					<li>No account or sign-in</li>
-					<li>Works with hotspots and shared Wi-Fi</li>
+					<li>Pair once by comparing a 6-digit code</li>
 					<li>Light and dark themes</li>
 				</ul>
 			</div>
 			<div class="phones">
-				<img src={`${base}/images/app-mobile-light.png`} alt="dropumi on a phone, light theme" />
-				<img class="mid" src={`${base}/images/app-mobile-receive.png`} alt="Receiving a file" />
-				<img src={`${base}/images/app-mobile-dark.png`} alt="dropumi on a phone, dark theme" />
+				<img src={`${base}/images/app-mobile-light.png`} alt="Design mockup of dropumi on a phone, light theme" />
+				<img class="mid" src={`${base}/images/app-mobile-receive.png`} alt="Design mockup of an incoming-files prompt" />
+				<img src={`${base}/images/app-mobile-dark.png`} alt="Design mockup of dropumi on a phone, dark theme" />
 			</div>
 		</section>
 
 		<section id="share" class="dark">
 			<p class="eyebrow light">SHARE FROM ANY APP</p>
 			<h2>Select a file. Share it with dropumi.</h2>
-			<p class="sub dim">dropumi shows up in the share sheet of your phone, next to the apps you already use.</p>
+			<p class="sub dim">On iPhone and iPad, dropumi shows up in the share sheet, next to the apps you already use. It hands your files to the dropumi app, and you choose the device there. The Mac app has no Share Extension yet. The pictures are design mockups: the real share sheet has no device list.</p>
 			<div class="steps3">
 				{shareSteps.map(([img, t, d, alt], i) => (
 					<figure>
@@ -105,12 +107,13 @@ const platforms = [
 			</div>
 		</section>
 
-		<section id="download">
-			<p class="eyebrow">DOWNLOAD</p>
-			<h2>Get dropumi on every device.</h2>
+		<section id="platforms">
+			<p class="eyebrow">PLATFORMS</p>
+			<h2>What exists today, and what is planned.</h2>
+			<p class="sub">There is nothing to download yet: no releases, installers or store listings. dropumi is pre-alpha and unaudited, and its protocol is a draft, so do not use it for sensitive files yet. So far it has only been tested on one machine at a time; nothing has been tested between two real devices.</p>
 			<div class="platforms">
-				{platforms.map(([n, Icon, s]) => (
-					<div class="card plat"><Icon size={30} color="var(--text-primary)" /><h3>{n}</h3><p>{s}</p><a class="btn primary small" href="https://github.com/dropumi/dropumi/releases">Download</a></div>
+				{platforms.map(([n, Icon, status, s, cta]) => (
+					<div class="card plat"><Icon size={30} color="var(--text-primary)" /><h3>{n}</h3><span class="badge">{status}</span><p>{s}</p><a class={cta === 'Build from source' ? 'btn primary small' : 'btn small'} href={cta === 'Build from source' ? `${base}/docs/install/#build-from-source` : repo}>{cta}</a></div>
 				))}
 			</div>
 		</section>
