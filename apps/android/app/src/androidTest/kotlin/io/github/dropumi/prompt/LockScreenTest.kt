@@ -115,7 +115,9 @@ class LockScreenTest {
      * Needs a device without a secure lock screen, which `wm
      * dismiss-keyguard` can unlock again; it fails, never skips, on one with
      * a PIN. Where the lock screen is disabled (the AVDs), it is enabled for
-     * this test and disabled again after it.
+     * this test and disabled again after it. API 26-27 have no `locksettings
+     * get-disabled`: there the setting shows only by locking, so a lock
+     * screen that does not come up is enabled the same way.
      */
     @Test
     @UseScenario(Scenario.OFFER_UNVERIFIED)
@@ -124,14 +126,29 @@ class LockScreenTest {
         val keyguard = requireNotNull(context.getSystemService(KeyguardManager::class.java))
         val power = requireNotNull(context.getSystemService(PowerManager::class.java))
         assertFalse("needs a device without a secure lock screen (it must be unlocked again)", keyguard.isDeviceSecure)
-        val lockDisabled = shell("locksettings get-disabled").trim() == "true"
+        // true or false; null where the command does not exist (API 26-27).
+        var lockDisabled = when (shell("locksettings get-disabled").trim()) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
         launchShowing("prompt.offer").use { scenario ->
             try {
-                if (lockDisabled) shell("locksettings set-disabled false")
-                shell("input keyevent KEYCODE_SLEEP")
-                compose.waitUntil(TIMEOUT_MS) { !power.isInteractive }
-                shell("input keyevent KEYCODE_WAKEUP")
-                compose.waitUntil(TIMEOUT_MS) { power.isInteractive }
+                if (lockDisabled == true) shell("locksettings set-disabled false")
+                sleepAndWake(power)
+                if (lockDisabled == null) {
+                    val locks = try {
+                        compose.waitUntil(PROBE_MS) { keyguard.isKeyguardLocked }
+                        true
+                    } catch (_: ComposeTimeoutException) {
+                        false
+                    }
+                    lockDisabled = !locks
+                    if (!locks) {
+                        shell("locksettings set-disabled false")
+                        sleepAndWake(power)
+                    }
+                }
                 // The lock screen comes up and its window gets the keys.
                 var seen = ""
                 try {
@@ -161,7 +178,7 @@ class LockScreenTest {
             } finally {
                 shell("input keyevent KEYCODE_WAKEUP")
                 shell("wm dismiss-keyguard")
-                if (lockDisabled) shell("locksettings set-disabled true")
+                if (lockDisabled == true) shell("locksettings set-disabled true")
             }
             compose.waitUntil(TIMEOUT_MS) { !keyguard.isKeyguardLocked }
             compose.waitUntil(TIMEOUT_MS) {
@@ -175,8 +192,19 @@ class LockScreenTest {
         }
     }
 
+    /** Turns the screen off, then on again. */
+    private fun sleepAndWake(power: PowerManager) {
+        shell("input keyevent KEYCODE_SLEEP")
+        compose.waitUntil(TIMEOUT_MS) { !power.isInteractive }
+        shell("input keyevent KEYCODE_WAKEUP")
+        compose.waitUntil(TIMEOUT_MS) { power.isInteractive }
+    }
+
     private companion object {
         const val TIMEOUT_MS = 10_000L
+
+        /** How long a lock screen that is enabled takes at most to come up (API 26-27, which cannot be asked). */
+        const val PROBE_MS = 5_000L
 
         /** Long enough for the lock screen to come up on a slow emulator. */
         const val LOCK_TIMEOUT_MS = 20_000L
