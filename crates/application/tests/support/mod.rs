@@ -152,6 +152,26 @@ impl Discovery for StaticDiscovery {
     }
 }
 
+/// Discovery whose browse never completes. `started` is notified when a
+/// browse begins, so tests can act while it is pending without sleeping.
+#[derive(Clone, Default)]
+pub struct PendingDiscovery {
+    pub started: Arc<tokio::sync::Notify>,
+}
+
+impl Discovery for PendingDiscovery {
+    type Handle = NoAd;
+
+    async fn advertise(&self, _ad: Advertisement) -> Result<NoAd, DiscoveryError> {
+        Ok(NoAd)
+    }
+
+    async fn browse(&self, _t: Duration) -> Result<Vec<DiscoveredPeer>, DiscoveryError> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
+}
+
 // ------------------------------------------------------------------ source
 
 /// A reader that yields `limit` bytes and then never completes.

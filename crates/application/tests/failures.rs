@@ -14,9 +14,13 @@ mod support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use dropumi_application::config::{SendRequest, Timeouts};
 use dropumi_application::events::{AppEvent, TransferOutcome};
 use dropumi_application::usecases::connect::dial;
+use dropumi_application::usecases::discovery::{DiscoverOutcome, discover};
+use dropumi_application::usecases::send::{SendDeps, SendFiles};
 use dropumi_domain::connection::ConnectionCandidate;
+use dropumi_domain::discovery::Target;
 use dropumi_domain::error::{Phase, TransferError};
 use dropumi_domain::policy::AcceptMode;
 use dropumi_domain::transfer::{CancelReason, Party, RejectReason};
@@ -608,4 +612,102 @@ async fn complete_ack_deadline_still_fires() {
     );
     rx.cancel.cancel();
     let _ = finish(rx).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancel_while_resolving_a_name_stops_send() {
+    // Ctrl-C while a name target is still being browsed for: the send stops
+    // at once with the local Cancelled outcome instead of waiting for the
+    // browse deadline (here: never), and nothing is dialled.
+    let net = Net::new();
+    let alice = identity(1, "Alice");
+    let source = MemSource::default();
+    let paths = vec![source.add("/r.txt", b"r".to_vec())];
+    let trust = MemTrust::with(&[]);
+    let connector = net.connector();
+    let discovery = PendingDiscovery::default();
+    let interaction = Scripted::accept();
+    let clock = ManualClock::at(1_000);
+    let (sink, mut events_rx) = events();
+    let use_case = SendFiles::new(SendDeps {
+        connector: &connector,
+        discovery: Some(&discovery),
+        source: &source,
+        trust: &trust,
+        interaction: &interaction,
+        clock: &clock,
+        identity: &alice,
+        timeouts: Timeouts::default(),
+        events: sink,
+    });
+    let target = Target::parse("Bob").unwrap();
+    assert!(target.needs_discovery());
+    let req = SendRequest {
+        targets: vec![target],
+        paths,
+        expect: None,
+        allow_unverified: false,
+        throttle_bps: None,
+        discover_timeout: Duration::from_secs(3_600),
+        allow_loopback: true,
+    };
+    let cancel = CancellationToken::new();
+    let run = use_case.run(req, cancel.clone());
+    tokio::pin!(run);
+    tokio::select! {
+        out = &mut run => panic!("send ended before the browse started: {out:?}"),
+        () = discovery.started.notified() => {}
+    }
+    let started = tokio::time::Instant::now();
+    cancel.cancel();
+    let out = tokio::time::timeout(Duration::from_secs(1), run)
+        .await
+        .expect("send must stop on cancel, not wait for the browse");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(
+        matches!(
+            out.as_ref().unwrap(),
+            TransferOutcome::Cancelled {
+                transfer_id: Some(_),
+                by: Party::Local,
+                reason: CancelReason::User,
+            }
+        ),
+        "{out:?}"
+    );
+    let ev = drain(&mut events_rx);
+    assert!(
+        !ev.iter().any(|e| matches!(e, AppEvent::Connecting { .. })),
+        "{ev:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancel_stops_discover_without_reporting_peers() {
+    // Ctrl-C during `dropumi discover`: the browse is abandoned at once (not
+    // at its deadline, here never), with a distinct Cancelled outcome and no
+    // PeerFound events.
+    let discovery = PendingDiscovery::default();
+    let (sink, mut events_rx) = events();
+    let cancel = CancellationToken::new();
+    let run = discover(
+        &discovery,
+        Duration::from_secs(3_600),
+        &sink,
+        cancel.clone(),
+    );
+    tokio::pin!(run);
+    tokio::select! {
+        out = &mut run => panic!("discover ended before the browse started: {out:?}"),
+        () = discovery.started.notified() => {}
+    }
+    let started = tokio::time::Instant::now();
+    cancel.cancel();
+    let out = tokio::time::timeout(Duration::from_secs(1), run)
+        .await
+        .expect("discover must stop on cancel, not wait for the browse");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(matches!(out, Ok(DiscoverOutcome::Cancelled)), "{out:?}");
+    let ev = drain(&mut events_rx);
+    assert!(ev.is_empty(), "{ev:?}");
 }

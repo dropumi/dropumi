@@ -177,6 +177,10 @@ where
     /// Sends `req.paths` to the target. Returns the transfer outcome; only
     /// input, resolution and configuration problems are errors.
     ///
+    /// Cancelling `cancel` while a name or fingerprint target is still being
+    /// browsed for, or while dialling, returns
+    /// [`TransferOutcome::Cancelled`] at once.
+    ///
     /// # Errors
     /// [`UseCaseError`] before any connection is attempted.
     pub async fn run(
@@ -185,30 +189,36 @@ where
         cancel: CancellationToken,
     ) -> Result<TransferOutcome, UseCaseError> {
         let prepared = self.prepare(&req.paths).await?;
-        let resolution = resolve(
-            self.connector,
-            self.discovery,
-            self.trust,
-            ResolveParams {
-                targets: &req.targets,
-                explicit: req.expect.clone(),
-                discover_timeout: req.discover_timeout,
-                allow_loopback: req.allow_loopback,
-            },
-        )
-        .await?;
         let id = prepared.request.id();
+        let cancelled = || TransferOutcome::Cancelled {
+            transfer_id: Some(id),
+            by: Party::Local,
+            reason: CancelReason::User,
+        };
+        // The browse for a name or fingerprint target can last as long as the
+        // discover timeout, so it must not delay a Ctrl-C.
+        let resolution = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Ok(cancelled()),
+            r = resolve(
+                self.connector,
+                self.discovery,
+                self.trust,
+                ResolveParams {
+                    targets: &req.targets,
+                    explicit: req.expect.clone(),
+                    discover_timeout: req.discover_timeout,
+                    allow_loopback: req.allow_loopback,
+                },
+            ) => r?,
+        };
         let fail = |error| TransferOutcome::Failed {
             transfer_id: Some(id),
             error,
         };
         let (stream, _addr) = tokio::select! {
             biased;
-            () = cancel.cancelled() => return Ok(TransferOutcome::Cancelled {
-                transfer_id: Some(id),
-                by: Party::Local,
-                reason: CancelReason::User,
-            }),
+            () = cancel.cancelled() => return Ok(cancelled()),
             r = dial(self.connector, &resolution.candidates, self.timeouts.connect, &self.events) => match r {
                 Ok(s) => s,
                 Err(e) => return Ok(fail(e)),

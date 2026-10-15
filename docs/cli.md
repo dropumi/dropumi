@@ -162,7 +162,8 @@ dropumi send <FILE>... --to <TARGET> [--to <TARGET>...] [--expect-fingerprint <F
 The sender reports success (`completed`, exit 0) only after the receiver's final acknowledgement says every file was
 stored, fsynced and visible under its final name. If some files failed, it reports `completed_with_failures` (exit 8).
 A source file that changes size or modification time while being sent is aborted (`file_sent` status `aborted`) and
-the other files continue.
+the other files continue. Ctrl-C while a name or fingerprint target is still being browsed for stops the send at once
+(`cancelled` event, exit 130) instead of waiting for `--discover-timeout-ms`.
 
 ## `discover`
 
@@ -172,8 +173,9 @@ dropumi discover [--timeout-ms <MS>]
 
 Browses mDNS (`_dropumi._tcp`, IPv4) for `--timeout-ms` (default `3000`) and prints one line per device seen: name,
 fingerprint hint and addresses. Results are reported when the browse window ends. Names and hints are unauthenticated
-hints; identity is checked only by the handshake. Exit 0 even if nothing was found. Builds without the `mdns` cargo
-feature, or hosts where mDNS cannot start, exit 2.
+hints; identity is checked only by the handshake. Exit 0 even if nothing was found. Ctrl-C stops the browse at once
+and exits 130 without printing any device (nor `No devices found.`). Builds without the `mdns` cargo feature, or hosts
+where mDNS cannot start, exit 2.
 
 ## Target syntax
 

@@ -96,7 +96,7 @@ Use cases live in `crates/application/src/usecases/`.
 
 | Use case (spec §9) | Code | Notes |
 |---|---|---|
-| DiscoverNearbyDevices | `discovery::discover` | Browses for a fixed time and emits one `PeerFound` per device. Results are hints. |
+| DiscoverNearbyDevices | `discovery::discover` | Browses for a fixed time and emits one `PeerFound` per device; a `CancellationToken` ends the browse at once with `DiscoverOutcome::Cancelled` and no events. Results are hints. |
 | ManageDiscoverability | `discovery::advertise`, `AdHandle::stop` | Used by `receive` and `pair --listen`; disabled with `--no-mdns`. Failure emits `DiscoveryUnavailable` and manual addressing keeps working. |
 | ConnectToPeer | `connect::{resolve, dial}`, `channel::{initiate, respond}` | `resolve` turns targets into ranked candidates plus a `PeerExpectation`; `dial` tries candidates in order. |
 | PairDevice | `pair::{pair_with, pair_listen}` | Committed SAS; trust is stored only if both users confirm. One attempt per listen window. |
