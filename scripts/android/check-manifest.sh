@@ -8,14 +8,19 @@
 # - there is no <queries> element (the Tethering module entry comes with the
 #   first API 33+ entry on the R21 gate's allowlist, HostLabelGate.kt);
 # - the exported components are exactly MainActivity and ShareActivity (a
-#   component with an intent filter and no android:exported counts as
-#   exported); there is no receiver, the only service is TransferService,
-#   and the only providers are the FileProvider and androidx.startup's
-#   InitializationProvider, whose initializers are exactly the allowlist
-#   below (no EmojiCompatInitializer);
-# - no activity can show over the lock screen (showWhenLocked, turnScreenOn);
+#   component counts as exported unless android:exported is the literal
+#   "false", or is absent and the component has no intent filter; a
+#   resource reference such as "@bool/x" counts as exported); there is no
+#   receiver, the only service is TransferService, and the only providers
+#   are the FileProvider and androidx.startup's InitializationProvider,
+#   whose initializers are exactly the allowlist below (no
+#   EmojiCompatInitializer);
+# - no activity can show over the lock screen: showWhenLocked and
+#   turnScreenOn are absent or the literal "false";
 # - <application> has allowBackup="false" and both backup rule files, and
-#   release and qa are not debuggable.
+#   in release and qa android:debuggable is absent or the literal "false".
+# Every check fails closed: a value the script cannot read as the safe
+# literal (a resource reference, another spelling) counts as the unsafe one.
 # A dependency update that adds a permission, a component or an
 # initializer fails here until it is reviewed and allowlisted.
 #
@@ -97,8 +102,13 @@ expect_app = {
 for attr, value in expect_app.items():
     if app.get(A + attr) != value:
         problems.append(f"<application> android:{attr} is {app.get(A + attr)!r}, expected {value!r}")
-if variant in ("release", "qa") and app.get(A + "debuggable") == "true":
-    problems.append(f"{variant} is debuggable")
+# Fail closed: anything but absent or the literal "false" is unsafe
+# (aapt2 accepts resource references for boolean attributes).
+def unsafe_flag(value):
+    return value is not None and value != "false"
+
+if variant in ("release", "qa") and unsafe_flag(app.get(A + "debuggable")):
+    problems.append(f"{variant} has android:debuggable={app.get(A + 'debuggable')!r}, expected absent or 'false'")
 
 NAMESPACE = "io.github.dropumi"
 
@@ -115,12 +125,12 @@ for kind in kinds:
             name = NAMESPACE + name
         by_kind[kind].append(name)
         flag = e.get(A + "exported")
-        if flag == "true" or (flag is None and e.find("intent-filter") is not None):
+        if unsafe_flag(flag) or (flag is None and e.find("intent-filter") is not None):
             exported.add(name)
         if kind == "activity":
             for attr in ("showWhenLocked", "turnScreenOn"):
-                if e.get(A + attr) == "true":
-                    problems.append(f"{short(name)} sets android:{attr}")
+                if unsafe_flag(e.get(A + attr)):
+                    problems.append(f"{short(name)} sets android:{attr}={e.get(A + attr)!r}")
 
 expected_exported = {"io.github.dropumi.MainActivity", "io.github.dropumi.ShareActivity"}
 if exported != expected_exported:
