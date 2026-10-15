@@ -18,7 +18,7 @@ So far, dropumi has only been tested on one machine at a time. Nothing has been 
 
 ## Build from source
 
-The source code lands on `main` with [pull requests #5 to #7](https://github.com/dropumi/dropumi/pulls). Until they are merged, `main` contains only the website and design files, so the commands below have nothing to build yet.
+The source code reaches `main` with [pull requests #5 to #7](https://github.com/dropumi/dropumi/pulls). If the repository's `main` branch has no `crates` or `apps` folder yet, those pull requests are not merged and the commands below have nothing to build.
 
 ```sh
 git clone https://github.com/dropumi/dropumi.git
@@ -26,7 +26,7 @@ cd dropumi
 cargo build --release --locked -p dropumi-cli
 ```
 
-This builds the command-line tool with stable Rust (1.89 or newer). The binary is `target/release/dropumi`. The same pull requests add a quick start to the repository's README, and `apps/apple/README.md`, which explains how to build the Apple app with Xcode.
+This builds the command-line tool with stable Rust (1.89 or newer). The binary is `target/release/dropumi`. The repository's README has a quick start, and `apps/apple/README.md` explains how to build the Apple app with Xcode (both arrive with the same pull requests).
 
 ## Phone and tablet
 

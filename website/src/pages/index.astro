@@ -113,7 +113,7 @@ const platforms = [
 			<p class="sub">There is nothing to download yet: no releases, installers or store listings. dropumi is pre-alpha and unaudited, and its protocol is a draft, so do not use it for sensitive files yet. So far it has only been tested on one machine at a time; nothing has been tested between two real devices.</p>
 			<div class="platforms">
 				{platforms.map(([n, Icon, status, s, cta]) => (
-					<div class="card plat"><Icon size={30} color="var(--text-primary)" /><h3>{n}</h3><span class="badge">{status}</span><p>{s}</p><a class={cta === 'Build from source' ? 'btn primary small' : 'btn small'} href={repo}>{cta}</a></div>
+					<div class="card plat"><Icon size={30} color="var(--text-primary)" /><h3>{n}</h3><span class="badge">{status}</span><p>{s}</p><a class={cta === 'Build from source' ? 'btn primary small' : 'btn small'} href={cta === 'Build from source' ? `${base}/docs/install/#build-from-source` : repo}>{cta}</a></div>
 				))}
 			</div>
 		</section>
