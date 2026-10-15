@@ -522,21 +522,46 @@ class AppModelTest {
     }
 
     /**
-     * The core reports a refused (not paired) sender with no peer: the
-     * receiver denies it while the connection is set up, so the session never
-     * gets a peer. The notice must still show. Found on the Tablet AVD
-     * (Android 16) with the real core and the CLI as the sender.
+     * The core reports a refusal during the handshake with no peer, whatever
+     * the reason: a device that isn't paired, but also a pairing request
+     * while no window is open (paired devices too), a paired device while a
+     * window is open, or an unreadable list of paired devices. Found on the
+     * Tablet AVD (Android 16) with the real core and the CLI as the sender.
+     * The notice says only that a device was refused, and never offers
+     * Everyone (that would point a paired device's user at the wrong fix).
      */
     @Test
-    fun unpairedSenderNoticeShowsWhenTheCoreGivesNoPeer() = runTest {
+    fun refusedConnectionWithoutAPeerIsNeutral() = runTest {
         val s = makeModel()
+        // For example a paired phone that asks to pair while this device has no window open.
         s.model.apply(listOf(NodeEvent.SessionClosed(null, "not_authorized")))
-        assertEquals("A device that isn't paired tried to send", s.model.state.value.banner?.title)
+        val banner = requireNotNull(s.model.state.value.banner)
+        assertEquals("A device was refused", banner.title)
+        assertNull("no Everyone action", banner.action)
+        assertFalse(banner.message.contains("everyone", ignoreCase = true))
+        assertFalse(banner.message.contains("isn't paired"))
         s.model.dismissBanner()
-        // Other closed sessions say nothing; a paired peer is never "not paired".
+        // Other closed sessions say nothing.
         s.model.apply(listOf(NodeEvent.SessionClosed(null, "handshake_failed")))
+        assertNull(s.model.state.value.banner)
+    }
+
+    /** A paired peer is never "not paired". */
+    @Test
+    fun refusedPairedPeerShowsNoNotice() = runTest {
+        val s = makeModel()
         s.model.apply(listOf(NodeEvent.SessionClosed(Fixtures.peer(trusted = true, alias = "Maya"), "not_authorized")))
         assertNull(s.model.state.value.banner)
+    }
+
+    /** Any host on the network can cause a refusal: it never takes the place of another notice. */
+    @Test
+    fun refusedNoticeNeverReplacesAnotherBanner() = runTest {
+        val s = makeModel()
+        s.model.notice("Not saved", "There is not enough free space.")
+        s.model.apply(listOf(NodeEvent.SessionClosed(null, "not_authorized")))
+        s.model.apply(listOf(NodeEvent.SessionClosed(Fixtures.peer(), "not_authorized")))
+        assertEquals("Not saved", s.model.state.value.banner?.title)
     }
 
     @Test

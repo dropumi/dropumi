@@ -37,6 +37,7 @@ import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.NodeSnapshot
 import io.github.dropumi.ffi.OperationResult
 import io.github.dropumi.ffi.PairingResult
+import io.github.dropumi.ffi.PeerInfo
 import io.github.dropumi.ffi.Prompt
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
@@ -1035,12 +1036,7 @@ class AppModel(
                 if (event.operation == windowOperation) windowEnded()
                 scope.launch { refreshTrusted() }
             }
-            is NodeEvent.SessionClosed -> {
-                // A refused sender comes with no peer: the receiver denies it
-                // while the connection is set up.
-                val peer = event.peer
-                if (event.code == NOT_AUTHORIZED && (peer == null || !peer.trusted)) noticeUnpairedSender()
-            }
+            is NodeEvent.SessionClosed -> if (event.code == NOT_AUTHORIZED) noticeRefused(event.peer)
             is NodeEvent.Warning -> showWarning(event.message)
             is NodeEvent.EventsDropped -> Unit
             NodeEvent.ResyncRequired -> resync()
@@ -1218,21 +1214,39 @@ class AppModel(
         saveHistory()
     }
 
-    private fun noticeUnpairedSender() {
+    /**
+     * The core refused a connection (`not_authorized`). Rate-limited, and
+     * never in place of another notice: any host on the network can cause it.
+     *
+     * Without a peer the refusal came during the handshake, and the reason is
+     * not known: a device that isn't paired, a pairing request while no
+     * pairing window is open (from paired devices too), a paired device
+     * while a window is open, or an unreadable list of paired devices. So the
+     * notice says only that a device was refused, and never offers Everyone.
+     */
+    private fun noticeRefused(peer: PeerInfo?) {
+        if (peer != null && peer.trusted) return
+        if (_state.value.banner != null) return
         val now = clock()
         val last = lastUnpairedNoticeMs
         if (last != null && now - last < UNPAIRED_NOTICE_INTERVAL_MS) return
         lastUnpairedNoticeMs = now
-        update {
-            copy(
-                banner = Banner(
-                    Banner.Style.INFO,
-                    "A device that isn't paired tried to send",
-                    "Pair with it, or let everyone send for 10 minutes.",
-                    Banner.Action.OPEN_EVERYONE,
-                ),
+        val banner = if (peer == null) {
+            Banner(
+                Banner.Style.INFO,
+                "A device was refused",
+                "A device on this network tried to connect and was turned away. " +
+                    "To pair with it, choose Wait for a device under Pair a device first.",
+            )
+        } else {
+            Banner(
+                Banner.Style.INFO,
+                "A device that isn't paired tried to send",
+                "Pair with it, or let everyone send for 10 minutes.",
+                Banner.Action.OPEN_EVERYONE,
             )
         }
+        update { copy(banner = banner) }
     }
 
     private fun resync() {
