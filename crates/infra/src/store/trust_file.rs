@@ -318,6 +318,51 @@ mod tests {
         }
     }
 
+    /// A manual add without an alias that races a rename never writes back
+    /// the alias read before that rename.
+    #[test]
+    fn manual_trust_racing_rename_keeps_new_alias() {
+        use dropumi_application::usecases::trust::add_manual;
+
+        use crate::clock::SystemClock;
+
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_path_buf();
+        let fp = Fingerprint::from_digest([1; 32]);
+        for round in 0..40 {
+            let t = TrustFile::open(&dir).unwrap();
+            t.upsert(device(1, "One")).unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let adder = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    for _ in 0..5 {
+                        add_manual(&t, &SystemClock, fp, None).unwrap();
+                    }
+                })
+            };
+            let renamer = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    assert!(t.rename(&fp, DeviceName::sanitize("Renamed")).unwrap());
+                })
+            };
+            adder.join().unwrap();
+            renamer.join().unwrap();
+            let stored = t.get(&fp).unwrap().unwrap();
+            assert_eq!(
+                stored.alias.unwrap().as_str(),
+                "Renamed",
+                "round {round}: a manual add dropped a concurrent rename"
+            );
+            assert_eq!(stored.method, PairingMethod::Sas);
+        }
+    }
+
     #[test]
     fn rename_keeps_fingerprint_and_method() {
         let d = tempfile::tempdir().unwrap();
