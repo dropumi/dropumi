@@ -15,6 +15,17 @@ pnpm build        # output in dist/
 
 ## Deploying
 
-`.github/workflows/deploy-site.yml` publishes to GitHub Pages on every push to `main` that touches `website/`. In the repo, set **Settings > Pages > Source** to **GitHub Actions**.
+The site is served at the root, `https://dropumi.github.io/`, so it lives in its own repo named `dropumi.github.io` in the `dropumi` org. A repo with that exact name is what gives GitHub Pages the root address.
 
-The site is built with `ASTRO_BASE=/dropumi` because it is served from the `dropumi` repo (`dropumi.github.io/dropumi/`). To serve from the root, move `website/` to a repo named `dropumi.github.io` in the `dropumi` org and drop `ASTRO_BASE`.
+`.github/workflows/deploy.yml` builds and publishes on every push to `main`. In that repo, set **Settings > Pages > Source** to **GitHub Actions**.
+
+### Moving the site out of the main repo
+
+From the `dropumi` repo, with the history of `website/` kept:
+
+```sh
+git subtree split --prefix=website -b site-only
+git push git@github.com:dropumi/dropumi.github.io.git site-only:main
+```
+
+After the first deploy works, remove `website/` and `.github/workflows/deploy-site.yml` from the main repo. While the site is still in the main repo, that workflow publishes it under `/dropumi/` instead.
