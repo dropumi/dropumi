@@ -5,6 +5,7 @@ package io.github.dropumi
 import io.github.dropumi.appstate.AppLoader
 import io.github.dropumi.appstate.PendingShare
 import io.github.dropumi.core.files.DocumentGuard
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * Implemented by the Application. Activities and services reach the graph
@@ -17,6 +18,11 @@ interface AppGraphHost {
 
 /** The app's long-lived objects: one core and one app model, opened by [loader]. */
 class AppGraph(
+    /**
+     * The app's main-thread scope, which the model also runs on. Screens
+     * start model calls here, so leaving a screen never cancels one half-way.
+     */
+    val scope: CoroutineScope,
     val loader: AppLoader,
     /** The in-process share hand-off; only ShareActivity writes to it. */
     val pendingShare: PendingShare,

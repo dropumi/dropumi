@@ -16,6 +16,18 @@ val keystoreProperties = rootProject.file("keystore.properties").takeIf { it.isF
     Properties().apply { file.inputStream().use { load(it) } }
 }
 
+// The commit the app was built from, shown in Settings next to the version.
+// "unknown" outside a git checkout (or without git); only a hex hash is used.
+val gitCommit: String = try {
+    providers.exec {
+        commandLine("git", "rev-parse", "--short=12", "HEAD")
+        workingDir = rootProject.projectDir
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+} catch (_: Exception) {
+    ""
+}.takeIf { Regex("[0-9a-f]{7,40}").matches(it) } ?: "unknown"
+
 // The ABIs the APK ships. The ABI filter and the core check below use this
 // one list, so an APK never carries JNA's libjnidispatch for an ABI that has
 // no libdropumi_ffi.
@@ -31,6 +43,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "COMMIT", "\"$gitCommit\"")
         // Installs the test Application, never DropumiApplication (ADR-0013 D9).
         testInstrumentationRunner = "io.github.dropumi.DropumiTestRunner"
         // The Rust core is built for these two ABIs only. JNA also ships
@@ -71,6 +84,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

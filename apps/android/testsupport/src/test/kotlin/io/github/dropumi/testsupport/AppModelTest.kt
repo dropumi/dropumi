@@ -520,6 +520,24 @@ class AppModelTest {
         assertEquals(first, s.model.state.value.banner)
     }
 
+    /**
+     * The core reports a refused (not paired) sender with no peer: the
+     * receiver denies it while the connection is set up, so the session never
+     * gets a peer. The notice must still show. Found on the Tablet AVD
+     * (Android 16) with the real core and the CLI as the sender.
+     */
+    @Test
+    fun unpairedSenderNoticeShowsWhenTheCoreGivesNoPeer() = runTest {
+        val s = makeModel()
+        s.model.apply(listOf(NodeEvent.SessionClosed(null, "not_authorized")))
+        assertEquals("A device that isn't paired tried to send", s.model.state.value.banner?.title)
+        s.model.dismissBanner()
+        // Other closed sessions say nothing; a paired peer is never "not paired".
+        s.model.apply(listOf(NodeEvent.SessionClosed(null, "handshake_failed")))
+        s.model.apply(listOf(NodeEvent.SessionClosed(Fixtures.peer(trusted = true, alias = "Maya"), "not_authorized")))
+        assertNull(s.model.state.value.banner)
+    }
+
     @Test
     fun nearbyDevicesThatLookLikePairedOnesComeFirst() = runTest {
         val s = makeModel()
@@ -863,6 +881,105 @@ class AppModelTest {
         s.model.openPairingWindow()
         advanceUntilIdle()
         assertEquals(47_999.toUShort(), s.model.state.value.pairing?.port)
+    }
+
+    /**
+     * Browse-only devices are paired by address: during a pairing window the
+     * addresses carry the window's port, and there are none before it opens.
+     */
+    @Test
+    fun pairingWindowAddressesUseTheWindowPort() = runTest {
+        val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
+        val model = AppModel(
+            FakeCoreClient(),
+            MemorySettingsStore(sdkInt = 36),
+            HistoryStore(File(root, "app/history.json")),
+            modelScope(),
+            StandardTestDispatcher(testScheduler),
+            localAddresses = { listOf("192.168.1.5") },
+        )
+        model.start()
+        advanceUntilIdle()
+        assertTrue("no window", model.pairingAddresses().isEmpty())
+        model.openPairingWindow()
+        advanceUntilIdle()
+        assertTrue("the window has no port yet", model.pairingAddresses().isEmpty())
+        model.apply(listOf(NodeEvent.PairingWindowOpened(requireNotNull(model.state.value.pairing).operation, 47_999u)))
+        assertEquals(listOf("192.168.1.5:47999"), model.pairingAddresses())
+    }
+
+    /**
+     * Opening a pairing window pauses the receiver (ReceiverStopped(STOPPED))
+     * and the core resumes it when the window ends. The model must not try to
+     * start receiving meanwhile: the core refuses that, and the user would
+     * see "Receiving could not start" each time they pair. Found on the
+     * Tablet AVD (Android 16) with the real core.
+     */
+    @Test
+    fun pairingWindowPauseDoesNotRestartReceiving() = runTest {
+        val s = makeModel()
+        s.model.start()
+        s.model.finishOnboarding()
+        advanceUntilIdle()
+        assertEquals(1, s.core.starts().size)
+        // The pause can be reported before openPairingWindow returns.
+        s.core.emitBeforeReturning("openPairingWindow") { listOf(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED)) }
+        s.model.openPairingWindow()
+        advanceUntilIdle()
+        s.model.apply(listOf(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED)))
+        s.model.applyVisibility()
+        advanceUntilIdle()
+        assertEquals(1, s.core.starts().size)
+        assertNull(s.model.state.value.banner)
+        assertNull(s.model.state.value.receiver)
+    }
+
+    /**
+     * While a pairing window is open the receiver's settings cannot change:
+     * the core resumes the paused receiver with its old settings afterwards,
+     * so a change made meanwhile would not take effect (Off would not stop it).
+     */
+    @Test
+    fun receivingSettingsWaitForThePairingWindow() = runTest {
+        val s = makeModel()
+        s.model.start()
+        s.model.finishOnboarding()
+        advanceUntilIdle()
+        s.model.openPairingWindow()
+        advanceUntilIdle()
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        s.model.setAutoAcceptPaired(true)
+        advanceUntilIdle()
+        assertEquals(ReceiveVisibility.PAIRED_ONLY, s.model.state.value.visibility)
+        assertFalse(s.model.state.value.autoAcceptPaired)
+        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
+        // Once the window has ended, changes apply again.
+        val window = requireNotNull(s.model.state.value.pairing).operation
+        s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
+        s.model.setVisibility(ReceiveVisibility.OFF)
+        advanceUntilIdle()
+        assertEquals(ReceiveVisibility.OFF, s.model.state.value.visibility)
+    }
+
+    /** Paired devices: a rename or a removal the core refuses says so (Apple gap 2). */
+    @Test
+    fun pairedDeviceChangesThatFailAreShown() = runTest {
+        val s = makeModel()
+        assertTrue(s.model.trust(Fixtures.PEER_FINGERPRINT, "Maya"))
+        val device = s.model.state.value.trusted.single()
+        s.core.failures["renameTrusted"] = DropumiException.Config(ConfigProblem.IO, "disk full")
+        assertFalse(s.model.rename(device, "Maya's laptop"))
+        assertEquals("Not renamed", s.model.state.value.banner?.title)
+        assertEquals(ErrorCatalog.message(DropumiException.Config(ConfigProblem.IO, "x")), s.model.state.value.banner?.message)
+        s.model.dismissBanner()
+        s.core.failures["untrust"] = DropumiException.Config(ConfigProblem.IO, "disk full")
+        assertFalse(s.model.forget(device))
+        assertEquals("Not removed", s.model.state.value.banner?.title)
+        assertEquals(1, s.model.state.value.trusted.size)
+        s.model.dismissBanner()
+        assertTrue(s.model.forget(device))
+        assertNull(s.model.state.value.banner)
+        assertTrue(s.model.state.value.trusted.isEmpty())
     }
 
     /** A pairing that ends before pair() returns still shows its result. */

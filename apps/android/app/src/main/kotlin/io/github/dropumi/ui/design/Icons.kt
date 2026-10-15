@@ -29,6 +29,13 @@ object DSIcons {
     @DrawableRes val close = R.drawable.lucide_x
     @DrawableRes val failed = R.drawable.lucide_circle_x
     @DrawableRes val partial = R.drawable.lucide_circle_alert
+    @DrawableRes val back = R.drawable.lucide_arrow_left
+    @DrawableRes val chevron = R.drawable.lucide_chevron_right
+    @DrawableRes val more = R.drawable.lucide_ellipsis_vertical
+    @DrawableRes val wifi = R.drawable.lucide_wifi
+    @DrawableRes val noCloud = R.drawable.lucide_cloud_off
+    @DrawableRes val appearance = R.drawable.lucide_sun_moon
+    @DrawableRes val licences = R.drawable.lucide_scroll_text
 
     /** The icon for a kind of file. */
     @DrawableRes

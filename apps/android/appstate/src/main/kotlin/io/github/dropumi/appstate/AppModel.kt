@@ -152,6 +152,10 @@ data class AppState(
     /** The prompt to show now. */
     val currentPrompt: Prompt? get() = prompts.firstOrNull()
 
+    /** A pairing window is open and has not ended: receiving settings wait for it. */
+    val pairingWindowOpen: Boolean
+        get() = pairing?.let { it.role == PairingSession.Role.Window && it.result == null } == true
+
     /**
      * The name onboarding suggests: only the core's own `Dropumi-XXXX`, never
      * a system, model, Bluetooth or account name (ADR-0013 D3).
@@ -220,6 +224,9 @@ class AppModel(
 
     /** Calls that start an operation (send, pair, pairing window) and have not returned yet. */
     private var startsUnderWay = 0
+
+    /** openPairingWindow() is under way (before its session is in the state). */
+    private var pairingWindowStarting = false
 
     /**
      * Events for an operation the model does not know yet, kept while a
@@ -370,30 +377,62 @@ class AppModel(
         }
     }
 
-    suspend fun rename(device: TrustedDeviceInfo, alias: String) {
-        quietly { core.renameTrusted(device.fingerprint, alias) }
-        refreshTrusted()
-    }
+    /** Renames a paired device. Returns whether it was renamed; a failure shows a banner. */
+    suspend fun rename(device: TrustedDeviceInfo, alias: String): Boolean =
+        trustChange("Not renamed") { core.renameTrusted(device.fingerprint, alias) }
 
-    suspend fun forget(device: TrustedDeviceInfo) {
-        quietly { core.untrust(device.fingerprint) }
+    /** Removes a paired device. Returns whether it was removed; a failure shows a banner. */
+    suspend fun forget(device: TrustedDeviceInfo): Boolean =
+        trustChange("Not removed") { core.untrust(device.fingerprint) }
+
+    private suspend fun trustChange(failureTitle: String, change: () -> Boolean): Boolean {
+        val done = try {
+            work(change)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            show(e, failureTitle)
+            null
+        }
         refreshTrusted()
+        if (done == false) {
+            update { copy(banner = Banner(Banner.Style.WARNING, failureTitle, "This device is no longer in the list.")) }
+        }
+        return done == true
     }
 
     // Receiving
 
-    /** Changes who may send to this device. */
+    /** Changes who may send to this device. Refused while a pairing window is open. */
     suspend fun setVisibility(value: ReceiveVisibility) {
+        if (refusedDuringPairingWindow()) return
         settings.visibility = value
         update { copy(visibility = value) }
         applyVisibility()
     }
 
+    /** Refused while a pairing window is open. */
     suspend fun setAutoAcceptPaired(value: Boolean) {
+        if (refusedDuringPairingWindow()) return
         settings.autoAcceptPaired = value
         update { copy(autoAcceptPaired = value) }
         applyVisibility()
     }
+
+    /**
+     * A pairing window pauses the receiver and the core resumes it, with
+     * its old settings, when the window ends: a change made meanwhile would
+     * not take effect (Off would not keep it stopped), so none is made.
+     */
+    private fun refusedDuringPairingWindow(): Boolean {
+        if (!pairingWindowOpen) return false
+        update { copy(banner = Banner(Banner.Style.INFO, "Finish pairing first", "Who can send can change once the pairing window closes.")) }
+        return true
+    }
+
+    /** Whether a pairing window is opening or open (the core has paused the receiver). */
+    private val pairingWindowOpen: Boolean
+        get() = pairingWindowStarting || _state.value.pairingWindowOpen
 
     /**
      * Makes the receiver match the visibility and the accept setting. Calls
@@ -432,7 +471,9 @@ class AppModel(
             if (s.receiver != null) {
                 val info = work { core.setReceivePolicy(policy, accept) }
                 update { copy(receiver = info) }
-            } else if (!s.receiverStopping) {
+            } else if (!s.receiverStopping && !pairingWindowOpen) {
+                // (During a pairing window the core resumes the paused
+                // receiver itself; it refuses a start meanwhile.)
                 // Advertised only where the R21 gate is open (ADR-0013 D5);
                 // elsewhere the core never calls advertise, and peers reach
                 // this device by address or after pairing.
@@ -457,6 +498,18 @@ class AppModel(
     /** Addresses other devices can type to reach this one ("ip:port"); empty when not receiving. */
     fun connectionDetails(): List<String> {
         val port = _state.value.receiver?.port ?: return emptyList()
+        return localAddresses().map { "$it:$port" }
+    }
+
+    /**
+     * Addresses another device can type to pair with this one while the
+     * pairing window is open; empty when no window is listening. Where this
+     * device is not advertised (ADR-0013 D5), this is how it is reached.
+     */
+    fun pairingAddresses(): List<String> {
+        val session = _state.value.pairing ?: return emptyList()
+        if (session.role != PairingSession.Role.Window || session.result != null) return emptyList()
+        val port = session.port ?: return emptyList()
         return localAddresses().map { "$it:$port" }
     }
 
@@ -683,6 +736,8 @@ class AppModel(
 
     /** Lets one device pair with this one for five minutes. */
     suspend fun openPairingWindow() {
+        // The core pauses the receiver before the call returns.
+        pairingWindowStarting = true
         try {
             startOperation({ core.openPairingWindow(PAIRING_WINDOW_MINUTES) }) { op ->
                 val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
@@ -692,6 +747,8 @@ class AppModel(
             throw e
         } catch (e: Exception) {
             show(e, "Pairing could not start")
+        } finally {
+            pairingWindowStarting = false
         }
     }
 
@@ -715,6 +772,10 @@ class AppModel(
     }
 
     fun dismissBanner() = update { copy(banner = null) }
+
+    /** Shows a notice from the screens (for example: no app can open a file). Text is the app's own, never a peer's. */
+    fun notice(title: String, message: String) =
+        update { copy(banner = Banner(Banner.Style.WARNING, title, message)) }
 
     /** The UI followed the route. */
     fun routeHandled() = update { copy(route = null) }
@@ -863,8 +924,10 @@ class AppModel(
                 scope.launch { refreshTrusted() }
             }
             is NodeEvent.SessionClosed -> {
+                // A refused sender comes with no peer: the receiver denies it
+                // while the connection is set up.
                 val peer = event.peer
-                if (event.code == NOT_AUTHORIZED && peer != null && !peer.trusted) noticeUnpairedSender()
+                if (event.code == NOT_AUTHORIZED && (peer == null || !peer.trusted)) noticeUnpairedSender()
             }
             is NodeEvent.Warning -> showWarning(event.message)
             is NodeEvent.EventsDropped -> Unit
@@ -889,7 +952,9 @@ class AppModel(
             }
             // A stop that finished after the user turned receiving back on
             // (or the app came back to the front meanwhile).
-            event.reason == ReceiverStopReason.STOPPED && s.onboarded && wanted -> scope.launch { applyVisibility() }
+            // A pairing window's pause is not restarted here: the core resumes the receiver after it.
+            event.reason == ReceiverStopReason.STOPPED && s.onboarded && wanted && !pairingWindowOpen ->
+                scope.launch { applyVisibility() }
         }
     }
 

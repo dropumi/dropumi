@@ -16,6 +16,10 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import io.github.dropumi.core.files.ExportRules
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.attribute.BasicFileAttributes
 
 class ReceivedFileActions(private val context: Context, private val receiveDir: File) {
     private val authority = context.packageName + AUTHORITY_SUFFIX
@@ -47,6 +51,25 @@ class ReceivedFileActions(private val context: Context, private val receiveDir: 
     /** API 26-28: the folder picker Save uses, starting in Downloads where the system allows it. */
     fun pickSaveFolder(): Intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
         .putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE, "primary:Download"))
+
+    /**
+     * Bytes the received folder's regular files use (Settings → Received
+     * files). Links are not followed. Call it off the main thread.
+     */
+    fun usedBytes(): Long {
+        val dir = receiveDir.toPath()
+        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) return 0
+        return try {
+            Files.newDirectoryStream(dir).use { entries ->
+                entries.sumOf { path ->
+                    val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                    if (attributes.isRegularFile) attributes.size() else 0L
+                }
+            }
+        } catch (_: IOException) {
+            0
+        }
+    }
 
     /** A content URI for a single received file; null for anything else. */
     fun uriFor(savedAs: String): Uri? {

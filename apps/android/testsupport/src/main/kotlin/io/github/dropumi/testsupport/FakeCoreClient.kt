@@ -217,9 +217,17 @@ class FakeCoreClient : CoreClient {
         return device
     }
 
-    override fun renameTrusted(fingerprint: String, alias: String): Boolean = true
+    override fun renameTrusted(fingerprint: String, alias: String): Boolean {
+        fail("renameTrusted")
+        return synchronized(lock) {
+            val index = trustedList.indexOfFirst { it.fingerprint == fingerprint }
+            if (index >= 0) trustedList[index] = trustedList[index].copy(alias = alias)
+            index >= 0
+        }
+    }
 
     override fun untrust(fingerprint: String): Boolean {
+        fail("untrust")
         note(Call.Untrust(fingerprint))
         return synchronized(lock) { trustedList.removeAll { it.fingerprint == fingerprint } }
     }

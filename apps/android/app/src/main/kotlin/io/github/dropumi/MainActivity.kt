@@ -1,30 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 package io.github.dropumi
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.lifecycleScope
-import io.github.dropumi.ui.design.DS
-import io.github.dropumi.ui.design.DSIcons
-import io.github.dropumi.ui.design.DSMetrics
-import io.github.dropumi.ui.design.DSType
-import io.github.dropumi.ui.design.DropumiTheme
+import io.github.dropumi.ui.Confirmations
+import io.github.dropumi.ui.DropumiApp
+import io.github.dropumi.ui.Router
 import kotlinx.coroutines.launch
 
 /**
@@ -35,14 +22,19 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val graph: AppGraph get() = (application as AppGraphHost).graph
 
+    /** The in-window confirmations (trust and policy changes) on screen, if any. */
+    val confirmations = Confirmations()
+
+    private var darkBars: Boolean? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // The launch screen is navy: light system bar icons until the theme is known.
+        applySystemBars(dark = true)
         super.onCreate(savedInstanceState)
         graph.loader.load()
         setContent {
-            DropumiTheme(darkTheme = isSystemInDarkTheme()) {
-                Shell()
-            }
+            val router = rememberSaveable(saver = Router.Saver) { Router() }
+            DropumiApp(graph, router, confirmations, onDarkTheme = ::applySystemBars)
         }
     }
 
@@ -53,30 +45,24 @@ class MainActivity : ComponentActivity() {
         val model = graph.loader.model ?: return
         lifecycleScope.launch { model.takeSharedItems() }
     }
-}
 
-/** The app shell. The screens are not built yet; this says so. */
-@Composable
-private fun Shell() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DS.colors.bg)
-            .safeDrawingPadding()
-            .padding(DSMetrics.screenPadding),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            painter = painterResource(DSIcons.nearby),
-            contentDescription = null,
-            tint = DS.colors.accent,
-            modifier = Modifier.size(28.dp),
-        )
-        Text("Dropumi", style = DSType.screenTitle, color = DS.colors.textPrimary)
-        Text(
-            "Pre-release build. The app's screens are not built yet.",
-            style = DSType.body,
-            color = DS.colors.textSecondary,
-        )
+    /** Edge to edge, with system bar icons that match the theme the user picked. */
+    private fun applySystemBars(dark: Boolean) {
+        if (darkBars == dark) return
+        darkBars = dark
+        val bars = if (dark) {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        }
+        // Before API 27 the navigation bar's icons cannot be dark: a scrim keeps them readable.
+        val navigation = if (dark) SystemBarStyle.dark(DARK_SCRIM) else SystemBarStyle.light(LIGHT_SCRIM, DARK_SCRIM)
+        enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = navigation)
+    }
+
+    private companion object {
+        // The scrims androidx.activity uses by default.
+        val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }

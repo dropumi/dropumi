@@ -65,7 +65,7 @@ class DropumiApplication : Application(), AppGraphHost {
                 ),
             )
         }
-        return AppGraph(loader, pendingShare, guard, ReceivedFileActions(this, paths.receiveDir))
+        return AppGraph(scope, loader, pendingShare, guard, ReceivedFileActions(this, paths.receiveDir))
     }
 
     /** Free bytes in shared storage, where Save writes (API 29+). */

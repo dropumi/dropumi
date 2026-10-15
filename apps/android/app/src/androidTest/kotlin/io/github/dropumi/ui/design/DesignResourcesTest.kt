@@ -31,7 +31,7 @@ class DesignResourcesTest {
     @Test
     fun everyLucideIconInflatesAndDraws() {
         val icons = R.drawable::class.java.fields.filter { it.name.startsWith("lucide_") }
-        assertEquals(26, icons.size)
+        assertEquals(33, icons.size)
         val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         for (field in icons) {

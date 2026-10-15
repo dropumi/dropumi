@@ -63,6 +63,7 @@ class TestApplication : Application(), AppGraphHost {
             )
         }
         return AppGraph(
+            scope,
             loader,
             pendingShare,
             UriGuard(this, listOf(paths.configDir, paths.appDataDir)),

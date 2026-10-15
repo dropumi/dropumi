@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: ISC -->
+<!-- Derived from Lucide (https://lucide.dev, ISC), icon "cloud-off", lucide-static 1.57.0. Licence: assets/licenses/LUCIDE-ISC.txt. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 10.94 5.274 A 7 7 0 0 1 15.71 10 h 1.79 a 4.5 4.5 0 0 1 4.222 6.057"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 18.796 18.81 A 4.5 4.5 0 0 1 17.5 19 H 9 A 7 7 0 0 1 5.79 5.78"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="m 2 2 l 20 20"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>
