@@ -112,7 +112,7 @@ fun TransfersScreen(state: AppState) {
                                         "Files you saved to Downloads or another folder stay there.",
                                     confirmLabel = "Clear and delete",
                                     destructive = true,
-                                ) { scope.launch { clearAll(model) } },
+                                ) { scope.launch { model.clearHistory() } },
                             )
                         },
                         modifier = Modifier.testTag("transfers.clear"),
@@ -152,14 +152,6 @@ fun TransfersScreen(state: AppState) {
             }
         }
     }
-}
-
-/** Clear: every listed transfer's received copies, then the list. */
-private suspend fun clearAll(model: AppModel) {
-    for (entry in model.state.value.history) {
-        if (entry.savedAs.isNotEmpty()) model.deleteReceived(entry)
-    }
-    model.clearHistory()
 }
 
 private fun open(files: ReceivedFileActions, savedAs: String, model: AppModel, context: Context) {

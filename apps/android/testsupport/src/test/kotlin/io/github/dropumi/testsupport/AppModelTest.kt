@@ -50,6 +50,7 @@ import io.github.dropumi.ffi.ServiceAd
 import io.github.dropumi.ffi.TransferStatus
 import java.io.File
 import java.nio.file.Files
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +122,11 @@ class AppModelTest {
     }
 
     private fun FakeCoreClient.starts() = calls.filterIsInstance<FakeCoreClient.Call.StartReceiving>()
+
+    private companion object {
+        /** Bound on the io and model rounds a test runs by hand. */
+        const val MAX_ROUNDS = 10
+    }
 
     @Test
     fun unverifiedOfferNeverAnsweredWithoutUserAction() = runTest {
@@ -1256,7 +1262,11 @@ class AppModelTest {
         override fun saveToFolder(treeUri: String, files: List<ReceivedFile>): ExportResult = saveToDownloads(files)
     }
 
-    private fun TestScope.makeModel(exporter: ReceivedExporter, receiveDir: File): Setup {
+    private fun TestScope.makeModel(
+        exporter: ReceivedExporter,
+        receiveDir: File,
+        io: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
+    ): Setup {
         val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
         val core = FakeCoreClient()
         val model = AppModel(
@@ -1264,7 +1274,7 @@ class AppModelTest {
             MemorySettingsStore(sdkInt = 36),
             HistoryStore(File(root, "app/history.json")),
             modelScope(),
-            StandardTestDispatcher(testScheduler),
+            io,
             clock = { testScheduler.currentTime },
             receiveDir = receiveDir,
             exporter = exporter,
@@ -1272,17 +1282,98 @@ class AppModelTest {
         return Setup(model, core, root)
     }
 
-    /** A received transfer of a.txt (10 bytes), as the core reports it. */
-    private fun AppModel.receive(receiveDir: File): HistoryEntry {
-        File(receiveDir, "a.txt").writeBytes(ByteArray(10))
+    /** A received transfer of [name] (10 bytes), as the core reports it. */
+    private fun AppModel.receive(receiveDir: File, name: String = "a.txt", transferId: String = "aa"): HistoryEntry {
+        File(receiveDir, name).writeBytes(ByteArray(10))
         apply(
             listOf(
-                NodeEvent.OfferReceived("aa", Fixtures.peer(trusted = true, alias = "Studio Mac"), 1u, 10u),
-                NodeEvent.FileSaved("aa", 0u, "a.txt", 10u, "00"),
-                NodeEvent.TransferFinished(null, Direction.INCOMING, Fixtures.result(TransferStatus.COMPLETED)),
+                NodeEvent.OfferReceived(transferId, Fixtures.peer(trusted = true, alias = "Studio Mac"), 1u, 10u),
+                NodeEvent.FileSaved(transferId, 0u, name, 10u, "00"),
+                NodeEvent.TransferFinished(null, Direction.INCOMING, Fixtures.result(TransferStatus.COMPLETED, transferId)),
             ),
         )
         return state.value.history.first()
+    }
+
+    /** Runs io work only when the test says so, so the test can act while it waits. */
+    private class ManualDispatcher : CoroutineDispatcher() {
+        private val queue = ArrayDeque<Runnable>()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            synchronized(queue) { queue.addLast(block) }
+        }
+
+        fun runPending() {
+            while (true) {
+                val next = synchronized(queue) { queue.removeFirstOrNull() } ?: return
+                next.run()
+            }
+        }
+    }
+
+    /**
+     * Review of C1 (#3): Clear deleted the listed transfers' files one by one
+     * and then emptied the whole list, so a transfer that finished meanwhile
+     * lost its entry while its files stayed, unreachable. Clear now removes
+     * only the entries whose files it deleted.
+     */
+    @Test
+    fun clearKeepsATransferThatFinishesDuringTheClear() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val io = ManualDispatcher()
+        val s = makeModel(FakeExporter(), dir, io)
+        val first = s.model.receive(dir)
+        val clearing = async { s.model.clearHistory() }
+        runCurrent()
+        assertFalse("the deletion waits for the io dispatcher", clearing.isCompleted)
+        val second = s.model.receive(dir, "b.txt", "bb")
+        assertNotEquals(first.id, second.id)
+        repeat(MAX_ROUNDS) {
+            if (!clearing.isCompleted) {
+                io.runPending()
+                runCurrent()
+            }
+        }
+        assertTrue(clearing.isCompleted)
+        assertFalse(File(dir, "a.txt").exists())
+        assertTrue("its files stay with their entry", File(dir, "b.txt").exists())
+        val left = s.model.state.value.history.single()
+        assertEquals(second.id, left.id)
+        assertEquals(listOf("b.txt"), left.savedAs)
+    }
+
+    /** Clear deletes every listed transfer's copies and then the list. */
+    @Test
+    fun clearDeletesTheReceivedCopies() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val s = makeModel(FakeExporter(), dir)
+        s.model.receive(dir)
+        s.model.receive(dir, "b.txt", "bb")
+        s.model.clearHistory()
+        advanceUntilIdle()
+        assertTrue(s.model.state.value.history.isEmpty())
+        assertTrue(dir.listFiles().isNullOrEmpty())
+        assertNull(s.model.state.value.banner)
+    }
+
+    /** A file that cannot be deleted stays listed (with its size), so it can still be opened, saved or deleted. */
+    @Test
+    fun filesThatCannotBeDeletedStayListed() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val s = makeModel(FakeExporter(), dir)
+        s.model.receive(dir)
+        assertTrue(dir.setWritable(false))
+        try {
+            s.model.clearHistory()
+            advanceUntilIdle()
+        } finally {
+            dir.setWritable(true)
+        }
+        assertTrue(File(dir, "a.txt").exists())
+        val entry = s.model.state.value.history.single()
+        assertEquals(listOf("a.txt"), entry.savedAs)
+        assertEquals(listOf(10uL), entry.savedSizes)
+        assertEquals("Not all files were deleted", s.model.state.value.banner?.title)
     }
 
     @Test

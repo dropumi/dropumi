@@ -892,9 +892,26 @@ class AppModel(
     /** The UI followed the route. */
     fun routeHandled() = update { copy(route = null) }
 
-    fun clearHistory() {
-        update { copy(history = emptyList()) }
+    /**
+     * Clear (after the UI's confirmation): deletes the received copies of
+     * every listed transfer, then removes those entries. A transfer that
+     * finishes meanwhile keeps its entry, and an entry keeps the files that
+     * could not be deleted, so no received file is left without one.
+     */
+    suspend fun clearHistory() {
+        val entries = _state.value.history
+        val left = deleteCopies(entries)
+        val cleared = entries.map { it.id }.toSet()
+        update {
+            copy(
+                history = history.mapNotNull { entry ->
+                    if (entry.id !in cleared) return@mapNotNull entry
+                    left[entry.id]?.let { entry.keeping(it) }
+                },
+            )
+        }
         saveHistory()
+        if (left.isNotEmpty()) noticeNotDeleted()
     }
 
     // Received files (ADR-0013 D4): they leave the app only on request.
@@ -956,13 +973,47 @@ class AppModel(
 
     /** Deletes a finished transfer's internal copies (after the UI's confirmation). Save never does. */
     suspend fun deleteReceived(entry: HistoryEntry) {
-        val dir = receiveDir ?: return
-        val names = entry.savedAs.filter(ExportRules::isSingleName)
-        work { names.forEach { File(dir, it).delete() } }
+        if (receiveDir == null) return
+        val left = deleteCopies(listOf(entry))[entry.id] ?: emptySet()
         update {
-            copy(history = history.map { if (it.id == entry.id) it.copy(savedAs = emptyList(), savedSizes = emptyList()) else it })
+            copy(history = history.map { if (it.id == entry.id) it.keeping(left) else it })
         }
         saveHistory()
+        if (left.isNotEmpty()) noticeNotDeleted()
+    }
+
+    /**
+     * Deletes the received copies of [entries] (single names only, inside
+     * the receive folder; a link is removed, never its target). Returns, by
+     * entry id, the names of the files still there.
+     */
+    private suspend fun deleteCopies(entries: List<HistoryEntry>): Map<String, Set<String>> {
+        val dir = receiveDir ?: return emptyMap()
+        return work {
+            buildMap {
+                for (entry in entries) {
+                    val left = entry.savedAs.filterTo(mutableSetOf()) { name ->
+                        if (!ExportRules.isSingleName(name)) return@filterTo false
+                        val file = File(dir, name)
+                        !file.delete() && file.exists()
+                    }
+                    if (left.isNotEmpty()) put(entry.id, left)
+                }
+            }
+        }
+    }
+
+    /** The entry with only the received files named in [names] (their sizes kept with them). */
+    private fun HistoryEntry.keeping(names: Set<String>): HistoryEntry {
+        val kept = savedAs.indices.filter { savedAs[it] in names }
+        return copy(
+            savedAs = kept.map { savedAs[it] },
+            savedSizes = if (savedSizes.size == savedAs.size) kept.map { savedSizes[it] } else emptyList(),
+        )
+    }
+
+    private fun noticeNotDeleted() = update {
+        copy(banner = Banner(Banner.Style.WARNING, "Not all files were deleted", "The files that are left are still listed. Try again later."))
     }
 
     // Events
