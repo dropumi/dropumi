@@ -94,6 +94,7 @@ final class ReceiverNotifications {
 
     private let post: @MainActor (Event) -> Void
     private var task: Task<Void, Never>?
+    private var last: Snapshot?
 
     init(post: @escaping @MainActor (Event) -> Void = ReceiverNotifications.postToNotifier) {
         self.post = post
@@ -105,13 +106,21 @@ final class ReceiverNotifications {
         guard task == nil else { return }
         let snapshots = Observations { Snapshot(current()) }
         task = Task { [weak self] in
-            var last: Snapshot?
             for await snapshot in snapshots {
                 guard let self else { return }
-                handle(snapshot, after: last)
-                last = snapshot
+                handle(snapshot)
             }
         }
+    }
+
+    /// Quitting: withdraw the offers still announced (their prompts close
+    /// with the core, after the model stops listening) and stop following.
+    func withdrawAll() {
+        for prompt in last?.prompts ?? [] {
+            post(.closed(promptId: prompt.promptId))
+        }
+        last = nil
+        stop()
     }
 
     func stop() {
@@ -119,18 +128,21 @@ final class ReceiverNotifications {
         task = nil
     }
 
-    private func handle(_ new: Snapshot, after old: Snapshot?) {
-        // A new model starts with no prompts, and its history was read from
-        // disk: never announce that history.
+    private func handle(_ new: Snapshot) {
+        let old = last
+        last = new
+        // A replaced model's prompts are gone with it (and a new core may
+        // reuse their ids), so withdraw them before announcing new ones. Its
+        // history was read from disk: never announce that.
         let sameModel = old?.model == new.model
-        let before = sameModel ? old?.prompts ?? [] : []
-        let beforeIds = Set(before.map(\.promptId))
+        let before = old?.prompts ?? []
         let nowIds = Set(new.prompts.map(\.promptId))
-        for prompt in new.prompts where !beforeIds.contains(prompt.promptId) {
-            post(.offer(prompt))
-        }
-        for prompt in before where !nowIds.contains(prompt.promptId) {
+        for prompt in before where !sameModel || !nowIds.contains(prompt.promptId) {
             post(.closed(promptId: prompt.promptId))
+        }
+        let kept = sameModel ? Set(before.map(\.promptId)) : []
+        for prompt in new.prompts where !kept.contains(prompt.promptId) {
+            post(.offer(prompt))
         }
         if sameModel, let latest = new.latest, latest.id != old?.latest?.id {
             post(.finished(latest))

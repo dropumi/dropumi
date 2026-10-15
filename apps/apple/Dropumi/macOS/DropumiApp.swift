@@ -82,9 +82,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// receiving while the window is closed. A launch at login may show no
     /// window at all.
     let loader = AppLoader()
-    let notifications = ReceiverNotifications()
+    let notifications: ReceiverNotifications
     /// The load started at launch (tests wait for it).
     private(set) var launch: Task<Void, Never>?
+
+    init(notifications: ReceiverNotifications) {
+        self.notifications = notifications
+        super.init()
+    }
+
+    override convenience init() {
+        self.init(notifications: ReceiverNotifications())
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = Notifier.shared
@@ -105,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting stops the receiver and withdraws the advertisement first
     /// (bounded by the core's shutdown).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Offers announced in Notification Center end with the core.
+        notifications.withdrawAll()
         guard let model = loader.model else { return .terminateNow }
         Task { @MainActor in
             await model.shutdownAndWait()

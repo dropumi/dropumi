@@ -13,12 +13,17 @@ struct MenuBarContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let model = loader.model {
+            switch MenuBarPhase(loader.state) {
+            case let .ready(model):
                 MenuBarStatus(model: model)
-            } else {
+            case .starting:
                 Text("Starting…")
                     .font(DSFont.body)
                     .foregroundStyle(DS.textSecondary)
+            case let .failed(message):
+                MenuBarStartupFailed(message: message) {
+                    Task { await loader.reload() }
+                }
             }
             Divider()
             Button {
@@ -38,6 +43,41 @@ struct MenuBarContent: View {
         .font(DSFont.body)
         .padding(16)
         .frame(width: 320)
+    }
+}
+
+/// What the menu bar shows for the loader. A launch with no window (at
+/// login) has no other place to report that the core could not open.
+enum MenuBarPhase {
+    case starting
+    case failed(String)
+    case ready(AppModel)
+
+    init(_ state: AppLoader.State) {
+        switch state {
+        case .loading: self = .starting
+        case let .failed(message): self = .failed(message)
+        case let .ready(model): self = .ready(model)
+        }
+    }
+}
+
+private struct MenuBarStartupFailed: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Dropumi could not start", systemImage: Icons.warning)
+                .font(DSFont.rowTitle)
+                .foregroundStyle(DS.danger)
+            Text(message)
+                .font(DSFont.meta)
+                .foregroundStyle(DS.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Try again", action: retry)
+                .buttonStyle(SoftPillButtonStyle())
+        }
     }
 }
 
