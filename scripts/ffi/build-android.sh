@@ -72,7 +72,7 @@ for abi in "${abi_list[@]}"; do
   export "CARGO_TARGET_${upper}_LINKER=${bin}/${triple}${api}-clang"
   export "CARGO_TARGET_${upper}_RUSTFLAGS=-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
   echo "building dropumi-ffi for ${abi} (${triple}, ${profile})"
-  cargo build --quiet --locked -p dropumi-ffi --lib --target "${triple}" "${cargo_profile[@]}"
+  cargo build --quiet --locked -p dropumi-ffi --lib --target "${triple}" ${cargo_profile[@]+"${cargo_profile[@]}"}
   mkdir -p "${out}/${abi}"
   cp "target/${triple}/${dir}/libdropumi_ffi.so" "${out}/${abi}/"
   echo "wrote ${out}/${abi}/libdropumi_ffi.so"

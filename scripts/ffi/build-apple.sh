@@ -50,7 +50,7 @@ trap 'rm -rf "${tmp}"' EXIT
 
 for t in "${targets[@]}"; do
   echo "building dropumi-ffi for ${t} (${profile})"
-  cargo build --quiet --locked -p dropumi-ffi --lib --target "${t}" "${cargo_profile[@]}"
+  cargo build --quiet --locked -p dropumi-ffi --lib --target "${t}" ${cargo_profile[@]+"${cargo_profile[@]}"}
 done
 
 # Header and module map, generated from the macOS slice. They sit in a

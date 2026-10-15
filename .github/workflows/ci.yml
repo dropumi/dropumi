@@ -319,8 +319,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with: { cache-disabled: true }
       - name: Android SDK packages
+        # `yes` dies of SIGPIPE when sdkmanager exits; with pipefail that
+        # failed the step even though the install succeeded.
         run: |
-          yes | "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" --install \
+          (yes || true) | "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" --install \
             "ndk;27.1.12297006" "platforms;android-36" > /dev/null
       - name: Build libdropumi_ffi.so (arm64-v8a, x86_64)
         run: |
