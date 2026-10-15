@@ -47,13 +47,13 @@ contain no tests.
 | `dropumi-protocol` | `tests/handshake.rs` | Noise XX happy path, tampering, replay, prologue mismatch, responder known before msg3, MitM gives independent SAS | 11 | 0 |
 | `dropumi-protocol` | `tests/record.rs` | Bit flips, reordering, replay, truncation, poisoning, independent directions | 7 | 0 |
 | `dropumi-protocol` | `tests/session_props.rs` | proptest: random input to the receiver machine never panics; valid sender traces are accepted | 2 | 0 |
-| `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits (one session per fingerprint, whatever the number of session slots), path-free store-error log text | 4 | 0 |
+| `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits (one session per fingerprint, whatever the number of session slots), path-free store-error log text, the merge rule of a manual trust add (a new entry; a paired entry keeps its key, method, dates and alias; an explicit alias wins) | 4 | 0 |
 | `dropumi-application` | `tests/channel.rs` | Handshake over in-memory streams: pinning before msg3, busy and incompatible replies, oversized pre-auth input | 8 | 0 |
 | `dropumi-application` | `tests/failures.rs` | Cancellation on both sides (synchronized on bytes written, not on sleeps), consent timeout, absolute offer deadline, idle timeout, write stall, storage errors not leaked, `discard` on every failure path, candidate order, CompleteAck deadline restarted by each FileAck and still firing without one, trust-store errors (lookup and last-seen update) logged without paths, cancellation while browsing (`discover` and `send` to a name both stop at once, `discover` without reporting peers) | 15 | 0 |
-| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result; while the code prompt is open, the peer's "no", Cancel, Error, departure or second PairResult ends it at once, an early "yes" is kept, and an early "yes" followed by a local "no" or timeout stores nothing | 12 | 0 |
+| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result; while the code prompt is open, the peer's "no", Cancel, Error, departure or second PairResult ends it at once, an early "yes" is kept, and an early "yes" followed by a local "no" or timeout stores nothing; a manual add of a paired device merges inside the store's write, without a separate lookup | 12 | 0 |
 | `dropumi-application` | `tests/policy.rs` | Trusted-only refuses unknown senders, pair intent refused by `receive`, receiver declines, Everyone expiry, unverified offers always prompt, unverified senders must confirm the SAS | 6 | 0 |
 | `dropumi-application` | `tests/transfer.rs` | Round trip, collisions, progress, source changed, write failure | 5 | 0 |
-| `dropumi-infra` | `src/lib.rs` (unit) | Finalization without overwrite, symlinks, 0600/0700 modes, permission checks, stores and locking, stale cleanup, collision probing bounded by a per-name hint and a probe cap, TCP fallback, TXT parsing | 32 | 0 |
+| `dropumi-infra` | `src/lib.rs` (unit) | Finalization without overwrite, symlinks, 0600/0700 modes, permission checks, stores and locking (a manual trust add racing a last-seen update keeps the update), stale cleanup, collision probing bounded by a per-name hint and a probe cap, TCP fallback, TXT parsing | 32 | 0 |
 | `dropumi-infra` | `tests/txt_props.rs` | proptest: untrusted mDNS TXT records never panic the parser; kept values are bounded and well-formed | 1 | 0 |
 | `dropumi-cli` | `src/main.rs` (unit) | Argument matrix, exit-code table, control parsing and decisions bound to the waiting prompt, terminal prompts that ignore earlier lines, `terminal_safe`, NDJSON escaping, peer display; proptest: `terminal_safe` output is inert for any input | 13 | 0 |
 | `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback | 38 | 1 |
@@ -98,7 +98,7 @@ replaced.
 | `PendingDiscovery` | `Discovery` | A browse that never completes; notifies the test when it starts (cancellation tests) |
 | `MemSource`, `StallingReader` | `FileSource` | In-memory files; a reader that stops after N bytes |
 | `MemSink`, `MemFile` | `FileSink`, `IncomingFile` | Fault injection (fail after N bytes with a chosen message, block writes); counts begin, commit, discard and directory syncs |
-| `MemTrust`, `MemIdentity` | `TrustStore`, `IdentityStore` | |
+| `MemTrust`, `MemIdentity` | `TrustStore`, `IdentityStore` | `fail_*` switches make a lookup or a last-seen update fail; `upsert_with` merges under the mutex and never consults `fail_get` |
 | `Scripted` | `Interaction` | Fixed decisions, never answers (consent and SAS timeouts), or answers the code after a delay (paused time) |
 | `ManualClock` | `Clock` | Advanced by hand (Everyone expiry) |
 

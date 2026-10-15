@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Pairing: trust is stored only when both users confirm the same code.
+//! Pairing: trust is stored only when both users confirm the same code,
+//! and a later manual add keeps what pairing stored.
 
 #![allow(
     clippy::unwrap_used,
@@ -470,4 +471,34 @@ async fn cancel_while_waiting_for_peer_result() {
     assert!(!matches!(b.unwrap(), PairOutcome::Paired(_)));
     assert_eq!(a_trust.len(), 0);
     assert_eq!(b_trust.len(), 0);
+}
+
+/// A manual add of an already paired device merges inside the store's
+/// write (the real store holds its lock there), never through a separate,
+/// unlocked lookup that a concurrent writer could make stale.
+#[test]
+fn add_manual_merges_without_unlocked_lookup() {
+    use dropumi_application::usecases::trust::add_manual;
+    use dropumi_domain::device::DeviceName;
+    use dropumi_domain::time::Timestamp;
+    use dropumi_domain::trust::{PairingMethod, TrustedDevice};
+    use std::sync::atomic::Ordering;
+
+    let bob = identity(2, "Bob");
+    let paired = TrustedDevice {
+        fingerprint: *bob.fingerprint(),
+        public_key: Some(*bob.public_key()),
+        alias: Some(DeviceName::sanitize("Bob's laptop")),
+        method: PairingMethod::Sas,
+        added_at: Timestamp(100),
+        last_seen: Some(Timestamp(200)),
+    };
+    let trust = MemTrust::default();
+    trust.devices.lock().unwrap().push(paired.clone());
+    trust.fail_get.store(true, Ordering::SeqCst);
+
+    let stored = add_manual(&trust, &ManualClock::at(999), *bob.fingerprint(), None).unwrap();
+
+    assert_eq!(stored, paired);
+    assert_eq!(*trust.devices.lock().unwrap(), vec![paired]);
 }

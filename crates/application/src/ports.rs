@@ -204,6 +204,21 @@ pub trait TrustStore: Send + Sync {
     /// [`StoreError`] for I/O failures.
     fn upsert(&self, device: TrustedDevice) -> Result<(), StoreError>;
 
+    /// Adds or replaces the entry for `fp` with `merge(current entry)`, in
+    /// one atomic step: the current entry is read under the same lock as
+    /// the write, so a concurrent change (a rename, a last-seen update, a
+    /// pairing) is never overwritten with stale data. Returns the stored
+    /// entry.
+    ///
+    /// # Errors
+    /// [`StoreError`] for I/O, corruption or unsafe permissions, or if the
+    /// merged entry has a fingerprint other than `fp` (nothing is changed).
+    fn upsert_with<F: FnOnce(Option<&TrustedDevice>) -> TrustedDevice>(
+        &self,
+        fp: &Fingerprint,
+        merge: F,
+    ) -> Result<TrustedDevice, StoreError>;
+
     /// Removes a device; returns whether it existed.
     ///
     /// # Errors

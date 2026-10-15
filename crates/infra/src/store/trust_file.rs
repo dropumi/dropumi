@@ -145,6 +145,25 @@ impl TrustStore for TrustFile {
         })
     }
 
+    fn upsert_with<F: FnOnce(Option<&TrustedDevice>) -> TrustedDevice>(
+        &self,
+        fp: &Fingerprint,
+        merge: F,
+    ) -> Result<TrustedDevice, StoreError> {
+        self.modify(|v| {
+            let device = merge(v.iter().find(|d| &d.fingerprint == fp));
+            if &device.fingerprint != fp {
+                // Checked before any change: the rewrite keeps the content.
+                return Err(StoreError::Io(
+                    "merged trust entry has a different fingerprint".into(),
+                ));
+            }
+            v.retain(|d| &d.fingerprint != fp);
+            v.push(device.clone());
+            Ok(device)
+        })?
+    }
+
     fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError> {
         self.modify(|v| {
             let before = v.len();
@@ -240,6 +259,52 @@ mod tests {
             t.list(),
             Err(StoreError::InsecurePermissions { .. })
         ));
+    }
+
+    /// A manual add that races a session's last-seen update never writes
+    /// back an entry read before that update.
+    #[test]
+    fn manual_trust_racing_touch_keeps_last_seen() {
+        use dropumi_application::usecases::trust::add_manual;
+
+        use crate::clock::SystemClock;
+
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_path_buf();
+        let fp = Fingerprint::from_digest([1; 32]);
+        for round in 0..40 {
+            let t = TrustFile::open(&dir).unwrap();
+            t.upsert(device(1, "One")).unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let adder = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    for _ in 0..5 {
+                        add_manual(&t, &SystemClock, fp, None).unwrap();
+                    }
+                })
+            };
+            let toucher = {
+                let (dir, start) = (dir.clone(), std::sync::Arc::clone(&start));
+                std::thread::spawn(move || {
+                    let t = TrustFile::open(&dir).unwrap();
+                    start.wait();
+                    t.touch(&fp, Timestamp(99)).unwrap();
+                })
+            };
+            adder.join().unwrap();
+            toucher.join().unwrap();
+            let stored = t.get(&fp).unwrap().unwrap();
+            assert_eq!(
+                stored.last_seen,
+                Some(Timestamp(99)),
+                "round {round}: a manual add dropped a concurrent last-seen update"
+            );
+            assert_eq!(stored.method, PairingMethod::Sas);
+            assert_eq!(stored.alias.unwrap().as_str(), "One");
+        }
     }
 
     #[test]

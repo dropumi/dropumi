@@ -473,6 +473,25 @@ impl TrustStore for MemTrust {
         Ok(())
     }
 
+    /// Merges under the mutex, like the real store under its lock; never
+    /// consults `fail_get`.
+    fn upsert_with<F: FnOnce(Option<&TrustedDevice>) -> TrustedDevice>(
+        &self,
+        fp: &Fingerprint,
+        merge: F,
+    ) -> Result<TrustedDevice, StoreError> {
+        let mut v = self.devices.lock().unwrap();
+        let device = merge(v.iter().find(|d| &d.fingerprint == fp));
+        if &device.fingerprint != fp {
+            return Err(StoreError::Io(
+                "merged trust entry has a different fingerprint".into(),
+            ));
+        }
+        v.retain(|d| &d.fingerprint != fp);
+        v.push(device.clone());
+        Ok(device)
+    }
+
     fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError> {
         let mut v = self.devices.lock().unwrap();
         let before = v.len();

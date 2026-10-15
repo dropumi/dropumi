@@ -77,7 +77,7 @@ generic over ports and receive them through constructors (no `dyn`, no `async-tr
 | `FileSource` | Inspect, open and re-check files to send | `infra::fs::LocalFileSource` | `MemSource` (with `StallingReader` for stuck sources) |
 | `FileSink` | Start received files, sync the directory | `infra::fs::ReceiveDir` | `MemSink` (fault injection: fail after N bytes, block writes; counts begin/commit/discard/dir syncs) |
 | `IdentityStore` | Load or create, reset, rename the identity | `infra::store::FileIdentityStore` | `MemIdentity` |
-| `TrustStore` | Trusted devices (get, list, upsert, remove, touch) | `infra::store::TrustFile` | `MemTrust` |
+| `TrustStore` | Trusted devices (get, list, upsert, upsert_with (merge under the store lock), remove, touch) | `infra::store::TrustFile` | `MemTrust` |
 | `Interaction` | Offer decisions and SAS confirmation | `cli::interaction::CliInteraction` (control channel, TTY prompt, or "never") | `Scripted` (fixed answers, or never answers) |
 | `Clock` | Wall-clock time | `infra::clock::SystemClock` | `ManualClock` |
 
