@@ -93,6 +93,10 @@ android {
         unitTests.all { test ->
             // JVM tests never load the native library (see :core).
             test.systemProperty("uniffi.component.dropumi_ffi.libraryOverride", "dropumi_ffi_must_not_load")
+            // TokensTest checks the colour tokens against design.md itself.
+            val designMd = rootProject.file("../../design.md")
+            test.systemProperty("dropumi.designMd", designMd.path)
+            test.inputs.file(designMd).withPathSensitivity(PathSensitivity.NONE)
         }
     }
 }
