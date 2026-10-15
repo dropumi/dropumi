@@ -130,7 +130,11 @@ class ProcessLifecycleTest {
     /**
      * Leaving the app (the activity stops) sends ON_STOP a moment later:
      * accepting stops once. Coming back sends ON_START; the stopping
-     * receiver is left alone until the core reports it stopped.
+     * receiver is left alone until the core reports it stopped: no receiver
+     * change follows StopAccepting. (At launch, ON_START can reach the model
+     * after it has started receiving; becomeActive then makes the running
+     * receiver match the settings again, with setReceivePolicy. That comes
+     * before StopAccepting and is not what this test checks.)
      */
     @Test
     fun leavingTheAppStopsAcceptingOnce() {
@@ -144,7 +148,8 @@ class ProcessLifecycleTest {
             compose.waitUntil(TIMEOUT_MS) { Lifecycle.Event.ON_START in events && !model.state.value.isInBackground }
             instrumentation.waitForIdleSync()
             assertEquals(1, stopAccepting())
-            assertTrue(fake.core.calls.none { it is Call.StopReceiving || it is Call.SetReceivePolicy })
+            val afterLeaving = fake.core.calls.dropWhile { it != Call.StopAccepting }
+            assertTrue("calls after leaving: $afterLeaving", afterLeaving.none { it is Call.StopReceiving || it is Call.SetReceivePolicy })
         }
     }
 
