@@ -50,6 +50,25 @@ class ContentUriFileTest {
         }
     }
 
+    /**
+     * openReader runs steps 1-2 again itself, before it opens anything: a
+     * guard that allowed the URI at create() and refuses it now keeps the
+     * document from being opened (no caller-side check is relied on).
+     */
+    @Test
+    fun uriCheckedAgainBeforeOpen() {
+        var allow = true
+        val guard = object : DocumentGuard {
+            override fun checkUri(uri: String): UriGuardPolicy.Refusal? = if (allow) null else UriGuardPolicy.Refusal.OWN_PROVIDER
+            override fun checkOpen(document: OpenDocument): UriGuardPolicy.Refusal? = null
+        }
+        val (f, source) = file(FakeDoc(DocumentMeta("a.jpg", 3), ByteArray(3)), guard)
+        allow = false
+        val e = runCatching { f.openReader() }.exceptionOrNull() ?: throw AssertionError("a refused URI was opened")
+        assertEquals(ContentUriFile.UNREADABLE, (e as CallbackException.Failed).detail)
+        assertTrue("never opened: ${source.calls}", source.calls.none { it.startsWith("open") })
+    }
+
     @Test
     fun sizeComesFromTheProviderElseFromAGuardedRegularFile() {
         val (sized, _) = file(FakeDoc(DocumentMeta("a", size = 42)))
