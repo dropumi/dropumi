@@ -34,12 +34,14 @@ struct ThisDeviceScreen: View {
             if let identity = model.identity {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionLabel(String(localized: "Fingerprint"))
-                    Text(verbatim: identity.fingerprintDisplay)
+                    // The full 52 characters: "Add by fingerprint" needs all
+                    // of them and sends people here.
+                    Text(verbatim: Formatting.fingerprint(identity.fingerprint))
                         .font(DSFont.fingerprint)
                         .foregroundStyle(DS.textPrimary)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("device.fingerprint")
-                    Text("Another device can add this one by typing this fingerprint. Compare it in person.")
+                    Text("This is the full fingerprint. Another device can add this one by typing all of it (Add by fingerprint). Compare it in person.")
                         .font(DSFont.meta)
                         .foregroundStyle(DS.textSecondary)
                 }

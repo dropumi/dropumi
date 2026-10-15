@@ -121,6 +121,21 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
         #expect(Formatting.spokenCode("123456") == "1 2 3, 4 5 6")
     }
 
+    /// "This device" shows the whole 52-character fingerprint that "Add by
+    /// fingerprint" needs, grouped in fours; the grouping is only for reading.
+    @Test func fullFingerprintIsGroupedInFoursAndRoundTrips() {
+        let full = FakeCoreClient.fingerprint
+        #expect(full.count == 52)
+        let grouped = Formatting.fingerprint(full)
+        let groups = grouped.split(separator: "-", omittingEmptySubsequences: false)
+        #expect(groups.count == 13)
+        #expect(groups.allSatisfy { $0.count == 4 })
+        // The add sheet and the core drop spaces and dashes.
+        #expect(grouped.filter { !$0.isWhitespace && $0 != "-" } == full)
+        // It starts with the short form shown elsewhere.
+        #expect(grouped.hasPrefix("ABCD-EFGH-IJKL-MNOP-QRST-UVWX"))
+    }
+
     @Test func backgroundStopsAcceptingButDoesNotStopReceiving() async throws {
         let (model, core) = try makeModel()
         await model.finishOnboarding()

@@ -42,6 +42,19 @@ public enum Formatting {
         return "\(first), \(second)"
     }
 
+    /// A full fingerprint in groups of four ("ABCD-EFGH-…", 13 groups for
+    /// the 52 characters), like the core's short display form. The dashes
+    /// are only for reading: "Add by fingerprint" and the core ignore them.
+    public static func fingerprint(_ full: String) -> String {
+        var groups: [Substring] = []
+        var rest = Substring(full)
+        while !rest.isEmpty {
+            groups.append(rest.prefix(4))
+            rest = rest.dropFirst(4)
+        }
+        return groups.joined(separator: "-")
+    }
+
     /// "m:ss" for countdowns.
     public static func countdown(_ seconds: Int) -> String {
         let s = max(0, seconds)

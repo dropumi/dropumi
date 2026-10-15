@@ -110,6 +110,24 @@ final class UIStateTests: XCTestCase {
         try audit(app)
     }
 
+    /// "Add by fingerprint" needs all 52 characters and points here, so
+    /// "This device" shows the full fingerprint (fake core's fixture).
+    @MainActor
+    func testThisDeviceShowsTheFullFingerprint() {
+        let app = launch("nearby-empty")
+        let settings = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let thisDevice = app.buttons["settings.thisDevice"]
+        XCTAssertTrue(thisDevice.waitForExistence(timeout: 5))
+        thisDevice.tap()
+        let fingerprint = app.staticTexts["device.fingerprint"]
+        XCTAssertTrue(fingerprint.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            fingerprint.label,
+            "ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567-ABCD-EFGH-IJKL-MNOP-QRST")
+    }
+
     @MainActor
     func testLocalNetworkDeniedExplainsHowToFix() {
         let app = launch("local-network-denied")
