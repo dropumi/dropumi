@@ -77,10 +77,11 @@ android {
         }
         // The build the CLI interop harness runs (scripts/android/interop.sh):
         // minified with the release rules, so the harness exercises what R8
-        // does to the app, plus keep rules for what the test APK calls
-        // (src/androidTest/proguard-qa.pro). Not debuggable; signed with the
-        // debug key, so it needs no secret. The library modules have no qa
-        // variant and use their release one.
+        // does to the app, plus keep rules for only the classes and members
+        // the interop test code calls (src/androidTest/proguard-qa.pro;
+        // what R8 cannot change in qa is listed there). Not debuggable;
+        // signed with the debug key, so it needs no secret. The library
+        // modules have no qa variant and use their release one.
         create("qa") {
             initWith(getByName("release"))
             applicationIdSuffix = ".qa"
