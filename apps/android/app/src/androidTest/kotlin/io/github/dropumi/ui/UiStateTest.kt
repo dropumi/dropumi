@@ -13,6 +13,10 @@ import android.provider.Settings
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -127,8 +131,15 @@ class UiStateTest {
             compose.waitUntil(TIMEOUT_MS) { compose.onAllNodesWithTag("nearby.row").fetchSemanticsNodes().size == 3 }
             compose.onNodeWithText("Maya's phone").assertExists()
             compose.onNodeWithText("Looks like Studio Mac").assertExists()
-            compose.onAllNodesWithText("Not paired").assertCountEquals(2)
-            compose.onAllNodesWithText("Paired").assertCountEquals(0)
+            // Each text in the rows is its own node here, so a "Paired" anywhere
+            // in a row's text or labels (alone, or as in "Paired · Studio Mac")
+            // is counted: the only ones are the two "Not paired". (The screen's
+            // own status pill, "Paired devices only", is outside the rows.)
+            val inRow = hasAnyAncestor(hasTestTag("nearby.row"))
+            val saysPaired = hasText("paired", substring = true, ignoreCase = true) or
+                hasContentDescription("paired", substring = true, ignoreCase = true)
+            compose.onAllNodes(inRow and hasText("Not paired"), useUnmergedTree = true).assertCountEquals(2)
+            compose.onAllNodes(inRow and saysPaired, useUnmergedTree = true).assertCountEquals(2)
             compose.onNodeWithText("3 devices found · works without internet").assertExists()
         }
     }
