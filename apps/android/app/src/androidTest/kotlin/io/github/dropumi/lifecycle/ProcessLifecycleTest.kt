@@ -16,8 +16,13 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dropumi.FakeScenarioRule
 import io.github.dropumi.MainActivity
 import io.github.dropumi.appstate.AppModel
+import io.github.dropumi.appstate.ServiceKind
+import io.github.dropumi.appstate.ServiceStart
+import io.github.dropumi.appstate.TransferServiceState
+import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.testsupport.FakeCoreClient.Call
 import io.github.dropumi.testsupport.FakeServiceStarter
+import io.github.dropumi.testsupport.Fixtures
 import io.github.dropumi.testsupport.Scenario
 import java.util.Collections
 import org.junit.After
@@ -89,8 +94,36 @@ class ProcessLifecycleTest {
             assertEquals(0, stopAccepting())
             assertFalse(model.state.value.isInBackground)
             assertNotNull(model.state.value.receiver)
-            // Pausing for a recreation starts no service either.
-            assertTrue((fake.app.services as FakeServiceStarter).starts.isEmpty())
+        }
+    }
+
+    /**
+     * MainActivity.onPause starts the transfer service for a running
+     * transfer when the user leaves, and not when the activity is only
+     * recreated (rotation). The first start is refused, so the model tries
+     * again at the next chance it is given: the recreation must not be one,
+     * and leaving must be.
+     */
+    @Test
+    fun pauseStartsTheServiceWhenLeavingButNotOnRecreation() {
+        val services = fake.app.services as FakeServiceStarter
+        services.result = ServiceStart.REFUSED
+        launch().use { scenario ->
+            fake.core.emit(
+                NodeEvent.OfferReceived("aa", Fixtures.peer(trusted = true), 1u, 10u),
+                NodeEvent.TransferAccepted(null, "aa"),
+            )
+            compose.waitUntil(TIMEOUT_MS) { model.state.value.transferService == TransferServiceState.REFUSED }
+            assertEquals(1, services.starts.size)
+            scenario.recreate()
+            instrumentation.waitForIdleSync()
+            assertEquals(Lifecycle.State.RESUMED, scenario.state)
+            assertEquals("no start for a recreation", 1, services.starts.size)
+            scenario.moveToState(Lifecycle.State.CREATED)
+            assertEquals("a start when leaving", 2, services.starts.size)
+            assertEquals(ServiceKind.TRANSFER, services.starts.last().kind)
+            // Back in front before closing: closing a stopped activity waits about 45 s for its destruction.
+            scenario.moveToState(Lifecycle.State.RESUMED)
         }
     }
 
