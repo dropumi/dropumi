@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# Every version is pinned here and justified in docs/dependencies.md.
+
+[versions]
+agp = "9.4.1"
+jna = "5.19.1"
+junit = "4.13.2"
+
+[libraries]
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }

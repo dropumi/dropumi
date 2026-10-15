@@ -1,0 +1,416 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# Dropumi CI. Policy (ADR-0010):
+# - read-only GITHUB_TOKEN, no secrets, no pull_request_target;
+# - every third-party action is pinned by full commit SHA with a version comment;
+# - every checkout sets persist-credentials: false;
+# - Rust is installed with plain rustup (no toolchain action).
+# Job display names are used as required status checks; do not rename them
+# without updating the "Protect Main Branch" ruleset.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+defaults:
+  run:
+    shell: bash
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Install Rust (stable + rustfmt)
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+          rustup default stable
+      - run: cargo fmt --all --check
+      - name: Check MPL-2.0 SPDX headers (first line of every .rs file)
+        run: |
+          bad=""
+          while IFS= read -r -d '' f; do
+            if [ "$(head -n 1 "$f")" != "// SPDX-License-Identifier: MPL-2.0" ]; then
+              bad="${bad}${f}"$'\n'
+            fi
+          done < <(git ls-files -z -- '*.rs')
+          if [ -n "$bad" ]; then
+            echo "::error::First line must be '// SPDX-License-Identifier: MPL-2.0' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+      - name: Check MPL-2.0 SPDX headers (TOML, YAML and shell files)
+        run: |
+          bad=""
+          while IFS= read -r -d '' f; do
+            first="$(head -n 1 "$f")"
+            case "$first" in
+              '#!'*) first="$(sed -n 2p "$f")" ;;
+            esac
+            if [ "$first" != "# SPDX-License-Identifier: MPL-2.0" ]; then
+              bad="${bad}${f}"$'\n'
+            fi
+          done < <(git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' ':!*pnpm-lock.yaml')
+          if [ -n "$bad" ]; then
+            echo "::error::First line (after any #! line) must be '# SPDX-License-Identifier: MPL-2.0' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+      # Generated bindings are exempt; Package.swift must start with its
+      # swift-tools-version line, so its header is on line 2.
+      - name: Check MPL-2.0 SPDX headers (Swift and Kotlin files)
+        run: |
+          bad=""
+          while IFS= read -r -d '' f; do
+            first="$(head -n 1 "$f")"
+            case "$f" in
+              */Package.swift) first="$(sed -n 2p "$f")" ;;
+            esac
+            if [ "$first" != "// SPDX-License-Identifier: MPL-2.0" ]; then
+              bad="${bad}${f}"$'\n'
+            fi
+          done < <(git ls-files -z -- '*.swift' '*.kt' '*.kts' \
+            ':!apps/apple/DropumiKit/Sources/DropumiBindings/DropumiBindings.swift' \
+            ':!apps/android/core-bindings/src/main/kotlin/io/github/dropumi/ffi/dropumi_ffi.kt')
+          if [ -n "$bad" ]; then
+            echo "::error::First line (line 2 in Package.swift) must be '// SPDX-License-Identifier: MPL-2.0' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Install Rust (stable + clippy)
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --no-default-features --locked -- -D warnings
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: { RUSTDOCFLAGS: -D warnings }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo doc --workspace --no-deps --all-features --locked
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo test --workspace --all-features --locked
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # The MSRV is read from [workspace.package] rust-version; there is no rust-toolchain.toml.
+      - id: msrv
+        run: |
+          msrv="$(cargo metadata --no-deps --format-version 1 | jq -r '[.packages[].rust_version | select(. != null)] | unique | if length == 1 then .[0] else error("expected one rust-version") end')"
+          echo "version=${msrv}" >> "$GITHUB_OUTPUT"
+      - env: { MSRV: "${{ steps.msrv.outputs.version }}" }
+        run: |
+          rustup toolchain install "$MSRV" --profile minimal --no-self-update
+          rustup default "$MSRV"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: msrv, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo check --workspace --all-targets --all-features --locked
+
+  architecture:
+    name: architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - run: bash scripts/ci/check-architecture.sh
+
+  # Core library crates only (the CLI and the FFI crates, which link, are excluded; the
+  # ffi jobs build the FFI for these targets). Result label: "Build verified only
+  # (core library crates; no app, not run)". Nothing is linked or executed on the target.
+  cross-build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-linux-android, os: ubuntu-latest }
+          - { target: aarch64-apple-ios, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env: { TARGET: "${{ matrix.target }}", ANDROID_API: "26" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --target "$TARGET" --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: "${{ matrix.target }}", save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - name: Build core library crates (no linking, not run)
+        run: |
+          if [ "$TARGET" = "aarch64-linux-android" ]; then   # blake3 compiles C NEON for the target
+            ndk="${ANDROID_NDK_HOME:?}"
+            echo "NDK $(grep -E '^Pkg.Revision' "$ndk/source.properties")"
+            ndk_bin="${ndk}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CC_aarch64_linux_android="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
+            export AR_aarch64_linux_android="${ndk_bin}/llvm-ar"
+            test -x "$CC_aarch64_linux_android" || { echo "::error::NDK clang missing: $CC_aarch64_linux_android"; exit 1; }
+          else
+            xcodebuild -version; xcrun --sdk iphoneos --show-sdk-version
+          fi
+          cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen \
+            --no-default-features --locked --target "$TARGET"
+
+  # The FFI for the Apple apps: the committed bindings match the library, the
+  # XCFramework builds for iOS devices, the iOS simulator and macOS (arm64), and the
+  # Swift binding tests pass against the macOS slice. Not a required check (adding
+  # it to the ruleset is a maintainer decision). Labels: iOS slices "Build verified
+  # only"; macOS "Automated test passed" with the runner's macOS version.
+  ffi-apple:
+    name: ffi (apple)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --target aarch64-apple-ios --target aarch64-apple-ios-sim
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: ffi-apple, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Bindings are up to date
+        run: bash scripts/ffi/bindings.sh --check
+      - name: Build DropumiFFI.xcframework (iOS device, iOS simulator, macOS)
+        run: bash scripts/ffi/build-apple.sh --profile dev --slices all
+      - name: Swift binding tests (macOS slice)
+        run: swift test --package-path apps/apple/DropumiKit
+
+  # The Apple apps (ADR-0012): the package tests, the app's hosted tests and the
+  # UI state tests (fake core) on an iOS simulator, and an unsigned macOS build.
+  # Not a required check. Needs Xcode 27; without it the job fails loudly instead
+  # of testing with another Xcode (gate G5). xcodegen comes from its GitHub
+  # release, checked against a pinned SHA-256. The macOS UI tests need UI
+  # automation approval on the machine and do not run here; neither do the
+  # opt-in interop tests (scripts/apple/interop.sh).
+  apple-app:
+    name: apple (app)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      SIMULATOR: iPhone 17
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --target aarch64-apple-ios-sim
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: apple-app, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - name: Select Xcode 27 (gate G5)
+        run: |
+          xcode="$(find /Applications -maxdepth 1 -name 'Xcode_27*.app' | sort -V | tail -n 1)"
+          if [[ -z "${xcode}" ]]; then
+            echo "::error::Xcode 27 is not installed on this runner (gate G5)"
+            find /Applications -maxdepth 1 -name 'Xcode*.app'
+            exit 1
+          fi
+          sudo xcode-select -s "${xcode}/Contents/Developer"
+          sw_vers
+          xcodebuild -version
+      - name: Install xcodegen 2.46.0
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/xcodegen.zip" \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  ${RUNNER_TEMP}/xcodegen.zip" \
+            | shasum -a 256 -c -
+          unzip -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          echo "${RUNNER_TEMP}/xcodegen/xcodegen/bin" >> "${GITHUB_PATH}"
+      - name: Build DropumiFFI.xcframework (iOS simulator, macOS)
+        run: bash scripts/ffi/build-apple.sh --profile dev --slices ci
+      - name: Package tests (macOS)
+        run: swift test --package-path apps/apple/DropumiKit
+      - name: Generate the Xcode project
+        run: cd apps/apple && xcodegen generate
+      - name: App tests on the iOS simulator (hosted and UI state tests)
+        run: |
+          xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS \
+            -destination "platform=iOS Simulator,name=${SIMULATOR}" -derivedDataPath apps/apple/build
+      - name: macOS app builds (unsigned)
+        run: |
+          xcodebuild build -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-macOS \
+            -destination "platform=macOS,arch=arm64" -derivedDataPath apps/apple/build \
+            CODE_SIGNING_ALLOWED=NO
+
+  # The FFI for the Android app: the library builds for arm64-v8a and x86_64 with
+  # 16 KB pages, and the Kotlin binding tests pass on the host JVM. Not a required
+  # check. Labels: Android ABIs "Build verified only"; the host JVM tests "Automated
+  # test passed (Linux x86_64 host JVM)".
+  ffi-android:
+    name: ffi (android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --target aarch64-linux-android --target x86_64-linux-android
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: ffi-android, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with: { distribution: temurin, java-version: "21" }
+      # Also validates the Gradle wrapper JAR checksum.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with: { cache-disabled: true }
+      - name: Android SDK packages
+        # `yes` dies of SIGPIPE when sdkmanager exits; with pipefail that
+        # failed the step even though the install succeeded.
+        run: |
+          (yes || true) | "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;27.1.12297006" "platforms;android-36" > /dev/null
+      - name: Build libdropumi_ffi.so (arm64-v8a, x86_64)
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/27.1.12297006"
+          bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile release
+      - name: 16 KB page alignment
+        run: bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
+      # Negative check: a directory without libraries must fail with the
+      # script's own message, so an early exit (a missing llvm-readelf, say)
+      # cannot pass for it.
+      - name: 16 KB check fails on a directory with no libraries
+        run: |
+          empty="$(mktemp -d)"
+          if out="$(bash scripts/ffi/check-16k.sh "${empty}" 2>&1)"; then
+            printf '%s\n' "${out}"
+            echo "::error::check-16k.sh exited 0 on a directory with no .so files"
+            exit 1
+          fi
+          printf '%s\n' "${out}"
+          if ! grep -qF "no .so files found" <<< "${out}"; then
+            echo "::error::check-16k.sh failed without reporting the missing .so files"
+            exit 1
+          fi
+      - name: Kotlin binding tests (host JVM)
+        run: |
+          cargo build --locked -p dropumi-ffi --lib
+          ./apps/android/gradlew -p apps/android --no-daemon --console=plain :core-bindings:testDebugUnitTest
+
+  deny:
+    name: cargo-deny (${{ matrix.checks }})
+    strategy:
+      fail-fast: false
+      matrix: { checks: [advisories, "bans licenses sources"] }
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with: { tool: cargo-deny@0.20.2, fallback: none }
+      - env: { CHECKS: "${{ matrix.checks }}" }
+        run: |
+          read -r -a checks <<< "$CHECKS"
+          cargo deny --locked check "${checks[@]}"
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with: { tool: zizmor@1.30.1, fallback: none }
+      # github.token is the automatic read-only job token (not a repository secret);
+      # zizmor uses it only for its online audits (for example impostor-commit and
+      # known-vulnerable-actions).
+      - env: { GH_TOKEN: "${{ github.token }}" }
+        run: zizmor --format=github .
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # The image digest is not tracked by Dependabot; update it by hand (docs/development.md).
+      - run: |
+          docker run --rm --volume "${GITHUB_WORKSPACE}:/repo" --workdir /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+
+  # Experimental and never a required check: multicast on hosted runners is UNVERIFIED.
+  mdns-e2e:
+    name: mdns-e2e (experimental)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    env: { DROPUMI_TEST_MDNS: "1" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - run: cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_

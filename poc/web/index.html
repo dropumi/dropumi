@@ -1,0 +1,191 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!--
+  Research prototype for ADR-0011 (browser companion), part 1.
+  Two browsers connect a WebRTC DataChannel over the local network by
+  copying the SDP by hand. No STUN or TURN server, no network traffic beyond
+  the LAN, no dependencies. Never deployed; not a Dropumi feature.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dropumi research prototype: LAN DataChannel</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 1rem; max-width: 46rem; }
+  .banner { background: #fff3cd; border: 1px solid #e0c97a; padding: .5rem .75rem; border-radius: 6px; }
+  textarea { width: 100%; height: 7rem; font: 12px/1.3 ui-monospace, monospace; }
+  button { font: inherit; margin: .25rem .25rem .25rem 0; padding: .35rem .8rem; }
+  pre { background: #f4f6f8; padding: .5rem; overflow-x: auto; font-size: 12px; }
+  fieldset { margin: .75rem 0; }
+</style>
+</head>
+<body>
+<p class="banner"><strong>Research prototype.</strong> Not a Dropumi feature, not secure, not deployed. It only measures whether two browsers on this network can open a WebRTC DataChannel, and how fast it is.</p>
+
+<fieldset>
+  <legend>Environment</legend>
+  <pre id="env"></pre>
+</fieldset>
+
+<fieldset>
+  <legend>1. Offer (on device A)</legend>
+  <button id="makeOffer">Create offer</button>
+  <textarea id="offer" placeholder="Offer SDP appears here; copy it to device B" readonly></textarea>
+</fieldset>
+
+<fieldset>
+  <legend>2. Answer (on device B)</legend>
+  <textarea id="offerIn" placeholder="Paste device A's offer here"></textarea>
+  <button id="makeAnswer">Create answer</button>
+  <textarea id="answer" placeholder="Answer SDP appears here; copy it back to device A" readonly></textarea>
+</fieldset>
+
+<fieldset>
+  <legend>3. Connect (on device A)</legend>
+  <textarea id="answerIn" placeholder="Paste device B's answer here"></textarea>
+  <button id="connect">Connect</button>
+</fieldset>
+
+<fieldset>
+  <legend>4. Measure (on device A, once connected)</legend>
+  <label>Megabytes to send <input id="mb" type="number" value="64" min="1" max="1024"></label>
+  <button id="run" disabled>Send</button>
+</fieldset>
+
+<fieldset>
+  <legend>Result (copy into ADR-0011; contains no addresses)</legend>
+  <pre id="out"></pre>
+</fieldset>
+
+<script>
+"use strict";
+// LAN only: no ICE servers, so no traffic leaves the local network.
+const CONFIG = { iceServers: [] };
+const CHUNK = 64 * 1024;
+const $ = (id) => document.getElementById(id);
+const log = (o) => { $("out").textContent = JSON.stringify(o, null, 2); };
+let pc = null;
+let channel = null;
+const result = {
+  secureContext: window.isSecureContext,
+  origin: location.protocol + "//" + (location.hostname === "localhost" ? "localhost" : "<lan-host>"),
+  userAgent: navigator.userAgent,
+};
+
+$("env").textContent = JSON.stringify({
+  isSecureContext: window.isSecureContext,
+  rtcPeerConnection: typeof RTCPeerConnection === "function",
+  cryptoSubtle: !!(window.crypto && window.crypto.subtle),
+  getRandomValues: !!(window.crypto && window.crypto.getRandomValues),
+}, null, 2);
+
+// Waits until ICE gathering is complete, so the SDP carries every candidate.
+function gathered(conn) {
+  if (conn.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    conn.addEventListener("icegatheringstatechange", () => {
+      if (conn.iceGatheringState === "complete") resolve();
+    });
+  });
+}
+
+// Candidate types in an SDP (host, srflx, relay) and whether hosts are
+// hidden behind mDNS names; the addresses themselves are not recorded.
+function candidateSummary(sdp) {
+  const lines = sdp.split(/\r?\n/).filter((l) => l.startsWith("a=candidate:"));
+  return lines.map((l) => {
+    const p = l.split(" ");
+    const type = p[p.indexOf("typ") + 1];
+    return { protocol: p[2].toLowerCase(), type, mdnsName: p[4].endsWith(".local") };
+  });
+}
+
+function setup(conn) {
+  conn.addEventListener("connectionstatechange", () => {
+    result.connectionState = conn.connectionState;
+    log(result);
+  });
+}
+
+function wire(ch) {
+  channel = ch;
+  channel.binaryType = "arraybuffer";
+  let received = 0;
+  channel.addEventListener("open", () => {
+    result.channelOpen = true;
+    $("run").disabled = false;
+    log(result);
+  });
+  channel.addEventListener("message", (e) => {
+    if (typeof e.data === "string") {
+      const msg = JSON.parse(e.data);
+      if (msg.done) {
+        channel.send(JSON.stringify({ ack: received }));
+        result.receivedBytes = received;
+        log(result);
+        received = 0;
+      } else if (msg.ack !== undefined) {
+        const seconds = (performance.now() - result.started) / 1000;
+        result.sentBytes = msg.ack;
+        result.seconds = Number(seconds.toFixed(3));
+        result.mibPerSecond = Number((msg.ack / 1048576 / seconds).toFixed(1));
+        delete result.started;
+        log(result);
+      }
+    } else {
+      received += e.data.byteLength;
+    }
+  });
+}
+
+$("makeOffer").onclick = async () => {
+  pc = new RTCPeerConnection(CONFIG);
+  setup(pc);
+  wire(pc.createDataChannel("dropumi-poc", { ordered: true }));
+  await pc.setLocalDescription(await pc.createOffer());
+  await gathered(pc);
+  $("offer").value = pc.localDescription.sdp;
+  result.localCandidates = candidateSummary(pc.localDescription.sdp);
+  log(result);
+};
+
+$("makeAnswer").onclick = async () => {
+  pc = new RTCPeerConnection(CONFIG);
+  setup(pc);
+  pc.addEventListener("datachannel", (e) => wire(e.channel));
+  await pc.setRemoteDescription({ type: "offer", sdp: $("offerIn").value });
+  await pc.setLocalDescription(await pc.createAnswer());
+  await gathered(pc);
+  $("answer").value = pc.localDescription.sdp;
+  result.localCandidates = candidateSummary(pc.localDescription.sdp);
+  result.remoteCandidates = candidateSummary($("offerIn").value);
+  log(result);
+};
+
+$("connect").onclick = async () => {
+  await pc.setRemoteDescription({ type: "answer", sdp: $("answerIn").value });
+  result.remoteCandidates = candidateSummary($("answerIn").value);
+  log(result);
+};
+
+$("run").onclick = async () => {
+  const total = Math.max(1, Math.min(1024, Number($("mb").value))) * 1048576;
+  const chunk = new Uint8Array(CHUNK);
+  crypto.getRandomValues(chunk.subarray(0, 65536));
+  channel.bufferedAmountLowThreshold = 4 * CHUNK;
+  result.started = performance.now();
+  let sent = 0;
+  while (sent < total) {
+    if (channel.bufferedAmount > 16 * CHUNK) {
+      await new Promise((r) => channel.addEventListener("bufferedamountlow", r, { once: true }));
+    }
+    const n = Math.min(CHUNK, total - sent);
+    channel.send(n === CHUNK ? chunk : chunk.subarray(0, n));
+    sent += n;
+  }
+  channel.send(JSON.stringify({ done: true }));
+};
+</script>
+</body>
+</html>

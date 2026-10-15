@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MPL-2.0
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (privately)
+    url: https://github.com/dropumi/dropumi/security/advisories/new
+    about: Report vulnerabilities privately through GitHub private vulnerability reporting (the form works once the maintainers have enabled it; see SECURITY.md). Never report them in public issues.
+  - name: Questions and ideas
+    url: https://github.com/dropumi/dropumi/discussions
+    about: Ask questions and discuss ideas in GitHub Discussions.

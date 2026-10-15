@@ -22,3 +22,24 @@ rustc-ice-*.txt
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# --- Dropumi additions ---
+.DS_Store
+/bench-out/
+# Apple apps: the Rust XCFramework (scripts/ffi/build-apple.sh) and SwiftPM state
+/apps/apple/DropumiKit/Artifacts/
+/apps/apple/DropumiKit/.build/
+/apps/apple/DropumiKit/.swiftpm/
+# Apple apps: the generated Xcode project, build output and local signing
+/apps/apple/Dropumi.xcodeproj/
+/apps/apple/build/
+/apps/apple/Config/Signing.local.xcconfig
+*.xcresult
+xcuserdata/
+# Android app: Gradle state, build output and local SDK paths
+/apps/android/.gradle/
+/apps/android/.kotlin/
+/apps/android/**/build/
+/apps/android/local.properties
+*.apk
+*.aab
