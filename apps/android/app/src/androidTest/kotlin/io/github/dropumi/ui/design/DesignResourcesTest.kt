@@ -4,6 +4,13 @@ package io.github.dropumi.ui.design
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.createFontFamilyResolver
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +26,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DesignResourcesTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val sample = "Dropumi shares files nearby"
 
     @Test
     fun everyLucideIconInflatesAndDraws() {
@@ -48,9 +56,35 @@ class DesignResourcesTest {
                 textSize = 40f
             }
             assertTrue("wght $weight", paint.setFontVariationSettings("'wght' $weight"))
-            paint.measureText("Dropumi shares files nearby")
+            paint.measureText(sample)
         }
         assertEquals(widths.sorted(), widths)
         assertTrue("700 is not wider than 400: $widths", widths.last() > widths.first())
+    }
+
+    /**
+     * The Compose path the screens use: `PlusJakartaSans` (Typography.kt)
+     * resolved and laid out by Compose. Each weight must come from the font's
+     * `wght` axis; without the per-weight variation settings every weight
+     * renders the default instance, and these widths would all be equal.
+     */
+    @Test
+    fun composeFontFamilyDrawsEachWeightFromTheAxis() {
+        val measurer = TextMeasurer(
+            defaultFontFamilyResolver = createFontFamilyResolver(context),
+            defaultDensity = Density(context),
+            defaultLayoutDirection = LayoutDirection.Ltr,
+        )
+        fun width(style: TextStyle) = measurer.measure(sample, style.copy(fontSize = 40.sp)).size.width
+
+        val weights = listOf(FontWeight.Normal, FontWeight.Medium, FontWeight.SemiBold, FontWeight.Bold)
+        val widths = weights.map { width(TextStyle(fontFamily = PlusJakartaSans, fontWeight = it)) }
+        assertTrue("each weight must be wider than the one before: $widths", widths.zipWithNext().all { (a, b) -> b > a })
+
+        // The type roles carry the family and weight: at one size, the 700
+        // screen title is wider than the 400 body text.
+        val title = width(DSType.screenTitle)
+        val body = width(DSType.body)
+        assertTrue("screenTitle $title is not wider than body $body", title > body)
     }
 }
