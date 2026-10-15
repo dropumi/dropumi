@@ -81,7 +81,12 @@ class TransferServiceTest {
         return scenario
     }
 
-    /** An auto-accepted receive starts while Dropumi is in front: the model starts the service. */
+    /**
+     * An auto-accepted receive starts while Dropumi is in front: the model
+     * starts the service. Returns once onStartCommand has returned: the
+     * service goes to the foreground inside it, and the system records what
+     * it returned (`callStart=true`, then `stopIfKilled`) only afterwards.
+     */
     private fun transferStarts() {
         fake.core.emit(
             NodeEvent.OfferReceived("tt", Fixtures.peer(name = "Maya's phone", trusted = true, alias = "Maya"), 1u, 10u),
@@ -89,7 +94,7 @@ class TransferServiceTest {
         )
         compose.waitUntil(TIMEOUT_MS) { model.state.value.transferService != TransferServiceState.OFF }
         assertEquals(TransferServiceState.RUNNING, model.state.value.transferService)
-        compose.waitUntil(TIMEOUT_MS) { serviceRecord().contains("isForeground=true") }
+        compose.waitUntil(TIMEOUT_MS) { serviceRecord().let { it.contains("isForeground=true") && it.contains("callStart=true") } }
     }
 
     private fun transferEnds() {
