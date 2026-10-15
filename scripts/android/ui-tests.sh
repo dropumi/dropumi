@@ -24,15 +24,29 @@
 # set-disabled`). API 26-27 cannot report the lock screen setting: there the
 # trap cannot put it back, and it prints a warning when the run failed.
 #
+# Images that refuse hard links. DocumentGuardTest#uriGuardRefusesHardLinkToIdentityKey
+# and #stagingRunsUriGuard first make a hard link to the identity key inside
+# the app's data. Where the image refuses link() there (EACCES on the
+# arm64-v8a API 26, 28 and 36 emulators, spike S-AN3), they fail on purpose
+# with "not runnable on this image (link <errno>)"; they are never skipped,
+# and their no-link variants run on every image. The script prints each such
+# failure by name with that label and does not count it against the exit
+# status, but only when the failure is that assertion, raised by the tests'
+# link step (the stack is checked). Any other failure, of these two tests or
+# of any other, fails the run. On an image that allows the link, both tests
+# run in full and must pass.
+#
 # Usage: bash scripts/android/ui-tests.sh [--no-build] [--class SPEC]
 #          [--exclude-local-or-device]
 #   ANDROID_SERIAL picks the device when several are connected.
 #   --class SPEC               only these tests (am instrument -e class)
 #   --exclude-local-or-device  leave out @LocalOrDevice tests (foreground
-#                              services, NSD), as the CI emulator job does
+#                              services, NSD), as a CI emulator job would
+#                              (there is none; ADR-0013 S-AN4)
 # Gradle needs JDK 17 (JAVA_HOME). Exit status: 0 when both passes report
-# OK, 1 otherwise. The full output of each pass is kept in a temporary
-# folder whose path is printed.
+# OK, or when their only failures are the link-step failures above; 1
+# otherwise. The full output of each pass is kept in a temporary folder
+# whose path is printed.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -127,8 +141,45 @@ fi
 logs="$(mktemp -d)"
 status=0
 
+# Prints one line per failed test in a pass log ($1): "link<TAB>label<TAB>test"
+# for a failure of the two hard-link tests' link step (see the header), and
+# "other<TAB><TAB>test" for any other failure. A failure's status keys come
+# in any order (it differs per API level) before its
+# INSTRUMENTATION_STATUS_CODE: -2 line; only the first three stack lines
+# are read.
+classify_failures() {
+  awk '
+    function reset() { cls = ""; tst = ""; s1 = ""; s2 = ""; s3 = ""; in_stack = 0; n = 0 }
+    function trim(s) { sub(/^[ \t]+/, "", s); return s }
+    BEGIN { reset(); g = "io.github.dropumi.files.DocumentGuardTest" }
+    /^INSTRUMENTATION_STATUS: [a-z_]+=/ {
+      rest = substr($0, 25); eq = index(rest, "=")
+      key = substr(rest, 1, eq - 1); val = substr(rest, eq + 1)
+      in_stack = 0
+      if (key == "class") cls = val
+      else if (key == "test") tst = val
+      else if (key == "stack") { s1 = val; in_stack = 1; n = 1 }
+      next
+    }
+    /^INSTRUMENTATION_STATUS_CODE: / {
+      if (substr($0, 30) == "-2") {
+        name = cls "#" tst
+        link = (name == g "#uriGuardRefusesHardLinkToIdentityKey" || name == g "#stagingRunsUriGuard") &&
+          s1 ~ /^java\.lang\.AssertionError: not runnable on this image \(link E[A-Z]+\)$/ &&
+          index(s2, "at org.junit.Assert.fail(") == 1 &&
+          index(s3, "at " g ".linkToIdentityKey(") == 1
+        if (link) print "link\t" substr(s1, 27) "\t" name
+        else print "other\t\t" name
+      }
+      reset()
+      next
+    }
+    in_stack && n < 3 { n++; if (n == 2) s2 = trim($0); else s3 = trim($0) }
+  ' "$1"
+}
+
 # Runs one pass ($1: log name, $2: label, then am instrument arguments);
-# prints its overlay records and its result line.
+# prints its overlay records, its result line and its failures.
 run_pass() {
   local log="${logs}/$1.txt"
   local name="$2"
@@ -137,17 +188,23 @@ run_pass() {
   [[ -z "${class}" ]] || args+=(-e class "${class}")
   "${adb}" shell am instrument "${args[@]}" "${runner}" | tr -d '\r' > "${log}"
   sed -n 's/^INSTRUMENTATION_STATUS: dropumi_overlay=/  overlay: /p' "${log}"
-  local result
+  local result failures link other broken=no
   result="$(grep -E '^(OK \(|Tests run:|FAILURES!!!)' "${log}" | tr '\n' ' ' || true)"
-  if grep -q '^OK (' "${log}" && ! grep -qE '^FAILURES!!!|^INSTRUMENTATION_FAILED|Process crashed' "${log}"; then
+  failures="$(classify_failures "${log}")"
+  link="$(grep -c '^link' <<< "${failures}" || true)"
+  other="$(grep -c '^other' <<< "${failures}" || true)"
+  if grep -qE '^INSTRUMENTATION_FAILED|Process crashed' "${log}"; then broken=yes; fi
+  if [[ "${broken}" == no ]] && grep -q '^OK (' "${log}" && ! grep -q '^FAILURES!!!' "${log}"; then
     echo "${name}: ${result}"
+  elif [[ "${broken}" == no && "${other}" == 0 && "${link}" -gt 0 ]] \
+    && grep -qE "^Tests run: [0-9]+,  Failures: ${link}\$" "${log}"; then
+    echo "${name}: passed except ${link} not runnable on this image: ${result}"
   else
     echo "${name}: FAILED ${result}"
-    { grep -E '^INSTRUMENTATION_STATUS: (class|test)=|^INSTRUMENTATION_STATUS_CODE: -2|^INSTRUMENTATION_FAILED|Process crashed' "${log}" || true; } \
-      | awk '/class=/ { c = $0 } /test=/ { t = $0 } /CODE: -2/ { print "  failed: " c " " t } /FAILED|crashed/ { print "  " $0 }' \
-      | sed 's/INSTRUMENTATION_STATUS: //g'
+    { grep -E '^INSTRUMENTATION_FAILED|Process crashed' "${log}" || true; } | sed 's/^/  /'
     status=1
   fi
+  awk -F '\t' '$1 == "link" { print "  " $2 ": " $3 } $1 == "other" { print "  failed: " $3 }' <<< "${failures}"
 }
 
 sdk_int="$("${adb}" shell getprop ro.build.version.sdk | tr -d '\r')"
