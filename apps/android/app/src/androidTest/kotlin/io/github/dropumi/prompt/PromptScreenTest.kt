@@ -340,8 +340,10 @@ class PromptScreenTest {
      * the keys do reach the window.
      */
     private fun activationNeedsTheUsersFocusMove(tag: String, button: String, answer: Call) {
+        // Before launch: before API 34 a window already shown keeps its
+        // touch mode until a key or its next focus change.
+        instrumentation.setInTouchMode(false)
         launchShowing(tag).use {
-            instrumentation.setInTouchMode(false)
             arm()
             val focusAsTheSystemMay = {
                 compose.onNodeWithTag(button).assertIsEnabled().requestFocus()
