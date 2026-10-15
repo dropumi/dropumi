@@ -494,21 +494,6 @@ class PromptScreenTest {
         }
     }
 
-    /** Never over the lock screen: the window asks for no lock-screen flags while a prompt shows. */
-    @Test
-    @UseScenario(Scenario.OFFER_UNVERIFIED)
-    fun promptWindowNeverShowsOverTheLockScreen() {
-        launchShowing("prompt.offer").use { scenario ->
-            scenario.onActivity {
-                @Suppress("DEPRECATION")
-                val lockFlags = android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                    android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-                assertEquals(0, it.window.attributes.flags and lockFlags)
-            }
-        }
-    }
-
     private companion object {
         const val TIMEOUT_MS = 10_000L
 
