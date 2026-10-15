@@ -21,6 +21,8 @@ import io.github.dropumi.core.CoreClient
 import io.github.dropumi.core.CoreOperation
 import io.github.dropumi.core.discovery.AdvertiseState
 import io.github.dropumi.core.discovery.Advertising
+import io.github.dropumi.core.files.DocumentException
+import io.github.dropumi.core.files.Documents
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
@@ -51,6 +53,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -87,6 +90,13 @@ data class OutgoingFile(
          * folder (`outgoing/<uuid>`), deleted once the transfer ends.
          */
         data class Path(val path: String, val stagedDir: String? = null) : Source
+
+        /**
+         * A content:// document (share sheet or document picker). It is read
+         * through UriGuard when it is sent: as a stream when its size is
+         * known, otherwise from a staged copy.
+         */
+        data class Document(val uri: String) : Source
     }
 }
 
@@ -161,6 +171,9 @@ val Prompt.promptId: ULong
  * @param advertising the advertiser's gate and state; closed means the
  *   receiver is started with `advertise = false` (browse-only).
  * @param localAddresses this device's IPv4 addresses on local networks.
+ * @param documents reads content:// documents through UriGuard; without it
+ *   documents are refused.
+ * @param pendingShare items the share target handed over.
  */
 class AppModel(
     private val core: CoreClient,
@@ -171,6 +184,8 @@ class AppModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val advertising: Advertising = Advertising.CLOSED,
     private val localAddresses: () -> List<String> = { emptyList() },
+    private val documents: Documents? = null,
+    private val pendingShare: PendingShare = PendingShare(),
 ) {
     private val _state = MutableStateFlow(
         AppState(
@@ -190,7 +205,10 @@ class AppModel(
     private var browseClients = 0
     private var browsing = false
     private val operations = HashMap<ULong, CoreOperation>()
-    private val held = HashMap<String, List<OutgoingFile>>()
+    /** What a running send holds: its draft files and the staged copies made for it. */
+    private val held = HashMap<String, Held>()
+
+    private class Held(val files: List<OutgoingFile>, val stagedFolders: List<String>)
     private var lastUnpairedNoticeMs: Long? = null
     private val historyWrites = Mutex()
 
@@ -207,6 +225,7 @@ class AppModel(
         refreshIdentity()
         refreshTrusted()
         if (_state.value.onboarded) applyVisibility()
+        takeSharedItems()
     }
 
     /** Ends onboarding with the chosen visibility and starts receiving (unless the choice is Off). */
@@ -243,6 +262,7 @@ class AppModel(
     suspend fun becomeActive() {
         update { copy(isInBackground = false) }
         if (_state.value.onboarded) applyVisibility()
+        takeSharedItems()
     }
 
     // Identity and trust
@@ -479,6 +499,39 @@ class AppModel(
         release(files)
     }
 
+    /**
+     * Adds content:// documents to the draft. Each passes UriGuard's scheme
+     * and own-provider checks before it is queried; refused ones are left out.
+     * Returns how many were added.
+     */
+    suspend fun addDocuments(uris: List<String>): Int {
+        val docs = documents ?: return 0
+        val files = work {
+            uris.mapNotNull { uri ->
+                val described = try {
+                    docs.describe(uri)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                described?.let { OutgoingFile(it.name, it.size, OutgoingFile.Source.Document(uri)) }
+            }
+        }
+        if (files.size < uris.size) {
+            update { copy(banner = Banner(Banner.Style.WARNING, "Some items can't be sent", "Dropumi can only send files other apps share with it.")) }
+        }
+        addToDraft(files)
+        return files.size
+    }
+
+    /** Picks up items the share target handed over and opens Send. */
+    suspend fun takeSharedItems() {
+        val shared = pendingShare.take()
+        if (shared.isEmpty()) return
+        if (addDocuments(shared) > 0) update { copy(route = Route.SEND) }
+    }
+
     // Sending
 
     /**
@@ -488,12 +541,14 @@ class AppModel(
     suspend fun sendDraft(target: SendTarget, targetName: String, allowUnverified: Boolean) {
         val files = _state.value.draft
         if (files.isEmpty()) return
-        val items = files.map { file ->
-            when (val source = file.source) {
-                is OutgoingFile.Source.Path -> SendItem.Path(source.path)
-            }
-        }
+        val staged = mutableListOf<String>()
         try {
+            val items = files.map { file ->
+                when (val source = file.source) {
+                    is OutgoingFile.Source.Path -> SendItem.Path(source.path)
+                    is OutgoingFile.Source.Document -> prepare(source.uri, staged)
+                }
+            }
             val op = work { core.send(target, items, allowUnverified) }
             operations[op.id] = op
             val record = TransferRecord(
@@ -506,14 +561,29 @@ class AppModel(
                 phase = TransferPhase.Connecting,
                 startedAtMs = clock(),
             )
-            held[record.id] = files
+            held[record.id] = Held(files, staged.toList())
             update { copy(active = listOf(record) + active, draft = emptyList()) }
         } catch (e: CancellationException) {
+            deleteFolders(staged)
             throw e
         } catch (e: Exception) {
+            deleteFolders(staged)
             show(e, "Not sent")
         }
     }
+
+    /** The item for a document: a stream, or a staged copy whose folder is noted in [staged]. */
+    private suspend fun prepare(uri: String, staged: MutableList<String>): SendItem {
+        val docs = documents ?: throw DocumentException(DocumentException.Reason.REFUSED)
+        return when (val prepared = runInterruptible(io) { docs.prepare(uri) }) {
+            is Documents.Prepared.Stream -> prepared.item
+            is Documents.Prepared.Staged -> {
+                staged += prepared.folder.path
+                prepared.item
+            }
+        }
+    }
+
 
     fun cancel(record: TransferRecord) {
         val handle = record.operation?.let { operations[it] }
@@ -823,7 +893,10 @@ class AppModel(
         val now = clock()
         val done = record.copy(phase = TransferPhase.Finished(result), finishedAtMs = now)
         record.operation?.let { operations.remove(it) }
-        held.remove(record.id)?.let(::release)
+        held.remove(record.id)?.let {
+            release(it.files)
+            deleteFolders(it.stagedFolders)
+        }
         val label = done.peerLabel
         val savedAs = done.fileResults.mapNotNull { it.savedAs }
         val entry = HistoryEntry(
@@ -904,8 +977,10 @@ class AppModel(
     }
 
     /** Deletes the app's own staged copies of [files], off the main thread. */
-    private fun release(files: List<OutgoingFile>) {
-        val folders = files.mapNotNull { (it.source as? OutgoingFile.Source.Path)?.stagedDir }
+    private fun release(files: List<OutgoingFile>) =
+        deleteFolders(files.mapNotNull { (it.source as? OutgoingFile.Source.Path)?.stagedDir })
+
+    private fun deleteFolders(folders: List<String>) {
         if (folders.isEmpty()) return
         scope.launch(io) { folders.forEach { File(it).deleteRecursively() } }
     }

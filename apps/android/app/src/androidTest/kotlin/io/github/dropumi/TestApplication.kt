@@ -19,6 +19,9 @@ import io.github.dropumi.appstate.AppLoader
 import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.HistoryStore
 import io.github.dropumi.appstate.MemorySettingsStore
+import io.github.dropumi.appstate.PendingShare
+import io.github.dropumi.core.AppPaths
+import io.github.dropumi.core.files.UriGuard
 import io.github.dropumi.testsupport.FakeCoreClient
 import java.io.File
 import java.util.UUID
@@ -39,19 +42,21 @@ class TestApplication : Application(), AppGraphHost {
     }
 
     private fun fakeGraph(): AppGraph {
-        val root = File(noBackupFilesDir, "uitest-" + UUID.randomUUID())
+        val paths = AppPaths.under(File(noBackupFilesDir, "uitest-" + UUID.randomUUID()))
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val core = FakeCoreClient().also { fakeCore = it }
+        val pendingShare = PendingShare()
         val loader = AppLoader(scope, Dispatchers.IO) {
             AppModel(
                 core,
                 MemorySettingsStore(Build.VERSION.SDK_INT),
-                HistoryStore(File(root, "app/history.json")),
+                HistoryStore(paths.historyFile),
                 scope,
                 Dispatchers.IO,
+                pendingShare = pendingShare,
             )
         }
-        return AppGraph(loader)
+        return AppGraph(loader, pendingShare, UriGuard(this, listOf(paths.configDir, paths.appDataDir)))
     }
 
     companion object {

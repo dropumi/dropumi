@@ -3,6 +3,8 @@
 package io.github.dropumi
 
 import io.github.dropumi.appstate.AppLoader
+import io.github.dropumi.appstate.PendingShare
+import io.github.dropumi.core.files.DocumentGuard
 
 /**
  * Implemented by the Application. Activities and services reach the graph
@@ -14,4 +16,10 @@ interface AppGraphHost {
 }
 
 /** The app's long-lived objects: one core and one app model, opened by [loader]. */
-class AppGraph(val loader: AppLoader)
+class AppGraph(
+    val loader: AppLoader,
+    /** The in-process share hand-off; only ShareActivity writes to it. */
+    val pendingShare: PendingShare,
+    /** UriGuard, for ShareActivity's early filter (every read runs it again). */
+    val uriGuard: DocumentGuard,
+)

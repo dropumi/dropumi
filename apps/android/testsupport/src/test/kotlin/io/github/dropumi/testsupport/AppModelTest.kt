@@ -12,6 +12,8 @@ import io.github.dropumi.appstate.HistoryEntry
 import io.github.dropumi.appstate.HistoryStore
 import io.github.dropumi.appstate.MemorySettingsStore
 import io.github.dropumi.appstate.OutgoingFile
+import io.github.dropumi.appstate.PendingShare
+import io.github.dropumi.appstate.Route
 import io.github.dropumi.appstate.PeerLabel
 import io.github.dropumi.appstate.PromptArming
 import io.github.dropumi.appstate.ReceiveVisibility
@@ -22,16 +24,20 @@ import io.github.dropumi.core.discovery.HostLabelGate
 import io.github.dropumi.core.discovery.NsdAdapterCore
 import io.github.dropumi.core.discovery.NsdPort
 import io.github.dropumi.core.discovery.NsdService
+import io.github.dropumi.core.files.Documents
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.ConfigProblem
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
 import io.github.dropumi.ffi.ErrorCode
+import io.github.dropumi.ffi.ForeignFile
+import io.github.dropumi.ffi.ForeignReader
 import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.PromptCloseReason
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
 import io.github.dropumi.ffi.ReceiverStopReason
+import io.github.dropumi.ffi.SendItem
 import io.github.dropumi.ffi.SendTarget
 import io.github.dropumi.ffi.ServiceAd
 import io.github.dropumi.ffi.TransferStatus
@@ -683,5 +689,89 @@ class AppModelTest {
         assertTrue("not receiving", model.connectionDetails().isEmpty())
         model.finishOnboarding()
         assertEquals(listOf("192.168.1.5:47321", "10.0.0.7:47321"), model.connectionDetails())
+    }
+
+    // Android: the share hand-off and content:// documents (ADR-0013 D6)
+
+    /** Documents served by a test: `content://` ones are allowed, a `pipe` one is staged. */
+    private class FakeDocuments(private val stagedFolder: File) : Documents {
+        val prepared = mutableListOf<String>()
+
+        override fun describe(uri: String): Documents.Described? =
+            if (uri.startsWith("content://")) Documents.Described(uri.substringAfterLast('/'), 4u) else null
+
+        override fun prepare(uri: String): Documents.Prepared {
+            prepared += uri
+            if (uri.endsWith("pipe")) {
+                val copy = File(stagedFolder.also { it.mkdirs() }, "pipe").also { it.writeBytes(byteArrayOf(1)) }
+                return Documents.Prepared.Staged(SendItem.Path(copy.path), stagedFolder)
+            }
+            return Documents.Prepared.Stream(
+                SendItem.Stream(
+                    object : ForeignFile {
+                        override fun displayName() = "note.txt"
+                        override fun size(): ULong = 4u
+                        override fun modified(): Long? = null
+                        override fun openReader(): ForeignReader = throw UnsupportedOperationException()
+                    },
+                ),
+            )
+        }
+    }
+
+    private fun TestScope.makeModel(documents: Documents, pendingShare: PendingShare): Setup {
+        val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
+        val core = FakeCoreClient()
+        val model = AppModel(
+            core,
+            MemorySettingsStore(sdkInt = 36),
+            HistoryStore(File(root, "app/history.json")),
+            modelScope(),
+            StandardTestDispatcher(testScheduler),
+            clock = { testScheduler.currentTime },
+            documents = documents,
+            pendingShare = pendingShare,
+        )
+        return Setup(model, core, root)
+    }
+
+    @Test
+    fun sharedItemsArePickedUpAndOfferedForSending() = runTest {
+        val pending = PendingShare()
+        val s = makeModel(FakeDocuments(Files.createTempDirectory("staged").toFile().also(roots::add)), pending)
+        pending.put(listOf("content://com.example.files/note.txt"))
+        s.model.takeSharedItems()
+        assertEquals(listOf("note.txt"), s.model.state.value.draft.map { it.name })
+        assertEquals(Route.SEND, s.model.state.value.route)
+        assertTrue(pending.take().isEmpty())
+        // Nothing is sent until the user picks a device and taps Send.
+        assertTrue(s.core.calls.none { it is FakeCoreClient.Call.Send })
+    }
+
+    @Test
+    fun refusedDocumentsAreLeftOutOfTheDraft() = runTest {
+        val pending = PendingShare()
+        val s = makeModel(FakeDocuments(Files.createTempDirectory("staged").toFile().also(roots::add)), pending)
+        pending.put(listOf("file:///data/user/0/io.github.dropumi/no_backup/dropumi/identity.key"))
+        s.model.takeSharedItems()
+        assertTrue(s.model.state.value.draft.isEmpty())
+        assertNull(s.model.state.value.route)
+        assertEquals("Some items can't be sent", s.model.state.value.banner?.title)
+    }
+
+    @Test
+    fun documentsAreSentAsStreamsAndStagedCopiesAreReleased() = runTest {
+        val folder = File(Files.createTempDirectory("outgoing").toFile().also(roots::add), "uuid-1")
+        val docs = FakeDocuments(folder)
+        val s = makeModel(docs, PendingShare())
+        s.model.addDocuments(listOf("content://com.example.files/note.txt", "content://com.example.files/pipe"))
+        s.model.sendDraft(SendTarget.Nearby("i"), "X", allowUnverified = false)
+        val send = s.core.calls.single() as FakeCoreClient.Call.Send
+        assertTrue(send.items[0] is SendItem.Stream)
+        assertEquals(listOf(File(folder, "pipe").path), send.paths)
+        assertTrue("the core still reads the copy", folder.exists())
+        s.model.apply(listOf(NodeEvent.TransferFinished(1u, Direction.OUTGOING, Fixtures.result(TransferStatus.COMPLETED))))
+        advanceUntilIdle()
+        assertFalse(folder.exists())
     }
 }

@@ -36,7 +36,11 @@ fun modeOf(file: File): Int = Os.lstat(file.path).st_mode and 0b111_111_111
 const val MODE_0700 = 0b111_000_000
 const val MODE_0600 = 0b110_000_000
 
-class TestCore(discovery: PlatformDiscovery? = null) : AutoCloseable {
+/**
+ * @param collectEvents false when something else (an AppModel) collects the
+ *   events: a client's events have one collector.
+ */
+class TestCore(discovery: PlatformDiscovery? = null, collectEvents: Boolean = true) : AutoCloseable {
     val root: File = File(targetContext.noBackupFilesDir, "test-" + UUID.randomUUID()).also { it.mkdirs() }
     val paths: AppPaths = AppPaths.under(root).also { it.prepare() }
     val client = LiveCoreClient(paths.configDir, paths.receiveDir, discovery)
@@ -46,7 +50,7 @@ class TestCore(discovery: PlatformDiscovery? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        scope.launch { client.events.collect { queue.addAll(it) } }
+        if (collectEvents) scope.launch { client.events.collect { queue.addAll(it) } }
     }
 
     /** The next event of type [T] matching [match] (others are skipped); fails after 30 s. */

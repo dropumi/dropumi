@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 //
-// The composition root: the folders (ADR-0013 D3/D4), the Rust core and the
-// app model. Opening the core reads or creates the identity, so the loader
-// does it off the main thread when the main screen first asks.
+// The composition root: the folders (ADR-0013 D3/D4), the Rust core with the
+// NSD adapter, UriGuard and the app model. Opening the core reads or creates
+// the identity, so the loader does it off the main thread when the main
+// screen first asks.
 
 package io.github.dropumi
 
 import android.app.Application
 import android.os.Build
+import android.os.StatFs
 import io.github.dropumi.appstate.AppLoader
 import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.HistoryStore
+import io.github.dropumi.appstate.PendingShare
 import io.github.dropumi.core.AppPaths
 import io.github.dropumi.core.LiveCoreClient
 import io.github.dropumi.core.discovery.LocalAddresses
 import io.github.dropumi.core.discovery.NsdDiscovery
+import io.github.dropumi.core.files.AndroidDocumentSource
+import io.github.dropumi.core.files.AndroidDocuments
+import io.github.dropumi.core.files.StagingCopy
+import io.github.dropumi.core.files.UriGuard
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,12 +33,16 @@ class DropumiApplication : Application(), AppGraphHost {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val paths = AppPaths.standard(this)
         val settings = PrefsSettingsStore(getSharedPreferences(SETTINGS_FILE, MODE_PRIVATE), Build.VERSION.SDK_INT)
+        val pendingShare = PendingShare()
+        val guard = UriGuard(this, listOf(paths.configDir, paths.appDataDir))
         val loader = AppLoader(scope, Dispatchers.IO) {
             paths.prepare()
             paths.clearOutgoing()
             val addresses = LocalAddresses(this)
             val nsd = NsdDiscovery.create(this, addresses)
             val core = LiveCoreClient(paths.configDir, paths.receiveDir, nsd)
+            val source = AndroidDocumentSource(contentResolver)
+            val staging = StagingCopy(source, guard, paths.outgoingDir) { StatFs(paths.outgoingDir.path).availableBytes }
             AppModel(
                 core,
                 settings,
@@ -40,9 +51,11 @@ class DropumiApplication : Application(), AppGraphHost {
                 Dispatchers.IO,
                 advertising = nsd.adapter,
                 localAddresses = addresses::ipv4,
+                documents = AndroidDocuments(source, guard, staging),
+                pendingShare = pendingShare,
             )
         }
-        return AppGraph(loader)
+        return AppGraph(loader, pendingShare, guard)
     }
 
     private companion object {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- The test APK only. MockContentResolver is in the platform's optional
+     test libraries: android.test.mock from API 28, android.test.runner
+     before it. useLibrary() puts it on the compile classpath; these entries
+     load it at run time. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <uses-library
+            android:name="android.test.mock"
+            android:required="false" />
+        <uses-library
+            android:name="android.test.runner"
+            android:required="false" />
+    </application>
+</manifest>

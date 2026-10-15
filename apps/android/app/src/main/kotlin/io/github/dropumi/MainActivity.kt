@@ -19,25 +19,39 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import io.github.dropumi.ui.design.DS
 import io.github.dropumi.ui.design.DSIcons
 import io.github.dropumi.ui.design.DSMetrics
 import io.github.dropumi.ui.design.DSType
 import io.github.dropumi.ui.design.DropumiTheme
+import kotlinx.coroutines.launch
 
 /**
  * The only activity that draws Dropumi's screens. It is the launcher entry,
- * so any app can start it; it never takes share items from its intent.
+ * so any app can start it; it never takes share items from its intent: they
+ * come only from the in-process hand-off that ShareActivity writes.
  */
 class MainActivity : ComponentActivity() {
+    private val graph: AppGraph get() = (application as AppGraphHost).graph
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        graph.loader.load()
         setContent {
             DropumiTheme(darkTheme = isSystemInDarkTheme()) {
                 Shell()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Shared items handed over while the activity was away (singleTask:
+        // a share brings this instance back instead of starting a new one).
+        val model = graph.loader.model ?: return
+        lifecycleScope.launch { model.takeSharedItems() }
     }
 }
 

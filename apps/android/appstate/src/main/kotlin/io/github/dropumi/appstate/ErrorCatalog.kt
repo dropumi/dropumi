@@ -6,6 +6,7 @@
 
 package io.github.dropumi.appstate
 
+import io.github.dropumi.core.files.DocumentException
 import io.github.dropumi.ffi.CancelledBy
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
@@ -133,6 +134,13 @@ object ErrorCatalog {
 
     /** A short message for an error thrown by a node call (or anything else). */
     fun message(error: Throwable): String {
+        if (error is DocumentException) {
+            return when (error.reason) {
+                DocumentException.Reason.REFUSED -> "Dropumi can't send this item."
+                DocumentException.Reason.TOO_LARGE -> "This item is too large to prepare for sending."
+                DocumentException.Reason.UNREADABLE -> "This item could not be read."
+            }
+        }
         val e = error as? DropumiException ?: return GENERIC
         return when (e) {
             is DropumiException.InvalidInput -> e.detail
