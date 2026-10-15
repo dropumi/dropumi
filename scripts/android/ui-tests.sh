@@ -18,8 +18,11 @@
 #
 # An exit trap, set before anything is installed, resets the helper's
 # SYSTEM_ALERT_WINDOW app-op, uninstalls the helper (it never stays on the
-# device) and puts back the display size, density and font scale that the
-# layout and large-text tests change, in case a run dies before they do.
+# device) and puts back what the tests change, in case a run dies before
+# they do: the display size, density and font scale (the layout and
+# large-text tests) and the lock screen setting (LockScreenTest, `locksettings
+# set-disabled`). API 26-27 cannot report the lock screen setting: there the
+# trap cannot put it back, and it prints a warning when the run failed.
 #
 # Usage: bash scripts/android/ui-tests.sh [--no-build] [--class SPEC]
 #          [--exclude-local-or-device]
@@ -73,8 +76,12 @@ helper_apk="${root}/apps/android/overlayhelper/build/outputs/apk/debug/overlayhe
 size_override="$("${adb}" shell wm size | sed -n 's/^Override size: *//p' | tr -d '\r')"
 density_override="$("${adb}" shell wm density | sed -n 's/^Override density: *//p' | tr -d '\r')"
 font_scale="$("${adb}" shell settings get system font_scale | tr -d '\r')"
+# true or false; empty where `locksettings get-disabled` does not exist (API 26-27).
+lock_disabled="$("${adb}" shell locksettings get-disabled 2>/dev/null | tr -d '\r' || true)"
+case "${lock_disabled}" in true | false) ;; *) lock_disabled="" ;; esac
 
 cleanup() {
+  local rc=$?
   set +e
   "${adb}" shell appops set "${helper}" SYSTEM_ALERT_WINDOW default >/dev/null 2>&1
   "${adb}" uninstall "${helper}" >/dev/null 2>&1
@@ -87,6 +94,15 @@ cleanup() {
     "${adb}" shell settings put system font_scale "${font_scale}"
   else
     "${adb}" shell settings delete system font_scale >/dev/null
+  fi
+  if [[ -n "${lock_disabled}" ]]; then
+    "${adb}" shell locksettings set-disabled "${lock_disabled}" >/dev/null 2>&1
+    if [[ "$("${adb}" shell locksettings get-disabled 2>/dev/null | tr -d '\r')" != "${lock_disabled}" ]]; then
+      echo "warning: the lock screen setting could not be put back; run: adb shell locksettings set-disabled ${lock_disabled}" >&2
+    fi
+  elif [[ "${rc}" != 0 ]]; then
+    echo "warning: this Android version cannot report the lock screen setting, so it was not put back;" \
+      "if the run stopped during LockScreenTest, check the device's screen lock" >&2
   fi
 }
 trap cleanup EXIT
