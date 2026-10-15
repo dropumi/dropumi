@@ -21,7 +21,12 @@
 //   confirmation shows; elsewhere the system lets a touch through an
 //   overlay only up to 0.8 opacity, flagged obscured.
 // What happened on the image is reported as the instrumentation status
-// `dropumi_overlay` (am instrument -r), so a run records it per image.
+// `dropumi_overlay` (am instrument -r), so a run records it per image. A tap
+// is classified only once it has settled, from evidence: the state the app
+// sets on the main thread when a button acts (or the fake core's record of
+// the call), the touch events that reached MainActivity's window (recorded
+// ahead of Dropumi's own filtering), and the notice. "Blocked by the
+// system" means that no event of the tap reached the window.
 package io.github.dropumi.prompt
 
 import android.os.Build
@@ -29,9 +34,11 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.Window
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -57,6 +64,9 @@ import io.github.dropumi.testsupport.FakeCoreClient.Call
 import io.github.dropumi.testsupport.Fixtures
 import io.github.dropumi.testsupport.Scenario
 import io.github.dropumi.ui.OverlayNotice
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -88,6 +98,13 @@ class OverlayWindowTest {
      * (API 31+, the window manager's force-hide flag).
      */
     private enum class Overlay { ABSENT, PENDING, SHOWN, HIDDEN }
+
+    /**
+     * What became of a tap: it reached the button (the button acted), it
+     * reached the window obscured and the app dropped it with its notice,
+     * or no event of it reached the window (the system blocked it).
+     */
+    private enum class Tap { REACHED, DROPPED, BLOCKED }
 
     @Before
     fun requireHelper() {
@@ -166,7 +183,44 @@ class OverlayWindowTest {
         return state
     }
 
-    /** A tap at the centre of [bounds] (screen pixels), through the input system as a finger's would go. */
+    /**
+     * Records the flags of every touch event that reaches [MainActivity]'s
+     * window, through its Window.Callback, ahead of Dropumi's own filtering
+     * (MainActivity.dispatchTouchEvent). It only watches: every call goes on
+     * to the activity unchanged. A touch the system blocks never gets here.
+     */
+    private fun ActivityScenario<MainActivity>.recordTouches(): MutableList<Int> {
+        val flags = CopyOnWriteArrayList<Int>()
+        onActivity { activity ->
+            val window = activity.window
+            val app: Window.Callback = window.callback
+            window.callback = Proxy.newProxyInstance(
+                MainActivity::class.java.classLoader,
+                arrayOf(Window.Callback::class.java),
+            ) { _, method, args ->
+                if (method.name == "dispatchTouchEvent") (args?.firstOrNull() as? MotionEvent)?.let { flags += it.flags }
+                try {
+                    if (args == null) method.invoke(app) else method.invoke(app, *args)
+                } catch (e: InvocationTargetException) {
+                    throw e.targetException
+                }
+            } as Window.Callback
+        }
+        return flags
+    }
+
+    /** The event came through another window over the point (or, from API 29, part of the window is covered). */
+    private fun isObscured(flags: Int): Boolean =
+        flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED != 0 ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && flags and MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED != 0)
+
+    /**
+     * A tap at the centre of [bounds] (screen pixels), through the input
+     * system as a finger's would go. Each injection waits until the window
+     * that got the event has finished handling it (an event the input
+     * system refuses to inject fails the test), and then the main thread
+     * and Compose go idle.
+     */
     private fun injectTap(bounds: Rect) {
         val x = bounds.center.x
         val y = bounds.center.y
@@ -184,6 +238,36 @@ class OverlayWindowTest {
         compose.waitForIdle()
     }
 
+    /**
+     * Taps [bounds] and waits (bounded) until the tap has settled: the
+     * button acted ([reached]: state the app sets on the main thread when
+     * it does, or the fake core's record of the call), or an event of the
+     * tap reached the window obscured and the app showed its notice
+     * ([noticed]), or no event of the tap reached the window ([touches],
+     * from [recordTouches]). A tap that reached the window and did neither
+     * fails the test.
+     */
+    private fun tap(bounds: Rect, touches: MutableList<Int>, reached: () -> Boolean, noticed: () -> Boolean): Tap {
+        touches.clear()
+        injectTap(bounds)
+        var tap: Tap? = null
+        try {
+            compose.waitUntil(TIMEOUT_MS) {
+                tap = when {
+                    reached() -> Tap.REACHED
+                    touches.isEmpty() -> Tap.BLOCKED
+                    touches.any(::isObscured) && noticed() -> Tap.DROPPED
+                    else -> null
+                }
+                tap != null
+            }
+        } catch (e: ComposeTimeoutException) {
+            val seen = touches.joinToString { "0x" + Integer.toHexString(it) }
+            throw AssertionError("the tap reached the window (event flags: $seen) but the button neither acted nor was protected", e)
+        }
+        return checkNotNull(tap)
+    }
+
     private fun report(outcome: String) {
         instrumentation.sendStatus(STATUS_IN_PROGRESS, Bundle().apply { putString(STATUS_KEY, "API ${Build.VERSION.SDK_INT}: $outcome") })
     }
@@ -193,6 +277,13 @@ class OverlayWindowTest {
         compose.onAllNodesWithTag("overlay.notice").fetchSemanticsNodes().any {
             it.config.getOrNull(SemanticsProperties.Text)?.joinToString { t -> t.text } == OverlayNotice.ANSWER.text
         }
+
+    /** AppModel.answer has taken up [promptId] (it marks it on the main thread before it calls the core), or the core has the answer. */
+    private fun answerStarted(promptId: ULong): Boolean {
+        val s = model.state.value
+        return promptId in s.answering || promptId in s.answered ||
+            fake.core.calls.any { it is Call.AnswerOffer && it.promptId == promptId }
+    }
 
     /**
      * A prompt for each layout: a pass-through overlay over Accept (every
@@ -208,6 +299,7 @@ class OverlayWindowTest {
     @UseScenario(Scenario.OFFER_UNVERIFIED)
     fun obscuredTouchNeverAccepts() {
         launchShowing("prompt.offer").use { scenario ->
+            val touches = scenario.recordTouches()
             val layouts = buildList {
                 add("over-accept")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add("partial") else report("partial: not run, no partial flag before API 29 (disclosed residual)")
@@ -223,13 +315,18 @@ class OverlayWindowTest {
                 val accept = scenario.screenBounds("offer.accept")
                 val covered = if (layout == "over-accept") accept else scenario.screenBounds("prompt.peer")
                 val state = showOverlay(layout, covered)
-                injectTap(accept)
-                val accepted = Call.AnswerOffer(promptId, true) in fake.core.calls
-                val outcome = when {
-                    state == Overlay.HIDDEN && accepted -> "overlay hidden while the prompt shows; the tap reached Accept"
-                    accepted -> throw AssertionError("$layout: a tap through a visible overlay accepted the offer")
-                    answerNoticeShown() -> "touch arrived obscured and was dropped"
-                    else -> "touch blocked by the system"
+                val id = promptId
+                val outcome = when (tap(accept, touches, reached = { answerStarted(id) }, noticed = ::answerNoticeShown)) {
+                    Tap.REACHED -> {
+                        compose.waitUntil(TIMEOUT_MS) { fake.core.calls.any { it is Call.AnswerOffer && it.promptId == id } }
+                        when {
+                            Call.AnswerOffer(id, true) !in fake.core.calls -> throw AssertionError("$layout: a tap on Accept did not accept")
+                            state != Overlay.HIDDEN -> throw AssertionError("$layout: a tap through a visible overlay accepted the offer")
+                            else -> "overlay hidden while the prompt shows; the tap reached Accept"
+                        }
+                    }
+                    Tap.DROPPED -> "touch arrived obscured and was dropped"
+                    Tap.BLOCKED -> BLOCKED
                 }
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                     assertEquals("$layout on API ${Build.VERSION.SDK_INT}", "touch arrived obscured and was dropped", outcome)
@@ -271,24 +368,33 @@ class OverlayWindowTest {
             compose.onNodeWithTag("tab.settings").performClick()
             compose.onNodeWithText("Everyone · 10 min").performClick()
             compose.waitUntil(TIMEOUT_MS) { exists("confirmation") }
+            val touches = scenario.recordTouches()
             val confirm = scenario.screenBounds("confirmation.confirm")
             val state = showOverlay("over-accept", confirm)
-            injectTap(confirm)
-            val enabled = model.state.value.visibility == ReceiveVisibility.EVERYONE ||
-                fake.core.calls.any {
-                    (it is Call.SetReceivePolicy && it.policy is ReceivePolicy.Everyone) ||
-                        (it is Call.StartReceiving && it.options.policy is ReceivePolicy.Everyone)
+            // AppModel.setVisibility sets the state on the main thread before it calls the core.
+            val enabled = {
+                model.state.value.visibility == ReceiveVisibility.EVERYONE ||
+                    fake.core.calls.any {
+                        (it is Call.SetReceivePolicy && it.policy is ReceivePolicy.Everyone) ||
+                            (it is Call.StartReceiving && it.options.policy is ReceivePolicy.Everyone)
+                    }
+            }
+            // Confirm closes the confirmation on the main thread before it acts.
+            val tap = tap(confirm, touches, reached = { !exists("confirmation") || enabled() }, noticed = ::answerNoticeShown)
+            val outcome = when (tap) {
+                Tap.REACHED -> {
+                    compose.waitUntil(TIMEOUT_MS) { enabled() }
+                    if (state != Overlay.HIDDEN) throw AssertionError("a tap through a visible overlay let everyone send")
+                    "overlay hidden while the confirmation shows; the tap reached Confirm"
                 }
-            val outcome = when {
-                state == Overlay.HIDDEN && enabled -> "overlay hidden while the confirmation shows; the tap reached Confirm"
-                enabled -> throw AssertionError("a tap through a visible overlay let everyone send")
-                answerNoticeShown() -> "touch arrived obscured and was dropped"
-                else -> "touch blocked by the system"
+                Tap.DROPPED -> "touch arrived obscured and was dropped"
+                Tap.BLOCKED -> BLOCKED
             }
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                 assertEquals("touch arrived obscured and was dropped", outcome)
                 assertTrue(exists("confirmation"))
             }
+            if (tap != Tap.REACHED) assertFalse("everyone can send", enabled())
             report("obscuredTouchNeverEnablesEveryone ($state): $outcome")
         }
     }
@@ -305,14 +411,21 @@ class OverlayWindowTest {
             }
             compose.onNodeWithTag("send.go").performScrollTo()
             compose.waitForIdle()
+            val touches = scenario.recordTouches()
             val send = scenario.screenBounds("send.go")
             val state = showOverlay("over-accept", send)
             assertEquals("Send is not a surface that hides overlays", Overlay.SHOWN, state)
-            injectTap(send)
-            assertTrue("a tap through an overlay sent", fake.core.calls.none { it is Call.Send })
-            val noticed = compose.onAllNodesWithText(OverlayNotice.SEND.text).fetchSemanticsNodes().isNotEmpty()
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) assertTrue("the Send notice shows", noticed)
-            report("obscuredTouchNeverSends: " + if (noticed) "touch arrived obscured and was ignored" else "touch blocked by the system")
+            // A send prepares the shared document (on the IO dispatcher) before it calls the core.
+            val started = { fake.app.documents.calls.any { it.startsWith("prepare ") } || fake.core.calls.any { it is Call.Send } }
+            val noticed = { compose.onAllNodesWithText(OverlayNotice.SEND.text).fetchSemanticsNodes().isNotEmpty() }
+            val tap = tap(send, touches, reached = started, noticed = noticed)
+            assertTrue("a tap through an overlay sent", tap != Tap.REACHED)
+            // A click the Send button refuses returns before it marks a send in progress
+            // (which disables the button) or starts one, so nothing can start later.
+            compose.onNodeWithTag("send.go").assertIsEnabled()
+            assertFalse("a tap through an overlay started a send", started())
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) assertEquals("the touch arrives obscured and the Send notice shows", Tap.DROPPED, tap)
+            report("obscuredTouchNeverSends: " + if (tap == Tap.DROPPED) "touch arrived obscured and was ignored" else BLOCKED)
         }
     }
 
@@ -342,6 +455,9 @@ class OverlayWindowTest {
         const val ARMED_AFTER_MS = 700L
         const val TAP_MS = 50L
         const val SHARED = "content://io.github.dropumi.test.documents/document/1"
+
+        /** The outcome when no event of the tap reached MainActivity's window. */
+        const val BLOCKED = "touch blocked by the system (it never reached the window)"
 
         /** The window manager's force-hide flag for other apps' overlays (its name differs by API level). */
         val FORCE_HIDDEN = Regex("""ForceHid\w*NonSystemOverlayWindow=true""")
