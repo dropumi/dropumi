@@ -17,6 +17,7 @@ import io.github.dropumi.appstate.Route
 import io.github.dropumi.appstate.PeerLabel
 import io.github.dropumi.appstate.PromptArming
 import io.github.dropumi.appstate.ReceiveVisibility
+import io.github.dropumi.appstate.TransferPhase
 import io.github.dropumi.appstate.promptId
 import io.github.dropumi.core.discovery.AdvertiseState
 import io.github.dropumi.core.discovery.Advertising
@@ -33,9 +34,11 @@ import io.github.dropumi.ffi.ConfigProblem
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
 import io.github.dropumi.ffi.ErrorCode
+import io.github.dropumi.ffi.FileStatus
 import io.github.dropumi.ffi.ForeignFile
 import io.github.dropumi.ffi.ForeignReader
 import io.github.dropumi.ffi.NodeEvent
+import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.PromptCloseReason
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
@@ -776,6 +779,103 @@ class AppModelTest {
         s.model.apply(listOf(NodeEvent.TransferFinished(1u, Direction.OUTGOING, Fixtures.result(TransferStatus.COMPLETED))))
         advanceUntilIdle()
         assertFalse(folder.exists())
+    }
+
+    // Events that arrive before the call that started their operation returns
+
+    /**
+     * A refused connection can end a send before send() returns: the event
+     * collector then sees TransferFinished for an operation the model does
+     * not know yet. The transfer must still end, and its staged copy go.
+     */
+    @Test
+    fun outgoingFailureBeforeSendReturnsStillFinishes() = runTest {
+        val folder = File(Files.createTempDirectory("outgoing").toFile().also(roots::add), "uuid-1")
+        val s = makeModel(FakeDocuments(folder), PendingShare())
+        s.model.start()
+        advanceUntilIdle()
+        s.model.addDocuments(listOf("content://com.example.files/pipe"))
+        s.core.emitBeforeReturning("send") { op ->
+            listOf(
+                NodeEvent.TransferFinished(op, Direction.OUTGOING, Fixtures.result(TransferStatus.FAILED, transferId = null)),
+            )
+        }
+        s.model.sendDraft(SendTarget.Address("192.0.2.1:47321", null), "192.0.2.1", allowUnverified = false)
+        advanceUntilIdle()
+        assertTrue("the send was made", s.core.calls.any { it is FakeCoreClient.Call.Send })
+        assertTrue("no transfer is left connecting", s.model.state.value.active.isEmpty())
+        assertEquals(HistoryEntry.Outcome.FAILED, s.model.state.value.history.single().outcome)
+        assertTrue(s.model.state.value.draft.isEmpty())
+        assertFalse("the staged copy is deleted", folder.exists())
+    }
+
+    /** Events that arrived early are applied in order once the record exists. */
+    @Test
+    fun outgoingEventsBeforeSendReturnsAreAppliedInOrder() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        val file = File(s.outgoing, "x.bin").also { it.writeBytes(byteArrayOf(1)) }
+        s.model.addToDraft(listOf(OutgoingFile("x.bin", 1u, OutgoingFile.Source.Path(file.path))))
+        s.core.emitBeforeReturning("send") { op ->
+            listOf(
+                NodeEvent.Connected(op, Fixtures.peer(trusted = true, alias = "Maya")),
+                NodeEvent.OfferSent(op, "bb", Fixtures.peer(trusted = true, alias = "Maya"), 1u, 1u),
+            )
+        }
+        s.model.sendDraft(SendTarget.Nearby("i"), "Maya", allowUnverified = false)
+        advanceUntilIdle()
+        val record = s.model.state.value.active.single()
+        assertEquals("bb", record.transferId)
+        assertEquals(TransferPhase.WaitingForAcceptance, record.phase)
+        // Later events still reach it, and it ends.
+        s.model.apply(listOf(NodeEvent.TransferFinished(record.operation, Direction.OUTGOING, Fixtures.result(TransferStatus.COMPLETED, "bb"))))
+        advanceUntilIdle()
+        assertTrue(s.model.state.value.active.isEmpty())
+        assertEquals(HistoryEntry.Outcome.COMPLETED, s.model.state.value.history.single().outcome)
+    }
+
+    /** What is kept early is bounded, but the event that ends the transfer is never dropped. */
+    @Test
+    fun earlyEventsAreBoundedButTheEndIsKept() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        val file = File(s.outgoing, "x.bin").also { it.writeBytes(byteArrayOf(1)) }
+        s.model.addToDraft(listOf(OutgoingFile("x.bin", 1u, OutgoingFile.Source.Path(file.path))))
+        s.core.emitBeforeReturning("send") { op ->
+            List(500) { NodeEvent.FileSent(op, "bb", it.toUInt(), FileStatus.STORED) } +
+                NodeEvent.TransferFinished(op, Direction.OUTGOING, Fixtures.result(TransferStatus.COMPLETED, "bb"))
+        }
+        s.model.sendDraft(SendTarget.Nearby("i"), "Maya", allowUnverified = false)
+        advanceUntilIdle()
+        assertTrue(s.model.state.value.active.isEmpty())
+        assertEquals(HistoryEntry.Outcome.COMPLETED, s.model.state.value.history.single().outcome)
+    }
+
+    /** A pairing window's port can arrive before openPairingWindow() returns: it is kept. */
+    @Test
+    fun pairingWindowPortBeforeTheCallReturnsIsKept() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        s.core.emitBeforeReturning("openPairingWindow") { op -> listOf(NodeEvent.PairingWindowOpened(op, 47_999u)) }
+        s.model.openPairingWindow()
+        advanceUntilIdle()
+        assertEquals(47_999.toUShort(), s.model.state.value.pairing?.port)
+    }
+
+    /** A pairing that ends before pair() returns still shows its result. */
+    @Test
+    fun pairingResultBeforeTheCallReturnsIsKept() = runTest {
+        val s = makeModel()
+        s.model.start()
+        advanceUntilIdle()
+        val result = PairingResult.Paired(Fixtures.peer(trusted = true))
+        s.core.emitBeforeReturning("pair") { op -> listOf(NodeEvent.PairingFinished(op, result)) }
+        s.model.pair(SendTarget.Nearby("i"), "Maya")
+        advanceUntilIdle()
+        assertEquals(result, s.model.state.value.pairing?.result)
     }
 
     // Android: received files leave only on request (ADR-0013 D4)

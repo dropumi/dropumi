@@ -217,6 +217,19 @@ class AppModel(
     private val held = HashMap<String, Held>()
 
     private class Held(val files: List<OutgoingFile>, val stagedFolders: List<String>)
+
+    /** Calls that start an operation (send, pair, pairing window) and have not returned yet. */
+    private var startsUnderWay = 0
+
+    /**
+     * Events for an operation the model does not know yet, kept while a
+     * start call is under way: the core may report on the operation (a
+     * refused connection, a pairing window's port) before the call returns.
+     * Applied once the call has registered the operation; dropped when no
+     * start call is under way. Bounded by [MAX_EARLY_OPERATIONS] and
+     * [MAX_EARLY_EVENTS]; progress is coalesced.
+     */
+    private val early = LinkedHashMap<ULong, MutableList<NodeEvent>>()
     private var lastUnpairedNoticeMs: Long? = null
     private val historyWrites = Mutex()
 
@@ -557,20 +570,20 @@ class AppModel(
                     is OutgoingFile.Source.Document -> prepare(source.uri, staged)
                 }
             }
-            val op = work { core.send(target, items, allowUnverified) }
-            operations[op.id] = op
-            val record = TransferRecord(
-                id = "out-${op.id}",
-                direction = Direction.OUTGOING,
-                operation = op.id,
-                targetName = targetName,
-                fileNames = files.map { it.name },
-                totalBytes = files.fold(0uL) { sum, f -> sum + (f.size ?: 0uL) },
-                phase = TransferPhase.Connecting,
-                startedAtMs = clock(),
-            )
-            held[record.id] = Held(files, staged.toList())
-            update { copy(active = listOf(record) + active, draft = emptyList()) }
+            startOperation({ core.send(target, items, allowUnverified) }) { op ->
+                val record = TransferRecord(
+                    id = "out-${op.id}",
+                    direction = Direction.OUTGOING,
+                    operation = op.id,
+                    targetName = targetName,
+                    fileNames = files.map { it.name },
+                    totalBytes = files.fold(0uL) { sum, f -> sum + (f.size ?: 0uL) },
+                    phase = TransferPhase.Connecting,
+                    startedAtMs = clock(),
+                )
+                held[record.id] = Held(files, staged.toList())
+                update { copy(active = listOf(record) + active, draft = emptyList()) }
+            }
         } catch (e: CancellationException) {
             deleteFolders(staged)
             throw e
@@ -658,9 +671,9 @@ class AppModel(
 
     suspend fun pair(target: SendTarget, name: String) {
         try {
-            val op = work { core.pair(target) }
-            operations[op.id] = op
-            update { copy(pairing = PairingSession(op.id, PairingSession.Role.Initiator(name))) }
+            startOperation({ core.pair(target) }) { op ->
+                update { copy(pairing = PairingSession(op.id, PairingSession.Role.Initiator(name))) }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -671,10 +684,10 @@ class AppModel(
     /** Lets one device pair with this one for five minutes. */
     suspend fun openPairingWindow() {
         try {
-            val op = work { core.openPairingWindow(PAIRING_WINDOW_MINUTES) }
-            operations[op.id] = op
-            val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
-            update { copy(pairing = PairingSession(op.id, PairingSession.Role.Window, expiresAtMs = expires)) }
+            startOperation({ core.openPairingWindow(PAIRING_WINDOW_MINUTES) }) { op ->
+                val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
+                update { copy(pairing = PairingSession(op.id, PairingSession.Role.Window, expiresAtMs = expires)) }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -785,6 +798,11 @@ class AppModel(
     fun apply(batch: List<NodeEvent>) = batch.forEach(::apply)
 
     private fun apply(event: NodeEvent) {
+        val op = event.operationId
+        if (op != null && op !in operations && startsUnderWay > 0) {
+            keepEarly(op, event)
+            return
+        }
         when (event) {
             is NodeEvent.ReceiverStarted -> update { copy(receiver = event.info, receiverStopping = false) }
             is NodeEvent.ReceiverStopped -> receiverStopped(event)
@@ -1029,6 +1047,41 @@ class AppModel(
         }
     }
 
+    // Operations
+
+    /**
+     * Runs [call] (which starts an operation) on the io dispatcher, then
+     * [register]s the operation and applies the events that arrived for it
+     * before the call returned. Nothing suspends between the call's return,
+     * the registration and the replay, so no event is applied in between.
+     */
+    private suspend fun startOperation(call: () -> CoreOperation, register: (CoreOperation) -> Unit) {
+        startsUnderWay += 1
+        try {
+            val op = work(call)
+            operations[op.id] = op
+            register(op)
+            early.remove(op.id)?.forEach(::apply)
+        } finally {
+            startsUnderWay -= 1
+            if (startsUnderWay == 0) early.clear()
+        }
+    }
+
+    private fun keepEarly(op: ULong, event: NodeEvent) {
+        val kept = early[op] ?: run {
+            if (early.size >= MAX_EARLY_OPERATIONS) return
+            mutableListOf<NodeEvent>().also { early[op] = it }
+        }
+        val terminal = event is NodeEvent.TransferFinished || event is NodeEvent.PairingFinished
+        when {
+            // Only the latest progress matters.
+            event is NodeEvent.TransferProgress && kept.lastOrNull() is NodeEvent.TransferProgress ->
+                kept[kept.lastIndex] = event
+            kept.size < MAX_EARLY_EVENTS || terminal -> kept += event
+        }
+    }
+
     // Helpers
 
     /**
@@ -1089,6 +1142,27 @@ class AppModel(
         const val UNPAIRED_NOTICE_INTERVAL_MS = 60_000L
         const val NOT_AUTHORIZED = "not_authorized"
         const val SAVE_NOTE = "Saved files can be opened by other apps that can see your Downloads."
+        const val MAX_EARLY_OPERATIONS = 16
+        const val MAX_EARLY_EVENTS = 64
+
+        /**
+         * The operation (send, pair or pairing window) an event reports on;
+         * null for incoming transfers and for events about no operation.
+         * Prompts are never held back: a code prompt shows at once.
+         */
+        val NodeEvent.operationId: ULong?
+            get() = when (this) {
+                is NodeEvent.Connected -> operation
+                is NodeEvent.SessionCode -> operation
+                is NodeEvent.OfferSent -> operation
+                is NodeEvent.TransferAccepted -> operation
+                is NodeEvent.TransferProgress -> operation
+                is NodeEvent.FileSent -> operation
+                is NodeEvent.TransferFinished -> operation
+                is NodeEvent.PairingWindowOpened -> operation
+                is NodeEvent.PairingFinished -> operation
+                else -> null
+            }
 
         fun compactFingerprint(value: String): String = value.uppercase().filter { it.isLetterOrDigit() }
 

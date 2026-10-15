@@ -105,6 +105,7 @@ class FakeCoreClient : CoreClient {
     private var receiving: ReceiverInfo? = null
     private val nearbyTable = mutableListOf<NearbyPeer>()
     private val gates = mutableMapOf<String, CallGate>()
+    private val duringCall = mutableMapOf<String, (ULong) -> List<NodeEvent>>()
     private var currentFingerprint = FINGERPRINT
 
     /** Errors to throw from the next call of each method, by method name. */
@@ -141,6 +142,20 @@ class FakeCoreClient : CoreClient {
     fun holdNext(method: String): CallGate = CallGate().also { synchronized(lock) { gates[method] = it } }
 
     fun holdNextStartReceiving(): CallGate = holdNext("startReceiving")
+
+    /**
+     * The next call of [method] (`send`, `pair` or `openPairingWindow`)
+     * emits these events for its new operation before it returns, as the
+     * core may (a refused connection can finish a send at once).
+     */
+    fun emitBeforeReturning(method: String, events: (operation: ULong) -> List<NodeEvent>) =
+        synchronized(lock) { duringCall[method] = events }
+
+    private fun started(method: String, operation: FakeOperation): FakeOperation {
+        val events = synchronized(lock) { duringCall.remove(method) }
+        if (events != null) emit(*events(operation.id).toTypedArray())
+        return operation
+    }
 
     private fun note(call: Call) = synchronized(lock) { log.add(call) }
 
@@ -275,17 +290,17 @@ class FakeCoreClient : CoreClient {
     override fun send(target: SendTarget, items: List<SendItem>, allowUnverified: Boolean): CoreOperation {
         fail("send")
         note(Call.Send(target, items, allowUnverified))
-        return newOperation()
+        return started("send", newOperation())
     }
 
     override fun pair(target: SendTarget): CoreOperation {
         note(Call.Pair(target))
-        return newOperation()
+        return started("pair", newOperation())
     }
 
     override fun openPairingWindow(minutes: UInt): CoreOperation {
         note(Call.OpenPairingWindow)
-        return newOperation()
+        return started("openPairingWindow", newOperation())
     }
 
     override fun snapshot(): NodeSnapshot = synchronized(lock) {
