@@ -147,6 +147,7 @@ swift test --package-path apps/apple/DropumiKit
 rustup target add aarch64-linux-android               # and x86_64-linux-android for the emulator
 bash scripts/ffi/build-android.sh --abis arm64-v8a    # finds the SDK and NDK 27.1.12297006 itself
 bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
+bash scripts/android/check-core-artifacts.sh          # the stamp matches the sources; the app build runs it, never cargo
 
 # Kotlin binding tests on the host JVM (they load target/debug/libdropumi_ffi).
 cargo build --locked -p dropumi-ffi --lib

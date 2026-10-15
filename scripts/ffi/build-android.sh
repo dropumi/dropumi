@@ -7,6 +7,14 @@
 # verifies it. The output is not committed.
 #
 #   apps/android/core-bindings/build/rust/jniLibs/<abi>/libdropumi_ffi.so
+#   apps/android/core-bindings/build/rust/core-stamp.txt
+#
+# The stamp (next to the jniLibs directory) records the hash of the Rust
+# sources the libraries were built from (scripts/ffi/core-sources-hash.sh),
+# the profile, and each ABI's library hash. scripts/android/check-core-artifacts.sh
+# compares it with the sources as they are now; the app build runs that check
+# and never runs cargo. Libraries of ABIs not built in this run are removed,
+# so every library in the directory matches the stamp.
 #
 # Usage: bash scripts/ffi/build-android.sh [--abis arm64-v8a[,x86_64]] [--profile release|dev] [--out DIR]
 #
@@ -61,6 +69,20 @@ echo "NDK $(sed -n 's/^Pkg\.Revision *= *//p' "${ndk}/source.properties")"
 IFS=',' read -r -a abi_list <<< "${abis}"
 for abi in "${abi_list[@]}"; do
   case "${abi}" in
+    arm64-v8a | x86_64) ;;
+    *) echo "error: unsupported ABI ${abi}" >&2; exit 2 ;;
+  esac
+done
+
+# A build that fails part-way must not leave an earlier stamp claiming the
+# libraries are current.
+stamp="$(dirname "${out}")/core-stamp.txt"
+rm -f "${stamp}"
+# The hash of the sources as they are before cargo runs.
+sources="$(bash scripts/ffi/core-sources-hash.sh)"
+
+for abi in "${abi_list[@]}"; do
+  case "${abi}" in
     arm64-v8a) triple="aarch64-linux-android" ;;
     x86_64) triple="x86_64-linux-android" ;;
     *) echo "error: unsupported ABI ${abi}" >&2; exit 2 ;;
@@ -77,3 +99,19 @@ for abi in "${abi_list[@]}"; do
   cp "target/${triple}/${dir}/libdropumi_ffi.so" "${out}/${abi}/"
   echo "wrote ${out}/${abi}/libdropumi_ffi.so"
 done
+
+for dir_abi in arm64-v8a x86_64; do
+  if [[ " ${abi_list[*]} " != *" ${dir_abi} "* && -e "${out}/${dir_abi}/libdropumi_ffi.so" ]]; then
+    rm -f "${out}/${dir_abi}/libdropumi_ffi.so"
+    echo "removed ${out}/${dir_abi}/libdropumi_ffi.so (not built in this run)"
+  fi
+done
+
+{
+  echo "sources ${sources}"
+  echo "profile ${profile}"
+  for abi in "${abi_list[@]}"; do
+    echo "abi ${abi} $(shasum -a 256 "${out}/${abi}/libdropumi_ffi.so" | cut -d' ' -f1)"
+  done
+} > "${stamp}"
+echo "wrote ${stamp}"
