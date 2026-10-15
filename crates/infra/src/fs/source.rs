@@ -26,31 +26,23 @@ fn meta_of(path: &Path, meta: &std::fs::Metadata) -> Result<SourceMeta, SourceEr
     let modified = local_modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
-    #[cfg(unix)]
-    let local_changed = {
-        use std::os::unix::fs::MetadataExt;
-        Some((meta.ctime(), meta.ctime_nsec()))
-    };
-    #[cfg(not(unix))]
-    let local_changed = None;
     Ok(SourceMeta {
         name,
         size: meta.len(),
         modified,
         local_modified,
-        local_changed,
     })
 }
 
-/// Whether `now` still describes the file `expected` was taken from: same
-/// size, same wire time, and the same full-resolution modification time
-/// and (Unix) inode change time, so an edit within the same second that
-/// keeps the size is still a change.
+/// Whether `now` still describes the file `expected` was taken from: the
+/// same size and the same modification time, compared at full resolution
+/// (the wire time has whole seconds only). Where the file system stores
+/// whole seconds, a same-size edit within the same second is not seen
+/// here; the receiver's BLAKE3 check still verifies the bytes sent.
 fn same_file_state(now: &SourceMeta, expected: &SourceMeta) -> bool {
     now.size == expected.size
         && now.modified == expected.modified
         && now.local_modified == expected.local_modified
-        && now.local_changed == expected.local_changed
 }
 
 fn unreadable(path: &Path, e: &std::io::Error) -> SourceError {
@@ -118,6 +110,13 @@ mod tests {
         let second = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         std::fs::write(&path, b"aaaa").unwrap();
         set_mtime(&path, second + Duration::from_millis(100));
+        let stored = std::fs::metadata(&path).unwrap().modified().unwrap();
+        if stored.duration_since(UNIX_EPOCH).unwrap().subsec_nanos() == 0 {
+            // Skipped: this file system stores whole seconds, so a
+            // same-second edit cannot be told apart by its modification
+            // time (the documented limitation).
+            return;
+        }
         let source = LocalFileSource;
         let meta = source.meta(&path).await.unwrap();
 

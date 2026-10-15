@@ -169,9 +169,10 @@ dropumi send <FILE>... --to <TARGET> [--to <TARGET>...] [--expect-fingerprint <F
 The sender reports success (`completed`, exit 0) only after the receiver's final acknowledgement says every file was
 stored, fsynced and visible under its final name. If some files failed, it reports `completed_with_failures` (exit 8).
 A source file that changes size or modification time while being sent is aborted (`file_sent` status `aborted`) and
-the other files continue. The modification time is compared at full resolution, and on Unix any change of the file's
-metadata (a `chmod`, for example) also counts. Ctrl-C while a name or fingerprint target is still being browsed for stops the send at once
-(`cancelled` event, exit 130) instead of waiting for `--discover-timeout-ms`.
+the other files continue. The size and the full-resolution modification time are compared. On file systems that store
+whole seconds, a same-size edit within the same second can still go undetected; the receiver's BLAKE3 check still
+verifies the bytes that were sent. Ctrl-C while a name or fingerprint target is still being browsed for stops the send
+at once (`cancelled` event, exit 130) instead of waiting for `--discover-timeout-ms`.
 
 ## `discover`
 

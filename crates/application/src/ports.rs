@@ -108,14 +108,13 @@ pub struct SourceMeta {
     /// sent on the wire.
     pub modified: Option<i64>,
     /// Local only, never sent on the wire: the modification time at the
-    /// file system's full resolution, if available. Detects an edit within
-    /// the same second, which `modified` cannot.
+    /// file system's full resolution, if available. A change of the file is
+    /// detected by its size or this time, so an edit within the same second
+    /// is detected where the file system stores sub-second times. On a
+    /// file system that stores whole seconds, a same-size edit within the
+    /// same second can still go undetected; the receiver's BLAKE3 check
+    /// still verifies the bytes that were sent.
     pub local_modified: Option<SystemTime>,
-    /// Local only, never sent on the wire: the inode change time (Unix
-    /// seconds and nanoseconds), where the platform has one. Any metadata
-    /// change (a `chmod`, for example) also counts as a change of the file,
-    /// which is the safe direction.
-    pub local_changed: Option<(i64, i64)>,
 }
 
 /// Reads files to send.

@@ -256,7 +256,6 @@ impl FileSource for MemSource {
             size: data.len() as u64,
             modified: Some(1),
             local_modified: None,
-            local_changed: None,
         })
     }
 
