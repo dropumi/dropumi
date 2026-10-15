@@ -117,9 +117,19 @@ fn on_emulator() -> bool {
         .any(|prop| adb_ok(&["shell", "getprop", prop]).trim() == "1")
 }
 
-/// The names in the device's shared Downloads folder.
+/// What a missing shared Downloads folder lists as.
+const DOWNLOADS_ABSENT: &str = "__absent__";
+
+/// The entries of the device's shared Downloads folder (hidden ones too).
+/// A listing that fails (no shared storage, not readable) fails the test;
+/// a missing folder lists as [`DOWNLOADS_ABSENT`], so a folder that
+/// appears is a change too.
 fn shared_downloads() -> BTreeSet<String> {
-    adb_ok(&["shell", "ls -1 /sdcard/Download 2>/dev/null; true"])
+    let list = format!(
+        "[ -d /sdcard/ ] || {{ echo 'no shared storage at /sdcard' >&2; exit 3; }}; \
+         if [ -e /sdcard/Download ]; then ls -1a /sdcard/Download/; else echo {DOWNLOADS_ABSENT}; fi"
+    );
+    adb_ok(&["shell", &list])
         .lines()
         .filter(|l| !l.is_empty())
         .map(str::to_owned)
