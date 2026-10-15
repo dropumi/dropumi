@@ -8,8 +8,8 @@ How Dropumi is tested, how to run the tests, and exactly what has been verified 
 | Item | Result |
 |---|---|
 | Latest recorded run | macOS 27 arm64 (Apple M4 Pro), Rust 1.99.0, maintainer machine, 2026-10-14, on the milestone 2a code (`dropumi-ffi` and the core changes it needed) |
-| `cargo test --workspace --all-features --locked` | **309 passed, 0 failed, 3 ignored** (the opt-in mDNS test and the two opt-in FFI measurements) |
-| Two-process e2e suite | 42 passed, 1 ignored (32.03 s), including the 5 facade-against-CLI interop tests. Milestone 1's 37 tests were green 3 times in a row (31.73 s, 31.64 s and 31.61 s) |
+| `cargo test --workspace --all-features --locked` | **309 passed, 0 failed, 3 ignored** (the opt-in mDNS test and the two opt-in FFI measurements). After the pairing fix found by the first Windows CI run (2026-10-15, macOS 27.0.1 arm64, Rust 1.93.0): **319 passed, 0 failed, 3 ignored** |
+| Two-process e2e suite | 42 passed, 1 ignored (32.03 s), including the 5 facade-against-CLI interop tests; after the pairing fix 43 passed, 1 ignored (32.06 s). Milestone 1's 37 tests were green 3 times in a row (31.73 s, 31.64 s and 31.61 s) |
 | Swift binding tests (`swift test --package-path apps/apple/DropumiKit`) | **6 passed** (Swift 6.4, Xcode 27.0, macOS slice of the XCFramework) |
 | Kotlin binding tests (`./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest`) | **6 passed, 0 failed** (AGP 9.4.1, Gradle 9.8.1, Temurin 21, host JVM on macOS 27 arm64) |
 | Opt-in mDNS e2e (`DROPUMI_TEST_MDNS=1`) | Passed on loopback in a separate local run (8.37 s) |
@@ -64,15 +64,15 @@ contain no tests.
 | `dropumi-infra` | `src/lib.rs` (unit) | Finalization without overwrite, symlinks, 0600/0700 modes, permission checks, stores and locking (including an atomic trust rename that never re-creates a removed device), stale cleanup, collision probing bounded by a per-name hint and a probe cap, TCP fallback, TXT parsing and random instance labels, a file source that refuses configuration files through symlinks and hard links | 41 | 0 |
 | `dropumi-infra` | `tests/txt_props.rs` | proptest: untrusted mDNS TXT records never panic the parser; kept values are bounded and well-formed | 1 | 0 |
 | `dropumi-cli` | `src/main.rs` (unit) | Argument matrix, exit-code table, control parsing and decisions bound to the waiting prompt, terminal prompts that ignore earlier lines, `terminal_safe`, NDJSON escaping, peer display; proptest: `terminal_safe` output is inert for any input | 13 | 0 |
-| `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback, and the app facade against a real `dropumi` process | 42 | 1 |
+| `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback, and the app facade against a real `dropumi` process | 43 | 1 |
 | `dropumi-ffi` | `src/lib.rs` (unit) | Event mailbox (coalescing, ordering, caps, resync, batching), prompts (registered before published, 1,000-iteration race, late and wrong-kind answers), discovery table (TXT rules, IPv6/loopback, cap, self-filter, "looks like" hints), error codes | 26 | 0 |
-| `dropumi-ffi` | `tests/node.rs` | Two real nodes on loopback: trusted send, Everyone with codes, decline, pairing both ways, the pairing window pausing and resuming the receiver, cancel by either side and by id, `stop_accepting`, app-read documents, size mismatch and panicking readers, configuration files refused, no paths in events, busy identity changes, answers bound to prompt ids, shutdown and drop, listener failures, a stuck listener, re-entrant listeners | 23 | 0 |
+| `dropumi-ffi` | `tests/node.rs` | Two real nodes on loopback: trusted send, Everyone with codes, decline, pairing both ways, a code prompt withdrawn when the other device says no, the pairing window pausing and resuming the receiver, cancel by either side and by id, `stop_accepting`, app-read documents, size mismatch and panicking readers, configuration files refused, no paths in events, busy identity changes, answers bound to prompt ids, shutdown and drop, listener failures, a stuck listener, re-entrant listeners | 24 | 0 |
 | `dropumi-ffi` | `tests/discovery.rs` | Advertising and withdrawal, sending to a listed device with a pinned key, copied hints that can neither redirect nor block a send, unpaired devices need a code, own advertisement filtered | 7 | 0 |
 | `dropumi-ffi` | `tests/stress.rs` | 8 threads × 10,000 mixed calls while prompted transfers run | 1 | 0 |
 | `dropumi-ffi` | `tests/measure.rs` | Opt-in measurements (cancel latency, event volume) | 0 | 2 |
-| **Total** | | | **309** | **3** |
+| **Total** | | | **319** | **3** |
 
-Per crate: domain 37, protocol 65, application 53, infra 42, cli 55, ffi 57 (plus the ignored mDNS test and the two
+Per crate: domain 37, protocol 65, application 61, infra 42, cli 56, ffi 58 (plus the ignored mDNS test and the two
 ignored measurements).
 
 End-to-end tests by module (`crates/cli/tests/e2e/`):
