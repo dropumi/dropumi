@@ -126,14 +126,17 @@ class DocumentGuardTest {
 
     /**
      * A hard link to the identity key under an innocent name. Where the
-     * image refuses links inside app data, the test fails with that reason
-     * (it is never skipped); the no-link variants below run everywhere.
+     * image refuses links inside app data (EACCES or EPERM), the test fails
+     * with that reason (it is never skipped); the no-link variants below run
+     * everywhere. Any other errno (a full disk, another mount, an existing
+     * name) is a plain test error, never "not runnable".
      */
     private fun linkToIdentityKey(): File {
         val link = File(core.root, "innocent.jpg")
         try {
             Os.link(identityKey.path, link.path)
         } catch (e: ErrnoException) {
+            if (e.errno != OsConstants.EACCES && e.errno != OsConstants.EPERM) throw e
             fail("not runnable on this image (link ${OsConstants.errnoName(e.errno)})")
         }
         return link

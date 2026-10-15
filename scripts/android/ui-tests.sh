@@ -26,15 +26,17 @@
 #
 # Images that refuse hard links. DocumentGuardTest#uriGuardRefusesHardLinkToIdentityKey
 # and #stagingRunsUriGuard first make a hard link to the identity key inside
-# the app's data. Where the image refuses link() there (EACCES on the
-# arm64-v8a API 26, 28 and 36 emulators, spike S-AN3), they fail on purpose
-# with "not runnable on this image (link <errno>)"; they are never skipped,
-# and their no-link variants run on every image. The script prints each such
-# failure by name with that label and does not count it against the exit
-# status, but only when the failure is that assertion, raised by the tests'
-# link step (the stack is checked). Any other failure, of these two tests or
-# of any other, fails the run. On an image that allows the link, both tests
-# run in full and must pass.
+# the app's data. Where the image refuses link() there with EACCES (the
+# arm64-v8a API 26, 28 and 36 emulators, spike S-AN3) or EPERM, they fail on
+# purpose with "not runnable on this image (link EACCES)" or "(link EPERM)";
+# they are never skipped, and their no-link variants run on every image. The
+# script prints each such failure by name with that label and does not count
+# it against the exit status, but only when the failure is that assertion
+# with one of those two errnos, raised by the tests' link step (the stack is
+# checked). Any other errno (ENOSPC, EXDEV, EEXIST, ENOENT, ...) is a test
+# error and fails the run, as does any other failure of these two tests or of
+# any other. On an image that allows the link, both tests run in full and
+# must pass.
 #
 # Usage: bash scripts/android/ui-tests.sh [--no-build] [--class SPEC]
 #          [--exclude-local-or-device]
@@ -165,7 +167,7 @@ classify_failures() {
       if (substr($0, 30) == "-2") {
         name = cls "#" tst
         link = (name == g "#uriGuardRefusesHardLinkToIdentityKey" || name == g "#stagingRunsUriGuard") &&
-          s1 ~ /^java\.lang\.AssertionError: not runnable on this image \(link E[A-Z]+\)$/ &&
+          s1 ~ /^java\.lang\.AssertionError: not runnable on this image \(link (EACCES|EPERM)\)$/ &&
           index(s2, "at org.junit.Assert.fail(") == 1 &&
           index(s3, "at " g ".linkToIdentityKey(") == 1
         if (link) print "link\t" substr(s1, 27) "\t" name
