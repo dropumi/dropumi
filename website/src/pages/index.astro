@@ -15,8 +15,8 @@ import AppMockup from '../components/AppMockup.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const steps = [
 	['Open dropumi', 'Both devices need to be on the same Wi-Fi or local network. Nearby devices show up on the radar on their own.'],
-	['Pick a file, tap a device', 'Drop a file or photo onto the app, then tap the device you want to send it to.'],
-	['Check the code, then accept', 'The first time, you pair by checking that both screens show the same 6-digit code. Then the other person accepts, and the file goes straight across your local network, encrypted.'],
+	['Pair once', 'In Settings, choose Pair a device: one device waits, the other asks to pair, and you check that both screens show the same 6-digit code. You do this once per pair of devices.'],
+	['Send', 'Tap Send next to the device, add files or photos, then tap the Send to button. The other person accepts, and the files go straight across your local network, encrypted.'],
 ];
 const features = [
 	['Works offline', WifiOff, 'Everything stays on your local network. No internet, no account, no server in the middle.'],
@@ -27,8 +27,8 @@ const features = [
 	['Free and open source', CodeXml, 'Read the code, fork it, improve it. No ads, no paywall, ever.'],
 ];
 const shareSteps = [
-	['share-1-select.png', 'Tap Share', 'Pick a photo, video or any file, tap Share and choose dropumi.', 'Design mockup: the iOS share sheet with dropumi'],
-	['share-2-choose.png', 'Open dropumi', 'The share sheet hands the files to dropumi. Open the app and tap a nearby device to send, no internet needed.', 'Design mockup: a list of nearby devices'],
+	['share-1-select.png', 'Tap Share', 'On iPhone or iPad, pick a photo, video or any file, tap Share and choose dropumi.', 'Design mockup: the iOS share sheet with dropumi'],
+	['share-2-choose.png', 'Open dropumi', 'The share sheet hands the files to dropumi. Open the app: the files wait on the Send screen. Choose a nearby device and tap the Send to button. No internet needed.', 'Design mockup: a list of nearby devices'],
 	['share-3-sending.png', 'Follow the transfer', 'The file goes straight across your Wi-Fi, encrypted, and the Transfers screen shows its progress.', 'Design mockup: a file sending to Maya\'s iPhone with a progress bar'],
 ];
 const repo = 'https://github.com/dropumi/dropumi';
@@ -78,7 +78,7 @@ const platforms = [
 			<div class="mtext">
 				<p class="eyebrow">ON YOUR PHONE</p>
 				<h2>Phone to Mac, no cable.</h2>
-				<p>See who is nearby, tap a device and send photos, videos and documents. Receiving is one tap, too. Light and dark themes follow your system.</p>
+				<p>See who is nearby, choose a device, add photos, videos and documents, and send them. Receiving is one tap, too. Light and dark themes follow your system.</p>
 				<p>The iPhone and iPad app is in development and has only run on the simulator so far. These screens are design mockups: the app does not show distance or device type, and there is no Android app yet.</p>
 				<ul>
 					<li>No account or sign-in</li>
@@ -96,7 +96,7 @@ const platforms = [
 		<section id="share" class="dark">
 			<p class="eyebrow light">SHARE FROM ANY APP</p>
 			<h2>Select a file. Share it with dropumi.</h2>
-			<p class="sub dim">On iPhone and iPad, dropumi shows up in the share sheet, next to the apps you already use. It hands your files to the dropumi app, and you choose the device there. The pictures are design mockups: the real share sheet has no device list.</p>
+			<p class="sub dim">On iPhone and iPad, dropumi shows up in the share sheet, next to the apps you already use. It hands your files to the dropumi app, and you choose the device there. The Mac app has no Share Extension yet. The pictures are design mockups: the real share sheet has no device list.</p>
 			<div class="steps3">
 				{shareSteps.map(([img, t, d, alt], i) => (
 					<figure>

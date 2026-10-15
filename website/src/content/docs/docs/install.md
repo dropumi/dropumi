@@ -10,7 +10,7 @@ There is nothing to download yet: no releases, no installers and no App Store or
 | Part | Status |
 | --- | --- |
 | `dropumi` command-line tool | Build it from source. Tested on macOS (Apple silicon) and on Linux in a container. It builds for Windows but has never been run there. |
-| App for iPhone, iPad and Mac, with a Share Extension | In development. Build it from source. Tested on the iOS simulator and on a Mac, not yet on an iPhone or iPad. |
+| App for iPhone, iPad and Mac | In development. Build it from source. Tested on the iOS simulator and on a Mac, not yet on an iPhone or iPad. On iPhone and iPad, a Share Extension adds dropumi to the share sheet. The Mac app has no Share Extension yet. |
 | Android, Windows and Linux apps | Planned, not built yet. |
 | Browser companion | A proposal only. |
 
@@ -18,13 +18,15 @@ So far, dropumi has only been tested on one machine at a time. Nothing has been 
 
 ## Build from source
 
+The source code lands on `main` with [pull requests #5 to #7](https://github.com/dropumi/dropumi/pulls). Until they are merged, `main` contains only the website and design files, so the commands below have nothing to build yet.
+
 ```sh
 git clone https://github.com/dropumi/dropumi.git
 cd dropumi
 cargo build --release --locked -p dropumi-cli
 ```
 
-This builds the command-line tool with stable Rust (1.89 or newer). The binary is `target/release/dropumi`. The repository's README has the quick start, and `apps/apple/README.md` explains how to build the Apple app with Xcode.
+This builds the command-line tool with stable Rust (1.89 or newer). The binary is `target/release/dropumi`. The same pull requests add a quick start to the repository's README, and `apps/apple/README.md`, which explains how to build the Apple app with Xcode.
 
 ## Phone and tablet
 
