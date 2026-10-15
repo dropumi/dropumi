@@ -244,10 +244,15 @@ public final class AppModel {
         guard !trimmed.isEmpty else { return }
         let wasReceiving = receiver != nil
         if wasReceiving { await stopReceivingAndWait() }
+        let before = identity?.name
         do {
             identity = try await work { [core] in try core.setDeviceName(trimmed) }
         } catch {
-            show(error, title: String(localized: "The name was not changed"))
+            // The core may have saved the name and only failed to read it back.
+            await reloadIdentity()
+            if identity?.name == before {
+                show(error, title: String(localized: "The name was not changed"))
+            }
         }
         if wasReceiving { await applyVisibility() }
     }
@@ -255,14 +260,32 @@ public final class AppModel {
     public func resetIdentity() async {
         let wasReceiving = receiver != nil
         if wasReceiving { await stopReceivingAndWait() }
+        let before = identity?.fingerprint
         do {
             identity = try await work { [core] in try core.resetIdentity() }
-            banner = Banner(style: .warning, title: String(localized: "New identity"),
-                            message: String(localized: "Devices you paired with must pair again."))
+            showNewIdentity()
         } catch {
-            show(error, title: String(localized: "The identity was not reset"))
+            // The core may have replaced the key and only failed to read it back.
+            await reloadIdentity()
+            if let now = identity?.fingerprint, now != before {
+                showNewIdentity()
+            } else {
+                show(error, title: String(localized: "The identity was not reset"))
+            }
         }
         if wasReceiving { await applyVisibility() }
+    }
+
+    private func showNewIdentity() {
+        banner = Banner(style: .warning, title: String(localized: "New identity"),
+                        message: String(localized: "Devices you paired with must pair again."))
+    }
+
+    /// Reloads the identity without a banner; keeps the old one on failure.
+    private func reloadIdentity() async {
+        if let now = try? await work({ [core] in try core.identity() }) {
+            identity = now
+        }
     }
 
     public func refreshTrusted() async {
@@ -275,9 +298,19 @@ public final class AppModel {
             await refreshTrusted()
             return true
         } catch {
+            // The core may have saved the device and only failed to read it back.
+            await refreshTrusted()
+            let wanted = Self.compactFingerprint(fingerprint)
+            if trusted.contains(where: { Self.compactFingerprint($0.fingerprint) == wanted }) {
+                return true
+            }
             show(error, title: String(localized: "Not added"))
             return false
         }
+    }
+
+    private static func compactFingerprint(_ value: String) -> String {
+        String(value.uppercased().filter { $0.isLetter || $0.isNumber })
     }
 
     public func rename(_ device: TrustedDeviceInfo, to alias: String) async {
@@ -666,7 +699,9 @@ public final class AppModel {
             Task { await refreshTrusted() }
         case let .sessionClosed(peer, code):
             if code == "not_authorized", let peer, !peer.trusted { noticeUnpairedSender() }
-        case .warning, .eventsDropped:
+        case let .warning(message):
+            showWarning(message)
+        case .eventsDropped:
             break
         case .resyncRequired:
             resync()
@@ -733,6 +768,19 @@ public final class AppModel {
     }
 
     // MARK: Helpers
+
+    /// A warning from the core (today: a change saved without a confirmed
+    /// directory sync). Added to a banner already showing, so a message
+    /// such as "New identity" is not lost.
+    private func showWarning(_ message: String) {
+        let text = message.prefix(1).uppercased() + message.dropFirst()
+        if let current = banner {
+            banner = Banner(style: current.style, title: current.title,
+                            message: current.message + "\n\n" + text, action: current.action)
+        } else {
+            banner = Banner(style: .warning, title: String(localized: "Saved, but not confirmed on disk"), message: text)
+        }
+    }
 
     private func show(_ error: Error, title: String, action: Banner.Action? = nil) {
         banner = Banner(style: .warning, title: title, message: ErrorCatalog.message(for: error), action: action)

@@ -136,6 +136,71 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
         #expect(grouped.hasPrefix("ABCD-EFGH-IJKL-MNOP-QRST-UVWX"))
     }
 
+    // MARK: Changes saved but not confirmed or not read back
+
+    @Test func warningEventShowsABanner() throws {
+        let (model, _) = try makeModel()
+        model.apply([.warning(message: "the change was saved, but the configuration directory could not be synced")])
+        let banner = try #require(model.banner)
+        #expect(banner.title == "Saved, but not confirmed on disk")
+        #expect(banner.message.hasPrefix("The change was saved"))
+    }
+
+    @Test func warningIsAddedToTheBannerAlreadyShowing() async throws {
+        let (model, _) = try makeModel()
+        await model.refreshIdentity()
+        await model.resetIdentity()
+        #expect(model.banner?.title == "New identity")
+        model.apply([.warning(message: "the change was saved, but the configuration directory could not be synced")])
+        let banner = try #require(model.banner)
+        #expect(banner.title == "New identity")
+        #expect(banner.message.contains("must pair again"))
+        #expect(banner.message.contains("The change was saved"))
+    }
+
+    @Test func resetSavedButNotReadBackIsReportedAsDone() async throws {
+        let (model, core) = try makeModel()
+        await model.refreshIdentity()
+        core.appliedButUnreadable = ["resetIdentity"]
+        await model.resetIdentity()
+        #expect(model.identity?.fingerprint == FakeCoreClient.resetFingerprint)
+        #expect(model.banner?.title == "New identity")
+    }
+
+    @Test func resetThatFailsKeepsTheIdentityAndSaysSo() async throws {
+        let (model, core) = try makeModel()
+        await model.refreshIdentity()
+        core.failures["resetIdentity"] = .Config(problem: .corrupt, detail: "bad")
+        await model.resetIdentity()
+        #expect(model.identity?.fingerprint == FakeCoreClient.fingerprint)
+        #expect(model.banner?.title == "The identity was not reset")
+    }
+
+    @Test func renameSavedButNotReadBackIsNotReportedAsFailed() async throws {
+        let (model, core) = try makeModel()
+        await model.refreshIdentity()
+        core.appliedButUnreadable = ["setDeviceName"]
+        await model.renameDevice("Kitchen iPad")
+        #expect(model.identity?.name == "Kitchen iPad")
+        #expect(model.banner?.title != "The name was not changed")
+    }
+
+    @Test func trustSavedButNotReadBackCountsAsAdded() async throws {
+        let (model, core) = try makeModel()
+        core.appliedButUnreadable = ["trustFingerprint"]
+        let fp = "ZYXWVUTSRQPONMLKJIHGFEDCBA765432ZYXWVUTSRQPONMLKJIHG"
+        #expect(await model.trust(fingerprint: fp, alias: "Maya"))
+        #expect(model.trusted.contains { $0.fingerprint == fp })
+        #expect(model.banner?.title != "Not added")
+    }
+
+    @Test func trustThatFailsIsNotAdded() async throws {
+        let (model, core) = try makeModel()
+        core.failures["trustFingerprint"] = .Config(problem: .io, detail: "disk full")
+        #expect(!(await model.trust(fingerprint: "ZYXWVUTSRQPONMLKJIHGFEDCBA765432ZYXWVUTSRQPONMLKJIHG", alias: nil)))
+        #expect(model.banner?.title == "Not added")
+    }
+
     @Test func backgroundStopsAcceptingButDoesNotStopReceiving() async throws {
         let (model, core) = try makeModel()
         await model.finishOnboarding()

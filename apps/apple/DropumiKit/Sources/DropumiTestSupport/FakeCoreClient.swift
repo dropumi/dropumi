@@ -98,8 +98,14 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
     private var startGate: CallGate?
     /// Errors to throw from the next calls, by method name.
     public var failures: [String: DropumiError] = [:]
+    /// Methods that apply their change and then fail, as the core does when
+    /// a change was saved but could not be read back.
+    public var appliedButUnreadable: Set<String> = []
+    private var currentFingerprint = FakeCoreClient.fingerprint
 
     public static let fingerprint = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST"
+    /// The fingerprint after `resetIdentity()`.
+    public static let resetFingerprint = "QRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCD"
 
     public init() {
         (events, continuation) = AsyncStream.makeStream(of: [NodeEvent].self)
@@ -149,6 +155,18 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         if let error { throw error }
     }
 
+    /// After the change is applied: fail like a change that was saved but
+    /// could not be read back.
+    private func failAfterApplying(_ method: String) throws {
+        lock.lock()
+        let fails = appliedButUnreadable.contains(method)
+        lock.unlock()
+        if fails {
+            throw DropumiError.Config(
+                problem: .io, detail: "the change was saved, but it could not be read back: test")
+        }
+    }
+
     private func newOperation() -> FakeOperation {
         lock.lock()
         defer { lock.unlock() }
@@ -162,9 +180,13 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         try fail("identity")
         lock.lock()
         defer { lock.unlock() }
+        let short = Array(currentFingerprint.prefix(24))
+        let display = stride(from: 0, to: short.count, by: 4)
+            .map { String(short[$0..<min($0 + 4, short.count)]) }
+            .joined(separator: "-")
         return IdentityInfo(
-            name: deviceName, fingerprint: Self.fingerprint,
-            fingerprintDisplay: "ABCD-EFGH-IJKL-MNOP-QRST-UVWX", fingerprintHint: "ABCDEFGH")
+            name: deviceName, fingerprint: currentFingerprint,
+            fingerprintDisplay: display, fingerprintHint: String(currentFingerprint.prefix(8)))
     }
 
     public func setDeviceName(_ name: String) throws -> IdentityInfo {
@@ -172,10 +194,18 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         lock.lock()
         deviceName = name
         lock.unlock()
+        try failAfterApplying("setDeviceName")
         return try identity()
     }
 
-    public func resetIdentity() throws -> IdentityInfo { try identity() }
+    public func resetIdentity() throws -> IdentityInfo {
+        try fail("resetIdentity")
+        lock.lock()
+        currentFingerprint = currentFingerprint == Self.fingerprint ? Self.resetFingerprint : Self.fingerprint
+        lock.unlock()
+        try failAfterApplying("resetIdentity")
+        return try identity()
+    }
 
     public func trustedDevices() throws -> [TrustedDeviceInfo] {
         lock.lock()
@@ -192,6 +222,7 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         lock.lock()
         trustedList.append(device)
         lock.unlock()
+        try failAfterApplying("trustFingerprint")
         return device
     }
 
