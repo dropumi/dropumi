@@ -8,8 +8,8 @@ How Dropumi is tested, how to run the tests, and exactly what has been verified 
 | Item | Result |
 |---|---|
 | Latest recorded run | macOS 27 arm64 (Apple M4 Pro), Rust 1.99.0, maintainer machine, 2026-10-14, on the final code of this milestone (the commits after the code commits change only CI configuration, documentation and the benchmark files) |
-| `cargo test --workspace --all-features --locked` | **224 passed, 0 failed, 1 ignored** (the opt-in mDNS test) |
-| Two-process e2e suite | 37 passed, 1 ignored; green 3 times in a row (31.73 s, 31.64 s and 31.61 s) |
+| `cargo test --workspace --all-features --locked` | **224 passed, 0 failed, 1 ignored** (the opt-in mDNS test). After the pairing fix found by the first Windows CI run (2026-10-15, macOS 27.0.1 arm64, Rust 1.93.0): **233 passed, 0 failed, 1 ignored** |
+| Two-process e2e suite | 37 passed, 1 ignored; green 3 times in a row (31.73 s, 31.64 s and 31.61 s). After the pairing fix: 38 passed, 1 ignored |
 | Opt-in mDNS e2e (`DROPUMI_TEST_MDNS=1`) | Passed on loopback in a separate local run (8.37 s) |
 | Scripted terminal-mode smoke test | Passed on macOS 27 arm64 and in the Debian 12 aarch64 container (as root). A script (not in the repository) ran two `dropumi` processes, each on its own pseudo-terminal, and typed the answers: pairing with matching codes; a `y` typed before the first prompt did not answer it (the `n` typed at the prompt rejected the offer); a trusted transfer with equal SHA-256; `receive --accept trusted` without a prompt; Ctrl-C (exit 130); and a second Ctrl-C exiting at once while a silent connection held the graceful shutdown. A second script showed stray input answering a prompt in 5 of 5 tries before the terminal flush (macOS only: one run on the code without the flush) and in 0 of 5 after it (macOS and the container), both for a line typed before the first prompt and for a partial line typed before a later prompt |
 | Linux, full workspace suite | **225 passed, 0 failed, 1 ignored** in a Debian 12 (bookworm) aarch64 container (Docker on the same machine, Rust 1.99.0, non-root user, `--no-fail-fast`), including the Linux-only `transfer::bounded_memory_independent_of_size` |
@@ -50,16 +50,16 @@ contain no tests.
 | `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits, path-free store-error log text | 3 | 0 |
 | `dropumi-application` | `tests/channel.rs` | Handshake over in-memory streams: pinning before msg3, busy and incompatible replies, oversized pre-auth input | 8 | 0 |
 | `dropumi-application` | `tests/failures.rs` | Cancellation on both sides (synchronized on bytes written, not on sleeps), consent timeout, absolute offer deadline, idle timeout, write stall, storage errors not leaked, `discard` on every failure path, candidate order, CompleteAck deadline restarted by each FileAck and still firing without one, trust-store errors (lookup and last-seen update) logged without paths | 13 | 0 |
-| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result | 4 | 0 |
+| `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result; while the code prompt is open, the peer's "no", Cancel, Error, departure or second PairResult ends it at once, an early "yes" is kept, and an early "yes" followed by a local "no" or timeout stores nothing | 12 | 0 |
 | `dropumi-application` | `tests/policy.rs` | Trusted-only refuses unknown senders, pair intent refused by `receive`, receiver declines, Everyone expiry, unverified offers always prompt, unverified senders must confirm the SAS | 6 | 0 |
 | `dropumi-application` | `tests/transfer.rs` | Round trip, collisions, progress, source changed, write failure | 5 | 0 |
 | `dropumi-infra` | `src/lib.rs` (unit) | Finalization without overwrite, symlinks, 0600/0700 modes, permission checks, stores and locking, stale cleanup, collision probing bounded by a per-name hint and a probe cap, TCP fallback, TXT parsing | 32 | 0 |
 | `dropumi-infra` | `tests/txt_props.rs` | proptest: untrusted mDNS TXT records never panic the parser; kept values are bounded and well-formed | 1 | 0 |
 | `dropumi-cli` | `src/main.rs` (unit) | Argument matrix, exit-code table, control parsing and decisions bound to the waiting prompt, terminal prompts that ignore earlier lines, `terminal_safe`, NDJSON escaping, peer display; proptest: `terminal_safe` output is inert for any input | 13 | 0 |
-| `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback | 37 | 1 |
-| **Total** | | | **224** | **1** |
+| `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback | 38 | 1 |
+| **Total** | | | **233** | **1** |
 
-Per crate: domain 37, protocol 65, application 39, infra 33, cli 50 (plus the ignored mDNS test).
+Per crate: domain 37, protocol 65, application 47, infra 33, cli 51 (plus the ignored mDNS test).
 
 End-to-end tests by module (`crates/cli/tests/e2e/`):
 
@@ -67,7 +67,7 @@ End-to-end tests by module (`crates/cli/tests/e2e/`):
 |---|---|---|
 | `transfer` | 6 | Single file (SHA-256 equal); Unicode names, an empty file and duplicate names; 64 MiB streaming; 300 small files; existing files never overwritten; Everyone mode with matching codes on both sides |
 | `policy` | 9 | Trusted-only refuses an unknown sender; receiver declines; `--accept never`; consent timeout; sender refuses an unverified receiver; `--expect-fingerprint` mismatch; sending by IP reports the actual authenticated peer and its local alias; a late `accept` never approves a later offer and a decision for another `transfer_id` is ignored; Ctrl-C (SIGINT) exits 130 (Unix) |
-| `pairing` | 4 | Both confirm: mutual trust, then a trusted transfer; one denies: nothing stored; cancel during the code comparison: exit 4, nothing stored; a name target with `--no-mdns` explains why it cannot be found (exit 2) |
+| `pairing` | 5 | Both confirm: mutual trust, then a trusted transfer; one denies: nothing stored; cancel during the code comparison: exit 4, and the other side's prompt ends with exit 6 without an answer, nothing stored; a name target with `--no-mdns` explains why it cannot be found (exit 2); ignorable messages around an early "yes" are skipped within the limit, and the peer's Cancel ends the prompt without a reply |
 | `failure` | 7 | Cancel from either side; kill either side (`connection_lost`, partial files removed); connection refused (exit 5); a dead candidate is skipped; stale `.part` files cleaned at start |
 | `security` | 11 | Wire capture has no plaintext (file content, file name, both device names, both static public keys); incompatible version; preamble tamper; recorded-session replay; ciphertext bit flip; malformed traffic matrix; wrong file hash; MitM relay refused by pinned trust; traversal and reserved names forged on the wire; an ignorable message during the consent prompt is skipped; a peer Error before the offer is reported with its own code |
 | `discovery` | 0 (+1 ignored) | mDNS discovery and send by fingerprint prefix (opt-in) |
@@ -98,7 +98,7 @@ replaced.
 | `MemSource`, `StallingReader` | `FileSource` | In-memory files; a reader that stops after N bytes |
 | `MemSink`, `MemFile` | `FileSink`, `IncomingFile` | Fault injection (fail after N bytes with a chosen message, block writes); counts begin, commit, discard and directory syncs |
 | `MemTrust`, `MemIdentity` | `TrustStore`, `IdentityStore` | |
-| `Scripted` | `Interaction` | Fixed decisions, or never answers (consent and SAS timeouts) |
+| `Scripted` | `Interaction` | Fixed decisions, never answers (consent and SAS timeouts), or answers the code after a delay (paused time) |
 | `ManualClock` | `Clock` | Advanced by hand (Everyone expiry) |
 
 Timeout tests use tokio's paused clock (`#[tokio::test(start_paused = true)]`), so they take no real time. Tests that

@@ -492,6 +492,8 @@ pub struct Scripted {
     /// `None` never answers (to test consent timeouts).
     pub decision: Option<Decision>,
     pub confirm: Option<bool>,
+    /// How long the user takes to answer the code (paused time).
+    pub confirm_delay: Duration,
     pub offers_seen: Arc<AtomicUsize>,
     pub sas_seen: Arc<Mutex<Vec<String>>>,
 }
@@ -501,8 +503,18 @@ impl Scripted {
         Self {
             decision: Some(Decision::Accept),
             confirm: Some(true),
+            confirm_delay: Duration::ZERO,
             offers_seen: Arc::default(),
             sas_seen: Arc::default(),
+        }
+    }
+
+    /// Answers the code with `confirm` after `delay`.
+    pub fn confirm_after(delay: Duration, confirm: bool) -> Self {
+        Self {
+            confirm: Some(confirm),
+            confirm_delay: delay,
+            ..Self::accept()
         }
     }
 
@@ -526,6 +538,9 @@ impl Interaction for Scripted {
 
     async fn confirm_sas(&self, prompt: &SasPrompt) -> bool {
         self.sas_seen.lock().unwrap().push(prompt.code.as_digits());
+        if !self.confirm_delay.is_zero() {
+            tokio::time::sleep(self.confirm_delay).await;
+        }
         match self.confirm {
             Some(c) => c,
             None => std::future::pending().await,

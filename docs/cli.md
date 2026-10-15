@@ -99,6 +99,9 @@ How it works:
 3. Trust is stored on **both** sides only if **both** users confirmed (method `sas`, alias = the other device's
    claimed name at pairing time, which you can change with `trust add <FP> --name`). Otherwise nothing is stored
    (`pairing_rejected`, exit 6).
+4. If the other device answers no or cancels while this device's code prompt is open, the prompt is withdrawn at
+   once and `pair` ends without an answer (`pairing_rejected`, exit 6); if the other device disconnects, it ends with
+   `connection_lost` (exit 5). Nothing is stored, and a `confirm` or `deny` written after that is ignored.
 
 `pair --to` browses for name and fingerprint targets for 3 s and uses a 3 s connect timeout per address (not
 configurable). `pair --listen` refuses transfer sessions, and `receive` refuses pairing sessions (`not_authorized`).
@@ -448,7 +451,7 @@ dropumi pair --to 192.168.1.20:47321
 
 Both terminals show `Verification code: NNN NNN` and ask `Does the other device show NNN NNN? [y/N]`. Answer `y` on
 both only if the codes match; both then print `Paired: Trusted "<name>" ...`. Scripted, use `--json --control-stdin`
-and write `{"cmd":"confirm"}` after the `sas` event.
+and write `{"cmd":"confirm"}` after the `sas` event (the command may end before that if the other device says no).
 
 **Receiving.**
 

@@ -52,6 +52,7 @@ Milestone 1 (Phase 0 + Phase 1) adds the secure LAN transfer core, a draft of pr
 - Transport records (2-byte length prefix) with implicit per-direction nonce counters, never sent on the wire and owned explicitly by `Sealer`/`Opener`; CONTROL and DATA frames, with at most 65,518 B of DATA per record.
 - Strict CBOR control messages (`minicbor`) with bounded decoding, and fixed, path-free `Error.detail` phrases.
 - A 6-digit short authentication string (SAS) committed inside the handshake, used for pairing and for unverified peers.
+- Pairing reads the other side while the code prompt is open: its "no", cancel or disconnect ends the prompt at once (found by the first Windows CI run, where the other side's "no" was lost and pairing ended as "connection lost").
 - BLAKE3 integrity checking per file.
 - Sender and receiver session state machines, limited to 10,000 files and 4 MiB of file metadata per transfer.
 
