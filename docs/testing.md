@@ -8,7 +8,7 @@ How Dropumi is tested, how to run the tests, and exactly what has been verified 
 | Item | Result |
 |---|---|
 | Latest recorded run | macOS 27 arm64 (Apple M4 Pro), Rust 1.99.0, maintainer machine, 2026-10-14, on the final code of this milestone (the commits after the code commits change only CI configuration, documentation and the benchmark files) |
-| `cargo test --workspace --all-features --locked` | **224 passed, 0 failed, 1 ignored** (the opt-in mDNS test). After the pairing fix found by the first Windows CI run (2026-10-15, macOS 27.0.1 arm64, Rust 1.93.0): **233 passed, 0 failed, 1 ignored** |
+| `cargo test --workspace --all-features --locked` | **224 passed, 0 failed, 1 ignored** (the opt-in mDNS test). After the pairing fix found by the first Windows CI run (2026-10-15, macOS 27.0.1 arm64, Rust 1.93.0): **233 passed, 0 failed, 1 ignored**. After the per-fingerprint admission test (same day, machine and toolchain): **234 passed, 0 failed, 1 ignored** |
 | Two-process e2e suite | 37 passed, 1 ignored; green 3 times in a row (31.73 s, 31.64 s and 31.61 s). After the pairing fix: 38 passed, 1 ignored |
 | Opt-in mDNS e2e (`DROPUMI_TEST_MDNS=1`) | Passed on loopback in a separate local run (8.37 s) |
 | Scripted terminal-mode smoke test | Passed on macOS 27 arm64 and in the Debian 12 aarch64 container (as root). A script (not in the repository) ran two `dropumi` processes, each on its own pseudo-terminal, and typed the answers: pairing with matching codes; a `y` typed before the first prompt did not answer it (the `n` typed at the prompt rejected the offer); a trusted transfer with equal SHA-256; `receive --accept trusted` without a prompt; Ctrl-C (exit 130); and a second Ctrl-C exiting at once while a silent connection held the graceful shutdown. A second script showed stray input answering a prompt in 5 of 5 tries before the terminal flush (macOS only: one run on the code without the flush) and in 0 of 5 after it (macOS and the container), both for a line typed before the first prompt and for a partial line typed before a later prompt |
@@ -47,7 +47,7 @@ contain no tests.
 | `dropumi-protocol` | `tests/handshake.rs` | Noise XX happy path, tampering, replay, prologue mismatch, responder known before msg3, MitM gives independent SAS | 11 | 0 |
 | `dropumi-protocol` | `tests/record.rs` | Bit flips, reordering, replay, truncation, poisoning, independent directions | 7 | 0 |
 | `dropumi-protocol` | `tests/session_props.rs` | proptest: random input to the receiver machine never panics; valid sender traces are accepted | 2 | 0 |
-| `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits, path-free store-error log text | 3 | 0 |
+| `dropumi-application` | `src/lib.rs` (unit) | I/O error mapping, admission limits (one session per fingerprint, whatever the number of session slots), path-free store-error log text | 4 | 0 |
 | `dropumi-application` | `tests/channel.rs` | Handshake over in-memory streams: pinning before msg3, busy and incompatible replies, oversized pre-auth input | 8 | 0 |
 | `dropumi-application` | `tests/failures.rs` | Cancellation on both sides (synchronized on bytes written, not on sleeps), consent timeout, absolute offer deadline, idle timeout, write stall, storage errors not leaked, `discard` on every failure path, candidate order, CompleteAck deadline restarted by each FileAck and still firing without one, trust-store errors (lookup and last-seen update) logged without paths | 13 | 0 |
 | `dropumi-application` | `tests/pairing.rs` | Both confirm, one denies, window closes, cancel while waiting for the peer's result; while the code prompt is open, the peer's "no", Cancel, Error, departure or second PairResult ends it at once, an early "yes" is kept, and an early "yes" followed by a local "no" or timeout stores nothing | 12 | 0 |
@@ -57,9 +57,9 @@ contain no tests.
 | `dropumi-infra` | `tests/txt_props.rs` | proptest: untrusted mDNS TXT records never panic the parser; kept values are bounded and well-formed | 1 | 0 |
 | `dropumi-cli` | `src/main.rs` (unit) | Argument matrix, exit-code table, control parsing and decisions bound to the waiting prompt, terminal prompts that ignore earlier lines, `terminal_safe`, NDJSON escaping, peer display; proptest: `terminal_safe` output is inert for any input | 13 | 0 |
 | `dropumi-cli` | `tests/e2e/main.rs` | Two real `dropumi` processes on loopback | 38 | 1 |
-| **Total** | | | **233** | **1** |
+| **Total** | | | **234** | **1** |
 
-Per crate: domain 37, protocol 65, application 47, infra 33, cli 51 (plus the ignored mDNS test).
+Per crate: domain 37, protocol 65, application 48, infra 33, cli 51 (plus the ignored mDNS test).
 
 End-to-end tests by module (`crates/cli/tests/e2e/`):
 
@@ -206,5 +206,5 @@ applies to loopback traffic is also UNVERIFIED.
 | The sender's CompleteAck deadline is not restarted by ignorable messages | No test: the in-memory receiver cannot send ignorable messages. The code restarts the deadline only when the number of acknowledged files grows, and ignorable messages are capped at 16 in a row. |
 | exFAT / vfat placeholder fallback | Tested only with injected errors, not on a real exFAT or vfat volume. |
 | MitM relay showing different SAS codes end to end (planned tests `channel::mitm_relay_sas_differs`, `security::mitm_relay_sas_codes_differ`) | Not implemented (planned). Covered at the protocol level by `mitm_split_handshakes_sas_independent`, and the pinned-trust case by `security::mitm_relay_rejected_by_pinned_trust`. |
-| Pre-auth slots recover after silent connections (planned test `security::silent_preauth_slots_recover`) | Not implemented (planned). Admission limits are covered by `usecases::admission::tests::admission_limits_global_per_ip_and_session`; the 10 s handshake deadline releases silent connections. |
+| Pre-auth slots recover after silent connections (planned test `security::silent_preauth_slots_recover`) | Not implemented (planned). Admission limits are covered by `usecases::admission::tests::admission_limits_global_per_ip_and_session` and `usecases::admission::tests::one_session_per_fingerprint_regardless_of_session_slots`; the 10 s handshake deadline releases silent connections. |
 | Performance regressions in CI | Not automated. Benchmarks run by hand with `scripts/bench/loopback.sh`. |
