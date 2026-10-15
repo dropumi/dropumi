@@ -66,16 +66,27 @@ fn meta_of(path: &Path, meta: &std::fs::Metadata) -> Result<SourceMeta, SourceEr
         .file_name()
         .map(wire_name_from_local)
         .ok_or_else(|| SourceError::NotAFile(path.display().to_string()))?;
-    let modified = meta
-        .modified()
-        .ok()
+    let local_modified = meta.modified().ok();
+    let modified = local_modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     Ok(SourceMeta {
         name,
         size: meta.len(),
         modified,
+        local_modified,
     })
+}
+
+/// Whether `now` still describes the file `expected` was taken from: the
+/// same size and the same modification time, compared at full resolution
+/// (the wire time has whole seconds only). Where the file system stores
+/// whole seconds, a same-size edit within the same second is not seen
+/// here; the receiver's BLAKE3 check still verifies the bytes sent.
+fn same_file_state(now: &SourceMeta, expected: &SourceMeta) -> bool {
+    now.size == expected.size
+        && now.modified == expected.modified
+        && now.local_modified == expected.local_modified
 }
 
 fn unreadable(path: &Path, e: &std::io::Error) -> SourceError {
@@ -107,7 +118,7 @@ impl FileSource for LocalFileSource {
         let meta = file.metadata().await.map_err(|e| unreadable(path, &e))?;
         self.check_allowed(path, &meta).await?;
         let now = meta_of(path, &meta)?;
-        if now.size != expected.size || now.modified != expected.modified {
+        if !same_file_state(&now, expected) {
             return Err(SourceError::Changed);
         }
         Ok(file)
@@ -115,18 +126,57 @@ impl FileSource for LocalFileSource {
 
     async fn unchanged(&self, path: &Path, expected: &SourceMeta) -> bool {
         match tokio::fs::metadata(path).await {
-            Ok(m) => meta_of(path, &m)
-                .is_ok_and(|now| now.size == expected.size && now.modified == expected.modified),
+            Ok(m) => meta_of(path, &m).is_ok_and(|now| same_file_state(&now, expected)),
             Err(_) => false,
         }
     }
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
+    fn set_mtime(path: &Path, at: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    }
+
+    /// An edit that keeps the size, within the same second as the previous
+    /// write, is still a change (the wire time has whole seconds only).
+    #[tokio::test]
+    async fn same_size_subsecond_edit_detected() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("a.txt");
+        let second = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::write(&path, b"aaaa").unwrap();
+        set_mtime(&path, second + Duration::from_millis(100));
+        let stored = std::fs::metadata(&path).unwrap().modified().unwrap();
+        if stored.duration_since(UNIX_EPOCH).unwrap().subsec_nanos() == 0 {
+            // Skipped: this file system stores whole seconds, so a
+            // same-second edit cannot be told apart by its modification
+            // time (the documented limitation).
+            return;
+        }
+        let source = LocalFileSource::default();
+        let meta = source.meta(&path).await.unwrap();
+
+        std::fs::write(&path, b"bbbb").unwrap();
+        set_mtime(&path, second + Duration::from_millis(600));
+
+        assert!(matches!(
+            source.open(&path, &meta).await,
+            Err(SourceError::Changed)
+        ));
+        assert!(!source.unchanged(&path, &meta).await);
+    }
+
+    #[cfg(unix)]
     struct Fixture {
         _dir: tempfile::TempDir,
         root: std::path::PathBuf,
@@ -134,6 +184,7 @@ mod tests {
         source: LocalFileSource,
     }
 
+    #[cfg(unix)]
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
@@ -150,16 +201,19 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn is_protected<T: std::fmt::Debug>(r: &Result<T, SourceError>) -> bool {
         matches!(r, Err(SourceError::Protected(_)))
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn denied_file_refused_directly() {
         let f = fixture();
         assert!(is_protected(&f.source.meta(&f.key).await));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn denied_file_refused_through_symlink() {
         let f = fixture();
@@ -168,6 +222,7 @@ mod tests {
         assert!(is_protected(&f.source.meta(&link).await));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn denied_file_refused_through_hard_link() {
         let f = fixture();
@@ -176,6 +231,7 @@ mod tests {
         assert!(is_protected(&f.source.meta(&link).await));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn denied_file_refused_when_swapped_in_after_inspection() {
         let f = fixture();
@@ -188,6 +244,7 @@ mod tests {
         assert!(is_protected(&f.source.open(&path, &meta).await));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn other_files_unaffected() {
         let f = fixture();

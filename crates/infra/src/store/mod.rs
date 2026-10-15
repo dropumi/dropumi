@@ -22,5 +22,5 @@ pub use identity_file::{DEVICE_FILE, FileIdentityStore, KEY_FILE, KEY_MAGIC};
 pub use lock::LOCK_FILE;
 pub use trust_file::{TRUST_FILE, TrustFile};
 
-pub(crate) use atomic::write_atomic;
+pub(crate) use atomic::{sync_dir_after_commit, write_atomic};
 pub(crate) use lock::ConfigLock;

@@ -150,9 +150,17 @@ pub enum StoreError {
         /// What is wrong.
         reason: String,
     },
-    /// Other I/O failure.
+    /// Other I/O failure. Nothing was changed.
     #[error("configuration I/O error: {0}")]
     Io(String),
+    /// The change is in place but the configuration directory could not be
+    /// synced, so it may not survive a crash. Returned only after the
+    /// commit point (the rename or the no-clobber link that makes the new
+    /// content visible), so the caller must treat the change as applied:
+    /// re-read the state if it needs it, and warn instead of failing. The
+    /// detail (local path and OS message) is for local display only.
+    #[error("the change was saved but could not be confirmed on disk: {0}")]
+    NotDurable(String),
 }
 
 impl StoreError {
@@ -165,6 +173,7 @@ impl StoreError {
             Self::InsecurePermissions { .. } => "insecure permissions",
             Self::Corrupt { .. } => "corrupt file",
             Self::Io(_) => "I/O error",
+            Self::NotDurable(_) => "saved, directory sync failed",
         }
     }
 }
@@ -204,6 +213,7 @@ mod tests {
                 reason: "bad JSON".into(),
             },
             StoreError::Io(format!("{path}: permission denied")),
+            StoreError::NotDurable(format!("{path}: permission denied")),
         ] {
             assert!(e.to_string().contains(path), "Display keeps the path");
             assert!(!e.kind().contains(path), "{}", e.kind());
@@ -218,6 +228,10 @@ mod tests {
             "corrupt file"
         );
         assert_eq!(StoreError::Io(path.into()).kind(), "I/O error");
+        assert_eq!(
+            StoreError::NotDurable(path.into()).kind(),
+            "saved, directory sync failed"
+        );
     }
 
     #[test]

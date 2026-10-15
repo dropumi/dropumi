@@ -133,6 +133,11 @@ impl CompositeSource {
                     name,
                     size,
                     modified: file.modified(),
+                    // The app reports whole seconds only. A change of an
+                    // app-read document is detected by its reader instead
+                    // (the `changed` flag, set when the bytes read differ
+                    // from the announced size), never by its times.
+                    local_modified: None,
                 },
                 file,
                 changed: Arc::new(AtomicBool::new(false)),

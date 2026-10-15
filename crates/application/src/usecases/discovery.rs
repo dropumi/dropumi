@@ -8,13 +8,28 @@ use std::time::Duration;
 
 use dropumi_domain::discovery::DiscoveredPeer;
 use dropumi_protocol::limits::SUPPORTED_VERSIONS;
+use tokio_util::sync::CancellationToken;
 
 use crate::error::DiscoveryError;
 use crate::events::{AppEvent, EventSink};
 use crate::identity::LocalIdentity;
 use crate::ports::{AdHandle, Advertisement, Discovery};
 
+/// How [`discover`] ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscoverOutcome {
+    /// The browse window ended; one `PeerFound` was emitted per device (the
+    /// list may be empty).
+    Finished(Vec<DiscoveredPeer>),
+    /// Cancelled before the browse window ended; nothing was emitted.
+    Cancelled,
+}
+
 /// Browses for `timeout` and emits one `PeerFound` per device.
+///
+/// Cancelling `cancel` abandons the browse at once and returns
+/// [`DiscoverOutcome::Cancelled`] without emitting anything, however long
+/// `timeout` is.
 ///
 /// # Errors
 /// [`DiscoveryError`] if discovery cannot run.
@@ -22,12 +37,17 @@ pub async fn discover<D: Discovery>(
     discovery: &D,
     timeout: Duration,
     events: &EventSink,
-) -> Result<Vec<DiscoveredPeer>, DiscoveryError> {
-    let peers = discovery.browse(timeout).await?;
+    cancel: CancellationToken,
+) -> Result<DiscoverOutcome, DiscoveryError> {
+    let peers = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return Ok(DiscoverOutcome::Cancelled),
+        r = discovery.browse(timeout) => r?,
+    };
     for p in &peers {
         events.emit(AppEvent::PeerFound(p.clone())).await;
     }
-    Ok(peers)
+    Ok(DiscoverOutcome::Finished(peers))
 }
 
 /// Starts advertising this device on `port`. Failure is reported as an

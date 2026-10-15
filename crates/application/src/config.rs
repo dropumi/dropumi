@@ -55,6 +55,10 @@ impl Default for Timeouts {
 }
 
 /// Connection admission limits for a receiver.
+///
+/// One authenticated session per peer fingerprint is not configurable: protocol
+/// v1 §17.2 fixes it at 1, and [`Admission`](crate::usecases::admission::Admission)
+/// always enforces it (a second session from the same fingerprint gets `BUSY`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdmissionLimits {
     /// Unauthenticated connections in total.
@@ -63,8 +67,6 @@ pub struct AdmissionLimits {
     pub preauth_per_ip: usize,
     /// Authenticated sessions in total.
     pub sessions: usize,
-    /// Active sessions per peer fingerprint.
-    pub per_fingerprint: usize,
 }
 
 impl Default for AdmissionLimits {
@@ -73,7 +75,6 @@ impl Default for AdmissionLimits {
             preauth_global: 16,
             preauth_per_ip: 4,
             sessions: 4,
-            per_fingerprint: 1,
         }
     }
 }

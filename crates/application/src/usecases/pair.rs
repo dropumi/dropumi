@@ -25,6 +25,7 @@ use crate::channel::{
     respond,
 };
 use crate::config::Timeouts;
+use crate::error::StoreError;
 use crate::events::{AppEvent, EventSink, PeerView};
 use crate::identity::LocalIdentity;
 use crate::ports::{
@@ -35,10 +36,18 @@ use crate::ports::{
 /// prompt is open (the prompt's own timeout ends it first).
 const PROMPT_READ_GRACE: Duration = Duration::from_secs(5);
 
+/// The warning shown when the new trust entry is in place but its
+/// durability is unconfirmed (fixed text: no path, nothing local).
+pub const PAIRED_NOT_DURABLE: &str = "the paired device was saved, but the configuration \
+    directory could not be synced, so the pairing may not survive a crash or power loss";
+
 /// How pairing ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairOutcome {
-    /// Both users confirmed; the peer is now trusted.
+    /// Both users confirmed; the peer is now trusted. If the store saved
+    /// the entry but could not sync the configuration directory
+    /// ([`StoreError::NotDurable`]), a [`AppEvent::Warning`] with
+    /// [`PAIRED_NOT_DURABLE`] comes before the `Paired` event.
     Paired(PeerView),
     /// Pairing failed; nothing was stored.
     Failed(TransferError),
@@ -314,8 +323,19 @@ where
         added_at: deps.clock.now(),
         last_seen: Some(deps.clock.now()),
     };
-    if let Err(e) = deps.trust.upsert(device) {
-        return PairOutcome::Failed(e.into());
+    match deps.trust.upsert(device) {
+        Ok(()) => {}
+        // The entry is in place (the store reports this only after its
+        // commit point): the pairing succeeded, only durability is
+        // unconfirmed.
+        Err(StoreError::NotDurable(_)) => {
+            deps.events
+                .emit(AppEvent::Warning {
+                    message: PAIRED_NOT_DURABLE.into(),
+                })
+                .await;
+        }
+        Err(e) => return PairOutcome::Failed(e.into()),
     }
     let paired = PeerView {
         trusted: true,

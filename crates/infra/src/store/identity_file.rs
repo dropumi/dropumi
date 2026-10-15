@@ -13,7 +13,7 @@ use dropumi_protocol::random;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::{ConfigLock, write_atomic};
+use super::{ConfigLock, sync_dir_after_commit, write_atomic};
 use crate::paths::{ensure_private_dir, io_err};
 use crate::perms::{
     NO_GROUP_OTHER_ACCESS, NO_GROUP_OTHER_WRITE, check_config_dir, check_private_file,
@@ -79,7 +79,12 @@ impl FileIdentityStore {
         Ok(Some(StaticSecret::from_bytes(key)))
     }
 
-    /// Creates the key unless another process created it first.
+    /// Creates the key unless another process created it first, then
+    /// fsyncs the directory.
+    ///
+    /// A failed directory fsync is reported as [`StoreError::NotDurable`]
+    /// after the key file is in place: a later load uses that key. Every
+    /// earlier failure is [`StoreError::Io`] and leaves no key file.
     fn create_key(&self) -> Result<StaticSecret, StoreError> {
         let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
         let path = self.key_path();
@@ -93,7 +98,10 @@ impl FileIdentityStore {
         tmp.write_all(&content).map_err(|e| io_err(&path, &e))?;
         tmp.as_file().sync_all().map_err(|e| io_err(&path, &e))?;
         match tmp.into_temp_path().persist_noclobber(&path) {
-            Ok(()) => Ok(secret),
+            Ok(()) => {
+                sync_dir_after_commit(&self.dir)?;
+                Ok(secret)
+            }
             Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => self
                 .load_key()?
                 .ok_or_else(|| StoreError::Io("identity key disappeared".into())),
@@ -142,6 +150,15 @@ impl FileIdentityStore {
     }
 }
 
+/// Logs a first-run write that is in place but whose directory sync
+/// failed. Only the fixed kind is logged, never the path.
+fn warn_not_durable(e: &StoreError) {
+    tracing::warn!(
+        kind = e.kind(),
+        "new identity saved, but the configuration directory could not be synced"
+    );
+}
+
 impl IdentityStore for FileIdentityStore {
     fn load_or_create(&self) -> Result<LocalIdentity, StoreError> {
         check_config_dir(&self.dir)?;
@@ -151,13 +168,28 @@ impl IdentityStore for FileIdentityStore {
         let _lock = ConfigLock::acquire(&self.dir)?;
         let secret = match self.load_key()? {
             Some(s) => s,
-            None => self.create_key()?,
+            None => match self.create_key() {
+                Ok(s) => s,
+                // The key file is in place; only its directory entry's
+                // durability is unconfirmed. Start with it.
+                Err(e @ StoreError::NotDurable(_)) => {
+                    warn_not_durable(&e);
+                    self.load_key()?
+                        .ok_or_else(|| StoreError::Io("identity key disappeared".into()))?
+                }
+                Err(e) => return Err(e),
+            },
         };
         let name = match self.load_name()? {
             Some(n) => n,
             None => {
                 let n = Self::default_name();
-                self.save_name(&n)?;
+                match self.save_name(&n) {
+                    Ok(()) => {}
+                    // device.json is in place, as for the key above.
+                    Err(e @ StoreError::NotDurable(_)) => warn_not_durable(&e),
+                    Err(e) => return Err(e),
+                }
                 n
             }
         };
@@ -229,6 +261,53 @@ mod tests {
             store.load_or_create(),
             Err(StoreError::InsecurePermissions { .. })
         ));
+    }
+
+    /// Creating the key syncs the directory and reports a failed sync
+    /// (write and search, no read) as `NotDurable`, after the key file is
+    /// in place.
+    #[cfg(unix)]
+    #[test]
+    fn key_dir_sync_failure_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.create_key();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            matches!(result, Err(StoreError::NotDurable(_))),
+            "{result:?}"
+        );
+        assert!(base.path().join(KEY_FILE).exists());
+    }
+
+    /// Regression: on first run, a key (and device name) saved without a
+    /// confirmed directory sync is in place, so startup goes on with that
+    /// identity instead of failing.
+    #[cfg(unix)]
+    #[test]
+    fn first_run_without_dir_sync_loads_the_new_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.load_or_create();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let created = result.unwrap();
+        let again = store.load_or_create().unwrap();
+        assert_eq!(again.fingerprint(), created.fingerprint());
+        assert_eq!(again.name(), created.name());
     }
 
     #[test]

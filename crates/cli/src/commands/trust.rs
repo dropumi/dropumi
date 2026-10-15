@@ -6,7 +6,7 @@ use dropumi_domain::device::DeviceName;
 use dropumi_domain::identity::Fingerprint;
 use dropumi_infra::clock::SystemClock;
 
-use super::Ctx;
+use super::{Ctx, settle};
 use crate::args::TrustCmd;
 use crate::exit::code;
 
@@ -28,19 +28,21 @@ pub fn run(cmd: TrustCmd, ctx: &Ctx) -> u8 {
             let Ok(fp) = Fingerprint::parse_full(&fingerprint) else {
                 return ctx.usage("expected the full 52-character fingerprint (A-Z, 2-7)");
             };
-            match uc::add_manual(
+            let added = uc::add_manual(
                 &trust,
                 &SystemClock,
                 fp,
                 name.as_deref().map(DeviceName::sanitize),
-            ) {
-                Ok(_) => match uc::list(&trust) {
-                    Ok(list) => {
-                        ctx.out.trusted(&list);
-                        code::OK
+            )
+            .and_then(|_| uc::list(&trust));
+            match settle(added, || uc::list(&trust)) {
+                Ok((list, warning)) => {
+                    if let Some(w) = &warning {
+                        ctx.out.warning(w);
                     }
-                    Err(e) => ctx.store_error(&e),
-                },
+                    ctx.out.trusted(&list);
+                    code::OK
+                }
                 Err(e) => ctx.store_error(&e),
             }
         }
@@ -48,16 +50,22 @@ pub fn run(cmd: TrustCmd, ctx: &Ctx) -> u8 {
             let Ok(fp) = Fingerprint::parse_full(&fingerprint) else {
                 return ctx.usage("expected the full 52-character fingerprint (A-Z, 2-7)");
             };
-            match uc::remove(&trust, &fp) {
-                Ok(existed) => {
+            // After a removal saved without a confirmed directory sync the
+            // removal itself is the applied state; whether the device was
+            // trusted before is not known then (`existed` is null).
+            match settle(uc::remove(&trust, &fp).map(Some), || Ok(None)) {
+                Ok((existed, warning)) => {
+                    if let Some(w) = &warning {
+                        ctx.out.warning(w);
+                    }
                     ctx.out.event(
                         "trust_removed",
                         serde_json::json!({"fingerprint": fp.to_full(), "existed": existed}),
                     );
-                    ctx.out.human(if existed {
-                        "Removed."
-                    } else {
-                        "That device was not trusted."
+                    ctx.out.human(match existed {
+                        Some(true) => "Removed.",
+                        Some(false) => "That device was not trusted.",
+                        None => "That device is no longer trusted.",
                     });
                     code::OK
                 }

@@ -182,6 +182,26 @@ impl Discovery for StaticDiscovery {
     }
 }
 
+/// Discovery whose browse never completes. `started` is notified when a
+/// browse begins, so tests can act while it is pending without sleeping.
+#[derive(Clone, Default)]
+pub struct PendingDiscovery {
+    pub started: Arc<tokio::sync::Notify>,
+}
+
+impl Discovery for PendingDiscovery {
+    type Handle = NoAd;
+
+    async fn advertise(&self, _ad: Advertisement) -> Result<NoAd, DiscoveryError> {
+        Ok(NoAd)
+    }
+
+    async fn browse(&self, _t: Duration) -> Result<Vec<DiscoveredPeer>, DiscoveryError> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
+}
+
 // ------------------------------------------------------------------ source
 
 /// A reader that yields `limit` bytes and then never completes.
@@ -265,6 +285,7 @@ impl FileSource for MemSource {
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             size: data.len() as u64,
             modified: Some(1),
+            local_modified: None,
         })
     }
 
@@ -411,6 +432,9 @@ pub struct MemTrust {
     pub fail_get: Arc<AtomicBool>,
     /// `touch` fails.
     pub fail_touch: Arc<AtomicBool>,
+    /// `upsert` stores the entry, then reports `NotDurable` (a directory
+    /// sync that failed after the commit point).
+    pub upsert_not_durable: Arc<AtomicBool>,
 }
 
 impl MemTrust {
@@ -480,7 +504,31 @@ impl TrustStore for MemTrust {
         let mut v = self.devices.lock().unwrap();
         v.retain(|d| d.fingerprint != device.fingerprint);
         v.push(device);
+        if self.upsert_not_durable.load(Ordering::SeqCst) {
+            return Err(StoreError::NotDurable(format!(
+                "{BROKEN_TRUST_PATH}: directory sync failed"
+            )));
+        }
         Ok(())
+    }
+
+    /// Merges under the mutex, like the real store under its lock; never
+    /// consults `fail_get`.
+    fn upsert_with<F: FnOnce(Option<&TrustedDevice>) -> TrustedDevice>(
+        &self,
+        fp: &Fingerprint,
+        merge: F,
+    ) -> Result<TrustedDevice, StoreError> {
+        let mut v = self.devices.lock().unwrap();
+        let device = merge(v.iter().find(|d| &d.fingerprint == fp));
+        if &device.fingerprint != fp {
+            return Err(StoreError::Io(
+                "merged trust entry has a different fingerprint".into(),
+            ));
+        }
+        v.retain(|d| &d.fingerprint != fp);
+        v.push(device.clone());
+        Ok(device)
     }
 
     fn remove(&self, fp: &Fingerprint) -> Result<bool, StoreError> {
