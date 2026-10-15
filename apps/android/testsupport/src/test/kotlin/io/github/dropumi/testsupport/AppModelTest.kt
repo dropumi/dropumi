@@ -25,6 +25,9 @@ import io.github.dropumi.core.discovery.NsdAdapterCore
 import io.github.dropumi.core.discovery.NsdPort
 import io.github.dropumi.core.discovery.NsdService
 import io.github.dropumi.core.files.Documents
+import io.github.dropumi.core.files.ExportResult
+import io.github.dropumi.core.files.ReceivedExporter
+import io.github.dropumi.core.files.ReceivedFile
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.ConfigProblem
 import io.github.dropumi.ffi.Direction
@@ -773,5 +776,104 @@ class AppModelTest {
         s.model.apply(listOf(NodeEvent.TransferFinished(1u, Direction.OUTGOING, Fixtures.result(TransferStatus.COMPLETED))))
         advanceUntilIdle()
         assertFalse(folder.exists())
+    }
+
+    // Android: received files leave only on request (ADR-0013 D4)
+
+    private class FakeExporter : ReceivedExporter {
+        val saved = mutableListOf<List<ReceivedFile>>()
+        var result: ExportResult = ExportResult.Saved(listOf("content://media/external/downloads/1"))
+        override val savesToDownloads = true
+
+        override fun saveToDownloads(files: List<ReceivedFile>): ExportResult {
+            saved += files
+            return result
+        }
+
+        override fun saveToFolder(treeUri: String, files: List<ReceivedFile>): ExportResult = saveToDownloads(files)
+    }
+
+    private fun TestScope.makeModel(exporter: ReceivedExporter, receiveDir: File): Setup {
+        val root = Files.createTempDirectory("dropumi-appmodel").toFile().also(roots::add)
+        val core = FakeCoreClient()
+        val model = AppModel(
+            core,
+            MemorySettingsStore(sdkInt = 36),
+            HistoryStore(File(root, "app/history.json")),
+            modelScope(),
+            StandardTestDispatcher(testScheduler),
+            clock = { testScheduler.currentTime },
+            receiveDir = receiveDir,
+            exporter = exporter,
+        )
+        return Setup(model, core, root)
+    }
+
+    /** A received transfer of a.txt (10 bytes), as the core reports it. */
+    private fun AppModel.receive(receiveDir: File): HistoryEntry {
+        File(receiveDir, "a.txt").writeBytes(ByteArray(10))
+        apply(
+            listOf(
+                NodeEvent.OfferReceived("aa", Fixtures.peer(trusted = true, alias = "Studio Mac"), 1u, 10u),
+                NodeEvent.FileSaved("aa", 0u, "a.txt", 10u, "00"),
+                NodeEvent.TransferFinished(null, Direction.INCOMING, Fixtures.result(TransferStatus.COMPLETED)),
+            ),
+        )
+        return state.value.history.first()
+    }
+
+    @Test
+    fun receivedSizesAreKeptForSave() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val s = makeModel(FakeExporter(), dir)
+        val entry = s.model.receive(dir)
+        assertEquals(listOf("a.txt"), entry.savedAs)
+        assertEquals(listOf(10uL), entry.savedSizes)
+    }
+
+    /** The first Save says who else can see saved files; Save never deletes the internal copy. */
+    @Test
+    fun saveShowsTheDisclosureOnceAndKeepsTheInternalCopy() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val exporter = FakeExporter()
+        val s = makeModel(exporter, dir)
+        val entry = s.model.receive(dir)
+        s.model.saveToDownloads(entry)
+        assertEquals(listOf(listOf(ReceivedFile("a.txt", 10))), exporter.saved)
+        assertEquals("Saved files can be opened by other apps that can see your Downloads.", s.model.state.value.banner?.message)
+        s.model.saveToDownloads(entry)
+        assertEquals("1 file saved.", s.model.state.value.banner?.message)
+        assertTrue(File(dir, "a.txt").exists())
+        exporter.result = ExportResult.Failed(ExportResult.Reason.CHANGED, 0)
+        s.model.saveToDownloads(entry)
+        assertEquals("Not saved", s.model.state.value.banner?.title)
+    }
+
+    @Test
+    fun saveRefusesFilesWithoutReportedSizes() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val exporter = FakeExporter()
+        val s = makeModel(exporter, dir)
+        val entry = s.model.receive(dir).copy(savedSizes = emptyList())
+        s.model.saveToDownloads(entry)
+        assertTrue(exporter.saved.isEmpty())
+        assertEquals("Not saved", s.model.state.value.banner?.title)
+        s.model.saveToDownloads(entry.copy(savedAs = listOf("../escape"), savedSizes = listOf(1u)))
+        assertTrue(exporter.saved.isEmpty())
+    }
+
+    @Test
+    fun deleteRemovesOnlyTheTransfersInternalCopies() = runTest {
+        val dir = Files.createTempDirectory("received").toFile().also(roots::add)
+        val s = makeModel(FakeExporter(), dir)
+        val other = File(dir, "other.txt").also { it.writeText("keep") }
+        val outside = File(dir.parentFile, "outside-${dir.name}.txt").also { it.writeText("keep") }
+        val entry = s.model.receive(dir)
+        s.model.deleteReceived(entry.copy(savedAs = entry.savedAs + "../${outside.name}"))
+        assertFalse(File(dir, "a.txt").exists())
+        assertTrue(other.exists())
+        assertTrue("a name that is not a single component is left alone", outside.exists())
+        outside.delete()
+        assertTrue(s.model.state.value.history.first().savedAs.isEmpty())
     }
 }

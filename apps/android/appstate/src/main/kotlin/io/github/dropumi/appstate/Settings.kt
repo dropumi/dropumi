@@ -70,6 +70,9 @@ interface SettingsStore {
     var autoAcceptPaired: Boolean
     var onboarded: Boolean
     var appearance: Appearance
+
+    /** Whether the Save disclosure ("other apps that can see your Downloads") was shown. */
+    var saveNoteShown: Boolean
 }
 
 /** Settings held in memory, with the same restore rules (tests and test applications). */
@@ -85,6 +88,7 @@ class MemorySettingsStore(private val sdkInt: Int) : SettingsStore {
 
     override var autoAcceptPaired: Boolean = false
     override var onboarded: Boolean = false
+    override var saveNoteShown: Boolean = false
 
     override var appearance: Appearance
         get() = Appearance.restored(storedAppearance, sdkInt)

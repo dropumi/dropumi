@@ -9,7 +9,9 @@ package io.github.dropumi
 
 import android.app.Application
 import android.os.Build
+import android.os.Environment
 import android.os.StatFs
+import android.webkit.MimeTypeMap
 import io.github.dropumi.appstate.AppLoader
 import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.HistoryStore
@@ -20,6 +22,7 @@ import io.github.dropumi.core.discovery.LocalAddresses
 import io.github.dropumi.core.discovery.NsdDiscovery
 import io.github.dropumi.core.files.AndroidDocumentSource
 import io.github.dropumi.core.files.AndroidDocuments
+import io.github.dropumi.core.files.ReceivedExport
 import io.github.dropumi.core.files.StagingCopy
 import io.github.dropumi.core.files.UriGuard
 import kotlinx.coroutines.CoroutineScope
@@ -53,10 +56,22 @@ class DropumiApplication : Application(), AppGraphHost {
                 localAddresses = addresses::ipv4,
                 documents = AndroidDocuments(source, guard, staging),
                 pendingShare = pendingShare,
+                receiveDir = paths.receiveDir,
+                exporter = ReceivedExport(
+                    contentResolver,
+                    paths.receiveDir,
+                    sharedFreeSpace = ::sharedStorageFreeBytes,
+                    mimeLookup = { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) },
+                ),
             )
         }
-        return AppGraph(loader, pendingShare, guard)
+        return AppGraph(loader, pendingShare, guard, ReceivedFileActions(this, paths.receiveDir))
     }
+
+    /** Free bytes in shared storage, where Save writes (API 29+). */
+    private fun sharedStorageFreeBytes(): Long =
+        @Suppress("DEPRECATION")
+        StatFs(Environment.getExternalStorageDirectory().path).availableBytes
 
     private companion object {
         const val SETTINGS_FILE = "settings"

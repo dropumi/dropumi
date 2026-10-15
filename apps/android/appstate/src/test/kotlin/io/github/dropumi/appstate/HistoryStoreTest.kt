@@ -27,6 +27,7 @@ class HistoryStoreTest {
         summary = "1 of 2 files saved",
         finishedAtMs = 1_760_000_000_000,
         savedAs = listOf("a (1).txt"),
+        savedSizes = listOf(ULong.MAX_VALUE),
     )
 
     /** Peer and file names are kept verbatim, whatever they contain. */
@@ -65,5 +66,18 @@ class HistoryStoreTest {
         val store = HistoryStore(File(root, "app/history.json"))
         repeat(3) { assertTrue(store.save(listOf(entry("$it")))) }
         assertEquals(listOf("history.json"), File(root, "app").list()?.toList())
+    }
+
+    /** An entry written before sizes were kept loads without them (and so cannot be saved). */
+    @Test
+    fun entriesWithoutSizesLoadWithNone() {
+        val file = File(root, "history.json")
+        file.writeText(
+            """{"version":1,"entries":[{"id":"1","outgoing":false,"peerName":"p","peerVerified":true,""" +
+                """"fileNames":["a"],"totalBytes":1,"outcome":"COMPLETED","summary":"s","finishedAtMs":2,"savedAs":["a"]}]}""",
+        )
+        val loaded = HistoryStore(file).load().single()
+        assertEquals(listOf("a"), loaded.savedAs)
+        assertEquals(emptyList<ULong>(), loaded.savedSizes)
     }
 }

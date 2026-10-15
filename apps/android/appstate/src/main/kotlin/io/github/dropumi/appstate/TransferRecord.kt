@@ -37,6 +37,8 @@ data class FileResult(
     val savedAs: String?,
     /** For received files: the BLAKE3 digest (hex). */
     val blake3: String?,
+    /** For received files: the size the core verified and saved. */
+    val size: ULong? = null,
 )
 
 /** One transfer, as its card shows it. */

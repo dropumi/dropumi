@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- The FileProvider shares from the received folder only (ADR-0013 D4/D6):
+     never noBackupFilesDir, where the configuration and history live. -->
+<paths>
+    <files-path
+        name="received"
+        path="received/" />
+</paths>

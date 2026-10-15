@@ -22,4 +22,6 @@ class AppGraph(
     val pendingShare: PendingShare,
     /** UriGuard, for ShareActivity's early filter (every read runs it again). */
     val uriGuard: DocumentGuard,
+    /** Open, Share and the Save folder picker for received files. */
+    val receivedFiles: ReceivedFileActions,
 )

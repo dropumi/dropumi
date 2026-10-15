@@ -23,6 +23,10 @@ import io.github.dropumi.core.discovery.AdvertiseState
 import io.github.dropumi.core.discovery.Advertising
 import io.github.dropumi.core.files.DocumentException
 import io.github.dropumi.core.files.Documents
+import io.github.dropumi.core.files.ExportResult
+import io.github.dropumi.core.files.ExportRules
+import io.github.dropumi.core.files.ReceivedExporter
+import io.github.dropumi.core.files.ReceivedFile
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
@@ -174,6 +178,8 @@ val Prompt.promptId: ULong
  * @param documents reads content:// documents through UriGuard; without it
  *   documents are refused.
  * @param pendingShare items the share target handed over.
+ * @param receiveDir the app-private folder the core saves received files in.
+ * @param exporter saves received files to shared storage, on request only.
  */
 class AppModel(
     private val core: CoreClient,
@@ -186,6 +192,8 @@ class AppModel(
     private val localAddresses: () -> List<String> = { emptyList() },
     private val documents: Documents? = null,
     private val pendingShare: PendingShare = PendingShare(),
+    private val receiveDir: File? = null,
+    private val exporter: ReceivedExporter? = null,
 ) {
     private val _state = MutableStateFlow(
         AppState(
@@ -703,6 +711,74 @@ class AppModel(
         saveHistory()
     }
 
+    // Received files (ADR-0013 D4): they leave the app only on request.
+
+    /** Whether Save goes straight to Downloads (API 29+); otherwise the UI asks for a folder first. */
+    val savesToDownloads: Boolean get() = exporter?.savesToDownloads == true
+
+    /** Saves a finished transfer's received files to Downloads/Dropumi (API 29+). */
+    suspend fun saveToDownloads(entry: HistoryEntry) =
+        save(entry, "Saved to Downloads") { exporter, files -> exporter.saveToDownloads(files) }
+
+    /** Saves a finished transfer's received files into the folder the user picked (API 26-28). */
+    suspend fun saveToFolder(entry: HistoryEntry, treeUri: String) =
+        save(entry, "Saved") { exporter, files -> exporter.saveToFolder(treeUri, files) }
+
+    private suspend fun save(
+        entry: HistoryEntry,
+        title: String,
+        export: (ReceivedExporter, List<ReceivedFile>) -> ExportResult,
+    ) {
+        val exporter = exporter ?: return
+        val files = receivedFiles(entry)
+        if (files == null) {
+            update { copy(banner = Banner(Banner.Style.WARNING, "Not saved", "These files can't be checked, so they were not saved.")) }
+            return
+        }
+        when (val result = work { export(exporter, files) }) {
+            is ExportResult.Saved -> {
+                // The first time, say who else can see saved files (G45).
+                val message = if (!settings.saveNoteShown) {
+                    settings.saveNoteShown = true
+                    SAVE_NOTE
+                } else {
+                    Formatting.fileCount(result.uris.size) + " saved."
+                }
+                update { copy(banner = Banner(Banner.Style.INFO, title, message)) }
+            }
+            is ExportResult.Failed -> {
+                val why = when (result.reason) {
+                    ExportResult.Reason.NOT_A_RECEIVED_FILE -> "The file is no longer in Dropumi."
+                    ExportResult.Reason.CHANGED -> "The file changed after it was received, so it was not saved."
+                    ExportResult.Reason.NO_SPACE -> "There is not enough free space."
+                    ExportResult.Reason.WRITE_FAILED -> "The file could not be written."
+                }
+                val done = if (result.saved > 0) " ${result.saved} of ${files.size} files were saved." else ""
+                update { copy(banner = Banner(Banner.Style.WARNING, "Not saved", why + done)) }
+            }
+        }
+    }
+
+    /** The entry's received files with their reported sizes; null if they cannot be checked. */
+    private fun receivedFiles(entry: HistoryEntry): List<ReceivedFile>? {
+        if (entry.outgoing || entry.savedAs.isEmpty() || entry.savedSizes.size != entry.savedAs.size) return null
+        return entry.savedAs.zip(entry.savedSizes).map { (name, size) ->
+            if (!ExportRules.isSingleName(name) || size > Long.MAX_VALUE.toULong()) return null
+            ReceivedFile(name, size.toLong())
+        }
+    }
+
+    /** Deletes a finished transfer's internal copies (after the UI's confirmation). Save never does. */
+    suspend fun deleteReceived(entry: HistoryEntry) {
+        val dir = receiveDir ?: return
+        val names = entry.savedAs.filter(ExportRules::isSingleName)
+        work { names.forEach { File(dir, it).delete() } }
+        update {
+            copy(history = history.map { if (it.id == entry.id) it.copy(savedAs = emptyList(), savedSizes = emptyList()) else it })
+        }
+        saveHistory()
+    }
+
     // Events
 
     /** Applies a batch of core events. */
@@ -749,7 +825,7 @@ class AppModel(
                 copy(fileResults = fileResults + FileResult(event.index, event.status, null, null))
             }
             is NodeEvent.FileSaved -> updateRecord(incoming(event.transferId)) {
-                copy(fileResults = fileResults + FileResult(event.index, FileStatus.STORED, event.savedAs, event.blake3))
+                copy(fileResults = fileResults + FileResult(event.index, FileStatus.STORED, event.savedAs, event.blake3, event.size))
             }
             is NodeEvent.FileFailed -> updateRecord(incoming(event.transferId)) {
                 copy(fileResults = fileResults + FileResult(event.index, event.status, null, null))
@@ -898,7 +974,8 @@ class AppModel(
             deleteFolders(it.stagedFolders)
         }
         val label = done.peerLabel
-        val savedAs = done.fileResults.mapNotNull { it.savedAs }
+        val stored = done.fileResults.filter { it.savedAs != null }
+        val savedAs = stored.mapNotNull { it.savedAs }
         val entry = HistoryEntry(
             id = "${record.id}-${now / 1000}",
             outgoing = record.direction == Direction.OUTGOING,
@@ -910,6 +987,7 @@ class AppModel(
             summary = ErrorCatalog.summary(result, record.direction),
             finishedAtMs = now,
             savedAs = savedAs,
+            savedSizes = if (stored.all { it.size != null }) stored.mapNotNull { it.size } else emptyList(),
         )
         update {
             copy(
@@ -1010,6 +1088,7 @@ class AppModel(
         const val PAIRING_WINDOW_MINUTES = 5u
         const val UNPAIRED_NOTICE_INTERVAL_MS = 60_000L
         const val NOT_AUTHORIZED = "not_authorized"
+        const val SAVE_NOTE = "Saved files can be opened by other apps that can see your Downloads."
 
         fun compactFingerprint(value: String): String = value.uppercase().filter { it.isLetterOrDigit() }
 

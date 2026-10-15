@@ -56,7 +56,12 @@ class TestApplication : Application(), AppGraphHost {
                 pendingShare = pendingShare,
             )
         }
-        return AppGraph(loader, pendingShare, UriGuard(this, listOf(paths.configDir, paths.appDataDir)))
+        return AppGraph(
+            loader,
+            pendingShare,
+            UriGuard(this, listOf(paths.configDir, paths.appDataDir)),
+            ReceivedFileActions(this, paths.receiveDir),
+        )
     }
 
     companion object {

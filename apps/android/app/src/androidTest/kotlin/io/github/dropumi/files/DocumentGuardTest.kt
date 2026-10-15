@@ -101,15 +101,12 @@ class DocumentGuardTest {
     @Test
     fun uriGuardSchemeCheckedAtOpen() {
         val recording = Recording(source)
-        val own = targetContext.packageName + ".androidx-startup"
+        val fileProvider = targetContext.packageName + ".fileprovider"
+        val startup = targetContext.packageName + ".androidx-startup"
         val readable = File(core.root, "readable.txt").apply { writeText("not to be sent") }
-        val refused = listOf(
-            "file://${readable.path}",
-            "content://$own/x",
-            "content://0@$own/x",
-            "content://$own:1/x",
-            "content://0@$own:1/x",
-        )
+        val refused = listOf("file://${readable.path}") + listOf(fileProvider, startup).flatMap { own ->
+            listOf("content://$own/received/x", "content://0@$own/received/x", "content://$own:1/x", "content://0@$own:1/x")
+        }
         for (uri in refused) {
             assertTrue(uri, ContentUriFile.create(recording, uri, guard) is ContentUriFile.Created.Refused)
             assertTrue(uri, stagingFailure(staging(recording).start(uri, "x")) is StagingCopy.Failure.Refused)

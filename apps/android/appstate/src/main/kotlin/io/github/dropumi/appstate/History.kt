@@ -26,6 +26,8 @@ data class HistoryEntry(
     val finishedAtMs: Long,
     /** For received files: their final names in the receive folder. */
     val savedAs: List<String>,
+    /** For received files: the sizes the core reported, in the order of [savedAs]. */
+    val savedSizes: List<ULong> = emptyList(),
 ) {
     enum class Outcome { COMPLETED, PARTIAL, REJECTED, CANCELLED, FAILED }
 
@@ -95,6 +97,7 @@ class HistoryStore(val file: File, val limit: Int = 200) {
                         "summary" to it.summary,
                         "finishedAtMs" to it.finishedAtMs,
                         "savedAs" to it.savedAs,
+                        "savedSizes" to it.savedSizes,
                     )
                 },
             ),
@@ -111,6 +114,8 @@ class HistoryStore(val file: File, val limit: Int = 200) {
         private fun entry(map: Map<*, *>): HistoryEntry? {
             fun strings(key: String): List<String>? =
                 (map[key] as? List<*>)?.map { it as? String ?: return null }
+            fun sizes(key: String): List<ULong>? =
+                (map[key] as? List<*>)?.map { (it as? Long)?.takeIf { v -> v >= 0 }?.toULong() ?: (it as? String)?.toULongOrNull() ?: return null }
             val totalBytes = when (val v = map["totalBytes"]) {
                 is Long -> if (v >= 0) v.toULong() else return null
                 is String -> v.toULongOrNull() ?: return null
@@ -127,6 +132,8 @@ class HistoryStore(val file: File, val limit: Int = 200) {
                 summary = map["summary"] as? String ?: return null,
                 finishedAtMs = map["finishedAtMs"] as? Long ?: return null,
                 savedAs = strings("savedAs") ?: return null,
+                // Older entries have no sizes: their files cannot be saved (Save needs them).
+                savedSizes = if (map.containsKey("savedSizes")) sizes("savedSizes") ?: return null else emptyList(),
             )
         }
     }

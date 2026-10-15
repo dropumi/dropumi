@@ -51,6 +51,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Open and Share of received files (ADR-0013 D4): not exported; it
+             grants read access to one received file per explicit action. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- The merged manifest stays network-silent (ADR-0013 D1). EmojiCompat's
              initializer could ask the Play Services font provider to download a
              font; it is removed, so emoji use the system font. -->
