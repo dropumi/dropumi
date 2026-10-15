@@ -19,7 +19,7 @@ export default defineConfig({
 			favicon: '/favicon.svg',
 			customCss: ['./src/styles/theme.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dropumi/dropumi' }],
-			editLink: { baseUrl: 'https://github.com/dropumi/dropumi/edit/main/website/' },
+			editLink: { baseUrl: process.env.ASTRO_EDIT_URL ?? 'https://github.com/dropumi/dropumi.github.io/edit/main/' },
 			sidebar: [
 				{ label: 'Getting started', items: ['docs', 'docs/install', 'docs/send-a-file', 'docs/receive-a-file'] },
 				{ label: 'Using dropumi', items: ['docs/visibility', 'docs/transfers', 'docs/settings'] },
