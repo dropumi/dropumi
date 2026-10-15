@@ -284,6 +284,9 @@ impl DropumiNode {
     ///
     /// # Errors
     /// `Busy` while receiving or while an operation runs; storage errors.
+    /// If a change saved without a confirmed directory sync cannot be read
+    /// back, the `Warning` is still published and the call fails with a
+    /// `Config` error whose detail says the change was saved.
     pub fn set_device_name(&self, name: String) -> Result<IdentityInfo, DropumiError> {
         self.engine.check_open()?;
         self.engine.check_quiet()?;
@@ -304,6 +307,9 @@ impl DropumiNode {
     ///
     /// # Errors
     /// `Busy` while receiving or while an operation runs; storage errors.
+    /// If a change saved without a confirmed directory sync cannot be read
+    /// back, the `Warning` is still published and the call fails with a
+    /// `Config` error whose detail says the change was saved.
     pub fn reset_identity(&self) -> Result<IdentityInfo, DropumiError> {
         self.engine.check_open()?;
         self.engine.check_quiet()?;
@@ -334,6 +340,9 @@ impl DropumiNode {
     ///
     /// # Errors
     /// An invalid fingerprint, or storage errors.
+    /// If a change saved without a confirmed directory sync cannot be read
+    /// back, the `Warning` is still published and the call fails with a
+    /// `Config` error whose detail says the change was saved.
     pub fn trust_fingerprint(
         &self,
         fingerprint: String,
@@ -366,6 +375,9 @@ impl DropumiNode {
     ///
     /// # Errors
     /// An invalid fingerprint, or storage errors.
+    /// If a change saved without a confirmed directory sync cannot be read
+    /// back, the `Warning` is still published and the call fails with a
+    /// `Config` error whose detail says the change was saved.
     pub fn rename_trusted(&self, fingerprint: String, alias: String) -> Result<bool, DropumiError> {
         self.engine.check_open()?;
         let fp = parse_full(&fingerprint)?;
@@ -930,20 +942,23 @@ impl Engine {
     }
 
     /// The result of a configuration write ([`settle`]). A change saved
-    /// without a confirmed directory sync is applied: the re-read state is
-    /// returned and a `Warning` event with fixed text is published.
+    /// without a confirmed directory sync is applied: a `Warning` event with
+    /// fixed text is published first, then the re-read state is returned. If
+    /// the re-read fails, the `Config` error says the change was saved.
     fn applied<T>(
         &self,
         written: Result<T, StoreError>,
         reread: impl FnOnce() -> Result<T, StoreError>,
     ) -> Result<T, DropumiError> {
-        let (state, warning) = settle(written, reread)?;
-        if let Some(message) = warning {
-            self.mailbox.push(NodeEvent::Warning {
-                message: message.to_owned(),
-            });
-        }
-        Ok(state)
+        settle(
+            written,
+            |message| {
+                self.mailbox.push(NodeEvent::Warning {
+                    message: message.to_owned(),
+                });
+            },
+            reread,
+        )
     }
 
     /// Dropumi's own configuration files, which are never sent.

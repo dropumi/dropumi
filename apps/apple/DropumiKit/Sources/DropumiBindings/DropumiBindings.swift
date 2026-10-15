@@ -876,6 +876,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     func renameTrusted(fingerprint: String, alias: String) throws  -> Bool
     
@@ -888,6 +891,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     func resetIdentity() throws  -> IdentityInfo
     
@@ -908,6 +914,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     func setDeviceName(name: String) throws  -> IdentityInfo
     
@@ -977,6 +986,9 @@ public protocol DropumiNodeProtocol: AnyObject, Sendable {
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     func trustFingerprint(fingerprint: String, alias: String?) throws  -> TrustedDeviceInfo
     
@@ -1234,6 +1246,9 @@ open func pendingPrompts() -> [Prompt]  {
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
 open func renameTrusted(fingerprint: String, alias: String)throws  -> Bool  {
     return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeDropumiError_lift) {
@@ -1255,6 +1270,9 @@ open func renameTrusted(fingerprint: String, alias: String)throws  -> Bool  {
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
 open func resetIdentity()throws  -> IdentityInfo  {
     return try  FfiConverterTypeIdentityInfo_lift(try rustCallWithError(FfiConverterTypeDropumiError_lift) {
@@ -1292,6 +1310,9 @@ open func send(target: SendTarget, items: [SendItem], options: SendOptions)throw
      *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
 open func setDeviceName(name: String)throws  -> IdentityInfo  {
     return try  FfiConverterTypeIdentityInfo_lift(try rustCallWithError(FfiConverterTypeDropumiError_lift) {
@@ -1423,6 +1444,9 @@ open func stopReceiving()  {try! rustCall() {
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
 open func trustFingerprint(fingerprint: String, alias: String?)throws  -> TrustedDeviceInfo  {
     return try  FfiConverterTypeTrustedDeviceInfo_lift(try rustCallWithError(FfiConverterTypeDropumiError_lift) {
@@ -4893,7 +4917,9 @@ enum DropumiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
          */detail: String
     )
     /**
-     * The local configuration cannot be used.
+     * The local configuration cannot be used. Nothing was changed, except
+     * when the detail starts with "the change was saved, but it could not
+     * be read back": then a configuration change is in place.
      */
     case Config(
         /**
@@ -7657,16 +7683,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_pending_prompts() != 54466) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() != 44601) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() != 26401) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() != 16042) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() != 35363) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_send() != 40109) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() != 3861) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() != 61093) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_set_receive_policy() != 206) {
@@ -7693,7 +7719,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_stop_receiving() != 13397) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() != 12960) {
+    if (uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() != 63969) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dropumi_ffi_checksum_method_dropuminode_trusted_devices() != 1585) {
