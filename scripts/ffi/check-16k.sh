@@ -3,7 +3,8 @@
 #
 # Checks Android native libraries for 16 KB page alignment: every LOAD
 # segment of every .so must be aligned to at least 0x4000. For an APK, also
-# checks the zip alignment of uncompressed libraries (zipalign -P 16).
+# checks the zip alignment of uncompressed libraries (zipalign -P 16). A
+# directory that contains no .so file fails: a check of nothing is not a pass.
 #
 # Usage: bash scripts/ffi/check-16k.sh <file.so | file.apk | directory>...
 #
@@ -58,7 +59,16 @@ check_so() {
 
 for arg in "$@"; do
   if [[ -d "${arg}" ]]; then
-    while IFS= read -r so; do check_so "${so}"; done < <(find "${arg}" -name '*.so' | sort)
+    # Process substitution, not a pipe, so the counter survives the loop.
+    libs=0
+    while IFS= read -r so; do
+      libs=$((libs + 1))
+      check_so "${so}"
+    done < <(find "${arg}" -name '*.so' | sort)
+    if [[ "${libs}" -eq 0 ]]; then
+      echo "FAIL ${arg}: no .so files found"
+      status=1
+    fi
   elif [[ "${arg}" == *.apk ]]; then
     tmp="$(mktemp -d)"
     unzip -q -o "${arg}" 'lib/*' -d "${tmp}"

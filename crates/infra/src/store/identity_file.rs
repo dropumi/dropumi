@@ -13,7 +13,7 @@ use dropumi_protocol::random;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::{ConfigLock, write_atomic};
+use super::{ConfigLock, sync_dir_after_commit, write_atomic};
 use crate::paths::{ensure_private_dir, io_err};
 use crate::perms::{
     NO_GROUP_OTHER_ACCESS, NO_GROUP_OTHER_WRITE, check_config_dir, check_private_file,
@@ -79,7 +79,12 @@ impl FileIdentityStore {
         Ok(Some(StaticSecret::from_bytes(key)))
     }
 
-    /// Creates the key unless another process created it first.
+    /// Creates the key unless another process created it first, then
+    /// fsyncs the directory.
+    ///
+    /// A failed directory fsync is reported as [`StoreError::NotDurable`]
+    /// after the key file is in place: a later load uses that key. Every
+    /// earlier failure is [`StoreError::Io`] and leaves no key file.
     fn create_key(&self) -> Result<StaticSecret, StoreError> {
         let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
         let path = self.key_path();
@@ -93,7 +98,10 @@ impl FileIdentityStore {
         tmp.write_all(&content).map_err(|e| io_err(&path, &e))?;
         tmp.as_file().sync_all().map_err(|e| io_err(&path, &e))?;
         match tmp.into_temp_path().persist_noclobber(&path) {
-            Ok(()) => Ok(secret),
+            Ok(()) => {
+                sync_dir_after_commit(&self.dir)?;
+                Ok(secret)
+            }
             Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => self
                 .load_key()?
                 .ok_or_else(|| StoreError::Io("identity key disappeared".into())),
@@ -142,6 +150,15 @@ impl FileIdentityStore {
     }
 }
 
+/// Logs a first-run write that is in place but whose directory sync
+/// failed. Only the fixed kind is logged, never the path.
+fn warn_not_durable(e: &StoreError) {
+    tracing::warn!(
+        kind = e.kind(),
+        "new identity saved, but the configuration directory could not be synced"
+    );
+}
+
 impl IdentityStore for FileIdentityStore {
     fn load_or_create(&self) -> Result<LocalIdentity, StoreError> {
         check_config_dir(&self.dir)?;
@@ -151,36 +168,62 @@ impl IdentityStore for FileIdentityStore {
         let _lock = ConfigLock::acquire(&self.dir)?;
         let secret = match self.load_key()? {
             Some(s) => s,
-            None => self.create_key()?,
+            None => match self.create_key() {
+                Ok(s) => s,
+                // The key file is in place; only its directory entry's
+                // durability is unconfirmed. Start with it.
+                Err(e @ StoreError::NotDurable(_)) => {
+                    warn_not_durable(&e);
+                    self.load_key()?
+                        .ok_or_else(|| StoreError::Io("identity key disappeared".into()))?
+                }
+                Err(e) => return Err(e),
+            },
         };
         let name = match self.load_name()? {
             Some(n) => n,
             None => {
                 let n = Self::default_name();
-                self.save_name(&n)?;
+                match self.save_name(&n) {
+                    Ok(()) => {}
+                    // device.json is in place, as for the key above.
+                    Err(e @ StoreError::NotDurable(_)) => warn_not_durable(&e),
+                    Err(e) => return Err(e),
+                }
                 n
             }
         };
         Self::identity(secret, name)
     }
 
+    /// Every step that can fail for any reason other than the final
+    /// directory sync runs before the new key is written (the commit
+    /// point): loading and checking the name, creating a missing default
+    /// name, generating the key and deriving its public key. So an error
+    /// other than [`StoreError::NotDurable`] leaves the old key in place.
     fn reset(&self) -> Result<LocalIdentity, StoreError> {
         check_config_dir(&self.dir)?;
         let _lock = ConfigLock::acquire(&self.dir)?;
-        let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
-        let mut content = Zeroizing::new(Vec::with_capacity(KEY_FILE_LEN));
-        content.extend_from_slice(KEY_MAGIC);
-        content.extend_from_slice(secret.as_storage_bytes());
-        write_atomic(&self.dir, KEY_FILE, &content)?;
         let name = match self.load_name()? {
             Some(n) => n,
             None => {
                 let n = Self::default_name();
-                self.save_name(&n)?;
+                match self.save_name(&n) {
+                    // device.json is in place; the key write below syncs
+                    // the directory again.
+                    Ok(()) | Err(StoreError::NotDurable(_)) => {}
+                    Err(e) => return Err(e),
+                }
                 n
             }
         };
-        Self::identity(secret, name)
+        let secret = StaticSecret::generate().map_err(|e| StoreError::Io(e.to_string()))?;
+        let identity = Self::identity(secret, name)?;
+        let mut content = Zeroizing::new(Vec::with_capacity(KEY_FILE_LEN));
+        content.extend_from_slice(KEY_MAGIC);
+        content.extend_from_slice(identity.secret().as_storage_bytes());
+        write_atomic(&self.dir, KEY_FILE, &content)?;
+        Ok(identity)
     }
 
     fn set_name(&self, name: &DeviceName) -> Result<LocalIdentity, StoreError> {
@@ -231,6 +274,53 @@ mod tests {
         ));
     }
 
+    /// Creating the key syncs the directory and reports a failed sync
+    /// (write and search, no read) as `NotDurable`, after the key file is
+    /// in place.
+    #[cfg(unix)]
+    #[test]
+    fn key_dir_sync_failure_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.create_key();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            matches!(result, Err(StoreError::NotDurable(_))),
+            "{result:?}"
+        );
+        assert!(base.path().join(KEY_FILE).exists());
+    }
+
+    /// Regression: on first run, a key (and device name) saved without a
+    /// confirmed directory sync is in place, so startup goes on with that
+    /// identity instead of failing.
+    #[cfg(unix)]
+    #[test]
+    fn first_run_without_dir_sync_loads_the_new_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.load_or_create();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let created = result.unwrap();
+        let again = store.load_or_create().unwrap();
+        assert_eq!(again.fingerprint(), created.fingerprint());
+        assert_eq!(again.name(), created.name());
+    }
+
     #[test]
     fn identity_bad_magic_rejected() {
         let base = tempfile::tempdir().unwrap();
@@ -263,6 +353,97 @@ mod tests {
             .collect();
         let fps: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         assert!(fps.windows(2).all(|w| w[0] == w[1]));
+    }
+
+    /// Regression: a reset whose device name cannot be loaded fails before
+    /// the new key is written, so the identity is unchanged. (It used to
+    /// write the key first and then fail on `device.json`, reporting a
+    /// failure although the identity had rotated.)
+    #[test]
+    fn reset_with_corrupt_device_file_keeps_the_key() {
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        store.load_or_create().unwrap();
+        let key_before = std::fs::read(base.path().join(KEY_FILE)).unwrap();
+        write_atomic(base.path(), DEVICE_FILE, b"{not json").unwrap();
+        let result = store.reset();
+        assert!(
+            matches!(result, Err(StoreError::Corrupt { .. })),
+            "{result:?}"
+        );
+        // Compared without printing: the bytes are a secret key.
+        assert!(
+            std::fs::read(base.path().join(KEY_FILE)).unwrap() == key_before,
+            "a failed reset replaced the key"
+        );
+    }
+
+    /// Regression: the same for a group-writable `device.json`.
+    #[cfg(unix)]
+    #[test]
+    fn reset_with_insecure_device_file_keeps_the_key() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        store.load_or_create().unwrap();
+        let key_before = std::fs::read(base.path().join(KEY_FILE)).unwrap();
+        std::fs::set_permissions(
+            base.path().join(DEVICE_FILE),
+            std::fs::Permissions::from_mode(0o620),
+        )
+        .unwrap();
+        let result = store.reset();
+        assert!(
+            matches!(result, Err(StoreError::InsecurePermissions { .. })),
+            "{result:?}"
+        );
+        // Compared without printing: the bytes are a secret key.
+        assert!(
+            std::fs::read(base.path().join(KEY_FILE)).unwrap() == key_before,
+            "a failed reset replaced the key"
+        );
+    }
+
+    /// A reset whose directory sync fails has rotated the key: it reports
+    /// `NotDurable`, and the next load returns the new identity.
+    #[cfg(unix)]
+    #[test]
+    fn reset_without_dir_sync_rotates_the_key() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            // Skipped: root bypasses directory permissions, so the open
+            // cannot be made to fail this way.
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        let before = store.load_or_create().unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+        let result = store.reset();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            matches!(result, Err(StoreError::NotDurable(_))),
+            "{result:?}"
+        );
+        let after = store.load_or_create().unwrap();
+        assert_ne!(after.fingerprint(), before.fingerprint());
+        assert_eq!(after.name(), before.name());
+    }
+
+    /// A reset without `device.json` creates the default name first and
+    /// then the key; both are in place afterwards.
+    #[test]
+    fn reset_without_device_file_creates_a_name() {
+        let base = tempfile::tempdir().unwrap();
+        let store = FileIdentityStore::open(base.path()).unwrap();
+        let before = store.load_or_create().unwrap();
+        std::fs::remove_file(base.path().join(DEVICE_FILE)).unwrap();
+        let after = store.reset().unwrap();
+        assert_ne!(after.fingerprint(), before.fingerprint());
+        assert!(after.name().as_str().starts_with("Dropumi-"));
+        let loaded = store.load_or_create().unwrap();
+        assert_eq!(loaded.fingerprint(), after.fingerprint());
+        assert_eq!(loaded.name(), after.name());
     }
 
     #[test]

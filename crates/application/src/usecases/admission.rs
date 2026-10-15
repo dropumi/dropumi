@@ -169,4 +169,29 @@ mod tests {
         assert!(!a.sessions_full());
         assert!(a.try_session(fp(1)).is_some());
     }
+
+    #[test]
+    fn one_session_per_fingerprint_regardless_of_session_slots() {
+        // Protocol v1 §17.2 fixes the per-fingerprint limit at 1; more
+        // session slots must not loosen it.
+        let a = Admission::new(AdmissionLimits {
+            sessions: 8,
+            ..AdmissionLimits::default()
+        });
+        let fp = |b| Fingerprint::from_digest([b; 32]);
+        let first = a.try_session(fp(1)).unwrap();
+        assert!(
+            a.try_session(fp(1)).is_none(),
+            "a second session for the same fingerprint is busy"
+        );
+        assert!(
+            a.try_session(fp(2)).is_some(),
+            "another fingerprint is admitted"
+        );
+        drop(first);
+        assert!(
+            a.try_session(fp(1)).is_some(),
+            "the fingerprint is admitted again once its session ends"
+        );
+    }
 }

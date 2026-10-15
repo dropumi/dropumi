@@ -330,6 +330,22 @@ jobs:
           bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile release
       - name: 16 KB page alignment
         run: bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
+      # Negative check: a directory without libraries must fail with the
+      # script's own message, so an early exit (a missing llvm-readelf, say)
+      # cannot pass for it.
+      - name: 16 KB check fails on a directory with no libraries
+        run: |
+          empty="$(mktemp -d)"
+          if out="$(bash scripts/ffi/check-16k.sh "${empty}" 2>&1)"; then
+            printf '%s\n' "${out}"
+            echo "::error::check-16k.sh exited 0 on a directory with no .so files"
+            exit 1
+          fi
+          printf '%s\n' "${out}"
+          if ! grep -qF "no .so files found" <<< "${out}"; then
+            echo "::error::check-16k.sh failed without reporting the missing .so files"
+            exit 1
+          fi
       - name: Kotlin binding tests (host JVM)
         run: |
           cargo build --locked -p dropumi-ffi --lib

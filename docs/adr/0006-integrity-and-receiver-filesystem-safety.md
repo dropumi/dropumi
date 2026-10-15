@@ -54,7 +54,7 @@
 
 **8. Error privacy.** Local storage errors stay local; the peer only sees `FileAck WRITE_FAILED`, `Cancel STORAGE` or the static `Error.detail` phrase (ADR-0005).
 
-**9. Sender side** (`infra::fs::source`). Only regular files are sent (an explicitly named symlink is followed, like `cp`; directories and special files are refused). Only the final component goes on the wire (lossy UTF-8, `/`, `\` and NUL replaced with `_`, at most 1,024 bytes). A size or modification-time change while sending yields `FileAbort SOURCE_CHANGED`.
+**9. Sender side** (`infra::fs::source`). Only regular files are sent (an explicitly named symlink is followed, like `cp`; directories and special files are refused). Only the final component goes on the wire (lossy UTF-8, `/`, `\` and NUL replaced with `_`, at most 1,024 bytes). A size or modification-time change while sending yields `FileAbort SOURCE_CHANGED`. The sender compares the size and the modification time at full resolution (local only; the wire carries whole seconds). On file systems that store whole seconds, a same-size edit within the same second can still go undetected; the receiver's BLAKE3 check still verifies the bytes that were sent.
 
 ## Implementation
 

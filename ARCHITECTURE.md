@@ -91,7 +91,7 @@ generic over ports and receive them through constructors (no `dyn`, no `async-tr
 | `FileSource` | Inspect, open and re-check files to send | `infra::fs::LocalFileSource` | `MemSource` (with `StallingReader` for stuck sources) |
 | `FileSink` | Start received files, sync the directory | `infra::fs::ReceiveDir` | `MemSink` (fault injection: fail after N bytes, block writes; counts begin/commit/discard/dir syncs) |
 | `IdentityStore` | Load or create, reset, rename the identity | `infra::store::FileIdentityStore` | `MemIdentity` |
-| `TrustStore` | Trusted devices (get, list, upsert, remove, touch) | `infra::store::TrustFile` | `MemTrust` |
+| `TrustStore` | Trusted devices (get, list, upsert, upsert_with (merge under the store lock), remove, touch) | `infra::store::TrustFile` | `MemTrust` |
 | `Interaction` | Offer decisions and SAS confirmation | `cli::interaction::CliInteraction` (control channel, TTY prompt, or "never") | `Scripted` (fixed answers, or never answers) |
 | `Clock` | Wall-clock time | `infra::clock::SystemClock` | `ManualClock` |
 
@@ -110,7 +110,7 @@ Use cases live in `crates/application/src/usecases/`.
 
 | Use case (spec §9) | Code | Notes |
 |---|---|---|
-| DiscoverNearbyDevices | `discovery::discover` | Browses for a fixed time and emits one `PeerFound` per device. Results are hints. |
+| DiscoverNearbyDevices | `discovery::discover` | Browses for a fixed time and emits one `PeerFound` per device; a `CancellationToken` ends the browse at once with `DiscoverOutcome::Cancelled` and no events. Results are hints. |
 | ManageDiscoverability | `discovery::advertise`, `AdHandle::stop` | Used by `receive` and `pair --listen`; disabled with `--no-mdns`. Failure emits `DiscoveryUnavailable` and manual addressing keeps working. |
 | ConnectToPeer | `connect::{resolve, dial}`, `channel::{initiate, respond}` | `resolve` turns targets into ranked candidates plus a `PeerExpectation`; `dial` tries candidates in order. |
 | PairDevice | `pair::{pair_with, pair_listen}` | Committed SAS; trust is stored only if both users confirm. One attempt per listen window. |

@@ -72,7 +72,9 @@ fn summary(label: &str, mut v: Vec<Duration>) {
 
 /// S7: from `OperationHandle::cancel` on the sender until each side reports
 /// `TransferFinished(Cancelled)`, over loopback, with the sender's document
-/// held mid-file.
+/// held mid-file. The timer starts only once the sender's reader reports that
+/// it is blocked at its hold point (the receiver's `TransferAccepted` alone
+/// does not prove that).
 #[test]
 #[ignore = "measurement"]
 fn measure_cancel_latency() {
@@ -85,6 +87,7 @@ fn measure_cancel_latency() {
         doc.hold_after = Some(100_000);
         doc.hold.close();
         let gate = Arc::clone(&doc.hold);
+        let held = doc.signal_held();
         let file: Arc<dyn ForeignFile> = Arc::new(doc);
         let op = a
             .node
@@ -105,6 +108,8 @@ fn measure_cancel_latency() {
                 }
             )
         });
+        held.recv_timeout(WAIT)
+            .unwrap_or_else(|e| panic!("the reader never reached its hold point: {e}"));
         let start = Instant::now();
         op.cancel();
         assert_eq!(

@@ -246,6 +246,9 @@ pub struct MemDoc {
     pub announced: Option<u64>,
     pub hold_after: Option<usize>,
     pub hold: Arc<Gate>,
+    /// Signalled when a reader reaches `hold_after` and is about to wait on
+    /// `hold` (see [`MemDoc::signal_held`]).
+    pub held: Option<mpsc::SyncSender<()>>,
     pub reads: Arc<AtomicUsize>,
     pub panic_on_read: bool,
     pub closed: Arc<AtomicBool>,
@@ -259,10 +262,21 @@ impl MemDoc {
             announced: None,
             hold_after: None,
             hold: Arc::new(Gate::default()),
+            held: None,
             reads: Arc::default(),
             panic_on_read: false,
             closed: Arc::default(),
         }
+    }
+
+    /// A receiver that is signalled once a reader has read `hold_after`
+    /// bytes and is about to block on `hold`: from then on the transfer is
+    /// stuck mid-file until the gate opens. The channel holds one signal and
+    /// the reader never blocks on it.
+    pub fn signal_held(&mut self) -> mpsc::Receiver<()> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.held = Some(tx);
+        rx
     }
 }
 
@@ -271,6 +285,7 @@ struct MemReader {
     pos: Mutex<usize>,
     hold_after: Option<usize>,
     hold: Arc<Gate>,
+    held: Option<mpsc::SyncSender<()>>,
     reads: Arc<AtomicUsize>,
     panic_on_read: bool,
     closed: Arc<AtomicBool>,
@@ -295,6 +310,7 @@ impl ForeignFile for MemDoc {
             pos: Mutex::new(0),
             hold_after: self.hold_after,
             hold: Arc::clone(&self.hold),
+            held: self.held.clone(),
             reads: Arc::clone(&self.reads),
             panic_on_read: self.panic_on_read,
             closed: Arc::clone(&self.closed),
@@ -313,6 +329,10 @@ impl ForeignReader for MemReader {
             && *pos >= h
         {
             drop(pos);
+            if let Some(held) = &self.held {
+                // Full (already signalled) or nobody listening: either is fine.
+                let _ = held.try_send(());
+            }
             self.hold.wait_open();
             pos = self.pos.lock().unwrap();
         }

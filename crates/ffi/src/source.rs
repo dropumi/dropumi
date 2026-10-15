@@ -133,6 +133,13 @@ impl CompositeSource {
                     name,
                     size,
                     modified: file.modified(),
+                    // The app reports whole seconds only, so times are not
+                    // compared. For an app-read document only a size change
+                    // is detected, by its reader (the `changed` flag, set
+                    // when the bytes read differ from the announced size);
+                    // an edit that keeps the size is not. The receiver's
+                    // BLAKE3 check still verifies the bytes that were sent.
+                    local_modified: None,
                 },
                 file,
                 changed: Arc::new(AtomicBool::new(false)),

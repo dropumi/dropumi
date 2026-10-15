@@ -1221,16 +1221,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_pending_prompts() and 0xFFFF) != 54466) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() and 0xFFFF) != 56308) {
+    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_rename_trusted() and 0xFFFF) != 26401) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() and 0xFFFF) != 19542) {
+    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_reset_identity() and 0xFFFF) != 35363) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_send() and 0xFFFF) != 40109) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() and 0xFFFF) != 19961) {
+    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_set_device_name() and 0xFFFF) != 61093) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_set_receive_policy() and 0xFFFF) != 206) {
@@ -1257,13 +1257,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_stop_receiving() and 0xFFFF) != 13397) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() and 0xFFFF) != 6655) {
+    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_trust_fingerprint() and 0xFFFF) != 63969) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_trusted_devices() and 0xFFFF) != 1585) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_untrust() and 0xFFFF) != 36547) {
+    if ((lib.uniffi_dropumi_ffi_checksum_method_dropuminode_untrust() and 0xFFFF) != 4923) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_dropumi_ffi_checksum_method_operationhandle_cancel() and 0xFFFF) != 15377) {
@@ -2145,16 +2145,29 @@ public interface DropumiNodeInterface {
      * Renames a paired device; returns whether it is paired. Never adds a
      * device.
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     fun `renameTrusted`(`fingerprint`: kotlin.String, `alias`: kotlin.String): kotlin.Boolean
     
     /**
      * Replaces this device's key. Every paired device must pair again.
      *
+     * A key saved without a confirmed directory sync is applied: the call
+     * succeeds with the new identity and a `Warning` event says it may not
+     * survive a crash.
+     *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     fun `resetIdentity`(): IdentityInfo
     
@@ -2170,8 +2183,14 @@ public interface DropumiNodeInterface {
     /**
      * Renames this device (sanitized; at most 64 bytes).
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     fun `setDeviceName`(`name`: kotlin.String): IdentityInfo
     
@@ -2236,8 +2255,14 @@ public interface DropumiNodeInterface {
      * Trusts a device by its full fingerprint (52 characters), compared
      * with the other device out of band.
      *
+     * A device saved without a confirmed directory sync is trusted: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     fun `trustFingerprint`(`fingerprint`: kotlin.String, `alias`: kotlin.String?): TrustedDeviceInfo
     
@@ -2251,6 +2276,11 @@ public interface DropumiNodeInterface {
     
     /**
      * Forgets a paired device; returns whether it was paired.
+     *
+     * A removal saved without a confirmed directory sync is applied: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     * Whether the device was paired is then the state read just before the
+     * removal.
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
@@ -2582,8 +2612,14 @@ open class DropumiNode: Disposable, AutoCloseable, DropumiNodeInterface
      * Renames a paired device; returns whether it is paired. Never adds a
      * device.
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     @Throws(DropumiException::class)override fun `renameTrusted`(`fingerprint`: kotlin.String, `alias`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2604,8 +2640,15 @@ open class DropumiNode: Disposable, AutoCloseable, DropumiNodeInterface
     /**
      * Replaces this device's key. Every paired device must pair again.
      *
+     * A key saved without a confirmed directory sync is applied: the call
+     * succeeds with the new identity and a `Warning` event says it may not
+     * survive a crash.
+     *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     @Throws(DropumiException::class)override fun `resetIdentity`(): IdentityInfo {
             return FfiConverterTypeIdentityInfo.lift(
@@ -2648,8 +2691,14 @@ open class DropumiNode: Disposable, AutoCloseable, DropumiNodeInterface
     /**
      * Renames this device (sanitized; at most 64 bytes).
      *
+     * A name saved without a confirmed directory sync is applied: the call
+     * succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * `Busy` while receiving or while an operation runs; storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     @Throws(DropumiException::class)override fun `setDeviceName`(`name`: kotlin.String): IdentityInfo {
             return FfiConverterTypeIdentityInfo.lift(
@@ -2816,8 +2865,14 @@ open class DropumiNode: Disposable, AutoCloseable, DropumiNodeInterface
      * Trusts a device by its full fingerprint (52 characters), compared
      * with the other device out of band.
      *
+     * A device saved without a confirmed directory sync is trusted: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     *
      * # Errors
      * An invalid fingerprint, or storage errors.
+     * If a change saved without a confirmed directory sync cannot be read
+     * back, the `Warning` is still published and the call fails with a
+     * `Config` error whose detail says the change was saved.
      */
     @Throws(DropumiException::class)override fun `trustFingerprint`(`fingerprint`: kotlin.String, `alias`: kotlin.String?): TrustedDeviceInfo {
             return FfiConverterTypeTrustedDeviceInfo.lift(
@@ -2857,6 +2912,11 @@ open class DropumiNode: Disposable, AutoCloseable, DropumiNodeInterface
     
     /**
      * Forgets a paired device; returns whether it was paired.
+     *
+     * A removal saved without a confirmed directory sync is applied: the
+     * call succeeds and a `Warning` event says it may not survive a crash.
+     * Whether the device was paired is then the state read just before the
+     * removal.
      *
      * # Errors
      * An invalid fingerprint, or storage errors.
@@ -6275,7 +6335,9 @@ sealed class DropumiException: kotlin.Exception() {
     }
     
     /**
-     * The local configuration cannot be used.
+     * The local configuration cannot be used. Nothing was changed, except
+     * when the detail starts with "the change was saved, but it could not
+     * be read back": then a configuration change is in place.
      */
     class Config(
         
