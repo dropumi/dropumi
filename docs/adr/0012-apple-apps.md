@@ -65,7 +65,7 @@
 | ID | Question | Result |
 |---|---|---|
 | S-A1 | Can a harness drive an app-hosted XCTest and read its status live? | **Yes**, on the iOS 27.0 simulator and on macOS. `xcodebuild test-without-building` with `TEST_RUNNER_DROPUMI_*` variables; the test's `DROPUMI_STATUS {json}` lines stream on xcodebuild's output while the test runs. |
-| S-A2 | Bonjour: random SRV host, both directions | **Partial.** Proxy registration works from an unsandboxed process on the Mac and from a test process in the simulator (probe registered `dropumi-probe001`); `dns-sd -P` showed a plain registration publishes `LocalHostName`. **Inside the app's process on the iOS 27.0 simulator, DNS-SD requests are accepted but never answered** (registration, browse; no prompt shown). The sandboxed Mac app and real devices: not tested. |
+| S-A2 | Bonjour: random SRV host, both directions | **Partial.** Proxy registration works from an unsandboxed process on the Mac and from a test process in the simulator (probe registered `dropumi-probe001`); `dns-sd -P` showed a plain registration publishes `LocalHostName`. **Inside the app's process on the iOS 27.0 simulator, DNS-SD requests are accepted but never answered** (registration, browse; no prompt shown). On 2026-10-18, the sandboxed Mac app (macOS 27.0.1) and an iPhone 15 (iOS 27.0.1) passed the Bonjour interop tests both ways against the CLI: the CLI found the app at its random host name, and the app found the CLI and sent to it. |
 | S-A3 | `BGContinuedProcessingTask` with a live transfer | Not tested (needs a device). |
 | S-A5 | Does the sandboxed Mac app need Local Network approval for loopback? | **No** for loopback: the interop tests (transfers both ways and pairing on 127.0.0.1) ran without a prompt. |
 
@@ -85,14 +85,16 @@
   - fixed-size code digits;
   - small hit areas;
   - text clipped at large sizes.
-- Interop (opt-in): `e2e interop::apple::apple_{ios_sim,macos}_{app_sends_to_cli_after_code,cli_sends_to_app_after_code,pairing_codes_match}`, plus `apple_macos_bonjour_*`.
+- Interop (opt-in): `e2e interop::apple::apple_{ios_sim,macos}_{app_sends_to_cli_after_code,cli_sends_to_app_after_code,pairing_codes_match}`, plus `apple_macos_bonjour_*`, and on a real iPhone or iPad over Wi-Fi the same three plus `apple_ios_device_bonjour_*` (`DROPUMI_TEST_APPLE_DEVICE`).
+- On real devices (2026-10-18, [run 2026-10-18-01](../device-tests/runs/2026-10-18-01.md)): `TestHostTests` (6) and `UIStateTests` (15) on an iPhone 15; `DropumiMacTests` (7) and `MacUIStateTests` (15) on the Mac. These runs found and we fixed: no notice when the core refused a device it could not name; the Mac's "…" menus offered VoiceOver no Open Menu action.
 
 **Status**
 - Package, app-hosted and iOS UI state tests: Automated test passed (iOS 27.0 simulator and macOS 27.0.1 arm64, local run).
 - Interop with the CLI over loopback: Automated test passed (6 tests: iOS 27.0 simulator and macOS 27, loopback, local run).
-- macOS UI state tests: Not tested (UI automation needs the user's approval on the machine).
-- Bonjour interop: Not tested.
-- Devices (iPhone 15, iPad Air 5, the Mac on a LAN): Not tested (device matrix pending).
+- iPhone 15 (iOS 27.0.1): hosted and UI state tests, and the app's core against the CLI over Wi-Fi (5 tests): Automated test passed (real device, local run, 2026-10-18).
+- macOS UI state tests (15): Automated test passed (macOS 27.0.1 arm64, local run, 2026-10-18).
+- Bonjour interop: Automated test passed (the sandboxed Mac app and an iPhone 15, each against the CLI, local run, 2026-10-18).
+- Device matrix (iPhone 15, iPad Air 5, the Mac on a LAN, by hand): Not tested.
 - CI job `apple (app)`: Not tested (pending CI; fails loudly without Xcode 27, gate G5).
 
 **Privacy manifests**

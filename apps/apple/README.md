@@ -84,8 +84,13 @@ xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -derivedDataPath apps/apple/build
 xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-macOS \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath apps/apple/build
+# On a real iPhone or iPad (unlocked, signed as above):
+xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS \
+  -destination 'platform=iOS,id=<UDID>' -derivedDataPath apps/apple/build -allowProvisioningUpdates
 ```
 
 - `DropumiTests` and `DropumiMacTests` run inside the app with temporary folders, never your real identity.
 - `DropumiUITests` and `DropumiMacUITests` run the app on a fake core. They are labelled "UI state test (fake core)", and they say nothing about the network or OS permissions.
-- Real devices, Bonjour and Local Network permission are covered only by the manual device matrix in `docs/device-tests/`.
+- The Mac UI tests open their windows on the Mac's built-in display when it has one, so an external display stays free. They need UI automation approved once. Their `.xcresult` bundles contain a recording of the main display: do not share them.
+- `scripts/apple/interop.sh` runs the app's real core against the CLI: on loopback (`apple_macos_*`), and over Wi-Fi on a real iPhone or iPad (`apple_ios_device_*`, with `DROPUMI_TEST_APPLE_DEVICE`); see `docs/testing.md`.
+- The Nearby screen, Local Network permission prompts and everything a person sees on two devices are covered only by the manual device matrix in `docs/device-tests/`.
