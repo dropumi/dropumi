@@ -96,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if TestHost.isActive { TestWindowPlacement.keepOnBuiltInDisplay() }
+        #endif
         UNUserNotificationCenter.current().delegate = Notifier.shared
         let loader = loader
         notifications.follow { loader.model }

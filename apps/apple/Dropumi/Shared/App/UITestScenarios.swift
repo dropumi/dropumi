@@ -12,6 +12,51 @@ import DropumiAppState
 import DropumiBindings
 import DropumiCore
 import Foundation
+#if os(macOS)
+import AppKit
+
+/// Under a test (DEBUG only), the app's windows open on the Mac's built-in
+/// display, so automated runs stay off an external display someone is using.
+/// Without a built-in display nothing moves.
+@MainActor
+enum TestWindowPlacement {
+    private static var placed = Set<ObjectIdentifier>()
+    private static var observer: NSObjectProtocol?
+
+    static func keepOnBuiltInDisplay() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { note in
+            guard let window = note.object as? NSWindow else { return }
+            MainActor.assumeIsolated { place(window) }
+        }
+    }
+
+    private static func place(_ window: NSWindow) {
+        guard !placed.contains(ObjectIdentifier(window)), let screen = builtInScreen() else { return }
+        placed.insert(ObjectIdentifier(window))
+        // SwiftUI sets the window's frame after it first becomes key; move it
+        // on the next turn of the run loop, after that.
+        DispatchQueue.main.async {
+            let area = screen.visibleFrame.insetBy(dx: 24, dy: 24)
+            guard !area.contains(window.frame) else { return }
+            var frame = window.frame
+            frame.size.width = min(frame.width, area.width)
+            frame.size.height = min(frame.height, area.height)
+            frame.origin = NSPoint(x: area.minX, y: area.maxY - frame.height)
+            window.setFrame(frame, display: true)
+        }
+    }
+
+    private static func builtInScreen() -> NSScreen? {
+        NSScreen.screens.first { screen in
+            let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+            return number.map { CGDisplayIsBuiltin($0.uint32Value) != 0 } ?? false
+        }
+    }
+}
+#endif
 
 enum UITestScenario: String, CaseIterable {
     case onboarding
