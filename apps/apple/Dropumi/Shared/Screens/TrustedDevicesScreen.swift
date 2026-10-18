@@ -37,6 +37,7 @@ struct TrustedDevicesScreen: View {
                                 .frame(width: 44, height: 44)
                         }
                         .menuIndicator(.hidden)
+                        .iconMenu()
                         .fixedSize()
                         .accessibilityLabel(Text("Actions"))
                     }

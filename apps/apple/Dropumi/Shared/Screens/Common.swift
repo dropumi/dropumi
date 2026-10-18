@@ -274,3 +274,19 @@ func nearbySubtitle(_ peer: NearbyPeer) -> String {
     }
     return String(localized: "Not paired")
 }
+
+extension View {
+    /// An icon-only "…" menu. On macOS a Menu with a custom label offers only
+    /// AXPress, not AXShowMenu, so VoiceOver's Open Menu has nothing to call
+    /// (the accessibility audit's "Action is missing"; macOS 27.0.1,
+    /// 2026-10-18). The button menu style with a plain button style offers
+    /// both and draws the label as it is.
+    @ViewBuilder
+    func iconMenu() -> some View {
+        #if os(macOS)
+        menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        #else
+        self
+        #endif
+    }
+}

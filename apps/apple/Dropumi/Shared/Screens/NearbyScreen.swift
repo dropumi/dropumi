@@ -92,6 +92,7 @@ struct NearbyScreen: View {
                 .frame(width: 44, height: 44)
                 .background(Circle().fill(DS.surface2))
         }
+        .iconMenu()
         .accessibilityLabel(Text("More"))
         .accessibilityIdentifier("nearby.more")
     }

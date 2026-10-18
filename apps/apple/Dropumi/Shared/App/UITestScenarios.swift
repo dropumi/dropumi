@@ -66,6 +66,8 @@ enum UITestScenario: String, CaseIterable {
     case offerPaired = "offer-paired"
     case codePairing = "code-pairing"
     case transfers
+    /// Settings with one paired device, for the Paired devices screen.
+    case pairedDevices = "paired-devices"
     case localNetworkDenied = "local-network-denied"
     /// A prompt whose core closes it once it is answered, so a UI test sees
     /// an answer as the prompt going away (prompt arming, PROMPT-1).
@@ -110,7 +112,11 @@ enum UITestScenario: String, CaseIterable {
 
     /// The tab the scenario starts on.
     var initialTab: AppTab {
-        self == .transfers ? .transfers : .nearby
+        switch self {
+        case .transfers: .transfers
+        case .pairedDevices: .settings
+        default: .nearby
+        }
     }
 
     func afterStart(_ model: AppModel) {
@@ -158,6 +164,9 @@ enum UITestScenario: String, CaseIterable {
                 .transferProgress(
                     operation: nil, transferId: "dd",
                     progress: TransferProgress(bytesDone: 11_300_000, bytesTotal: 18_200_000, filesDone: 0, filesTotal: 1)))
+        case .pairedDevices:
+            _ = try? core.trustFingerprint("QRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCD", alias: "Studio Mac")
+            Task { await model.refreshTrusted() }
         case .localNetworkDenied:
             core.emit(.discoveryUnavailable(reason: "local network access is turned off for Dropumi"))
         case .offerClosesOnAnswer, .codeClosesOnAnswer:

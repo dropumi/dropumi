@@ -131,6 +131,20 @@ final class MacUIStateTests: XCTestCase {
             + window.staticTexts.allElementsBoundByIndex.map(spoken))
             .flatMap { $0.components(separatedBy: ", ") }
         XCTAssertFalse(parts.contains("Paired"), parts.joined(separator: " | "))
+        // The audit includes the "…" menu's actions: it must offer AXShowMenu.
+        try audit(app)
+    }
+
+    @MainActor
+    func testPairedDevicesListsTheDeviceWithItsActions() throws {
+        let app = launch("paired-devices")
+        let window = mainWindow(app)
+        let paired = window.descendants(matching: .any)["settings.paired"]
+        XCTAssertTrue(paired.waitForExistence(timeout: 10))
+        paired.click()
+        XCTAssertTrue(text(in: window, containing: "Studio Mac").waitForExistence(timeout: 10))
+        XCTAssertTrue(window.menuButtons["Actions"].exists)
+        // The audit includes the row's "…" menu: it must offer AXShowMenu.
         try audit(app)
     }
 
