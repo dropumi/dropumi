@@ -170,7 +170,7 @@ Rules:
 |---|---|---|
 | `DROPUMI_TEST_MDNS=1` | Enables `discovery::mdns_discover_and_send_by_fingerprint` (also needs `--ignored`). It advertises and browses on loopback interfaces (`--mdns-loopback`), finds the receiver by its fingerprint hint and sends to it. | Off (the test is `#[ignore]`) |
 | `DROPUMI_TEST_LARGE_MIB=<N>` | File size for `transfer::large_file_streaming`. | 64 |
-| `DROPUMI_TEST_APPLE=1` | Enables the `interop::apple::apple_*` tests (also need `--ignored`; run one at a time). They drive the app-hosted XCTest `AppleInteropTests` with `xcodebuild test-without-building`; `scripts/apple/interop.sh` builds the bundles first. With `DROPUMI_TEST_MDNS=1` as well, the `apple_macos_bonjour_*` tests run too; they ask the macOS Local Network question for Dropumi the first time. | Off (the tests are `#[ignore]`) |
+| `DROPUMI_TEST_APPLE=1` | Enables the `interop::apple::apple_*` tests (also need `--ignored`; run one at a time). They drive the app-hosted XCTest `AppleInteropTests` with `xcodebuild test-without-building`; `scripts/apple/interop.sh` builds the bundles first, only for the destinations of the selected tests (a filter such as `apple_macos_` never builds for a simulator). With `DROPUMI_TEST_MDNS=1` as well, the `apple_macos_bonjour_*` tests run too; they ask the macOS Local Network question for Dropumi the first time. | Off (the tests are `#[ignore]`) |
 | `DROPUMI_TEST_APPLE_SIMULATOR=<name>` | Simulator for the iOS interop tests. | `iPhone 17` |
 | `--ignored` on `dropumi-ffi --test measure` | Runs the ADR-0009 measurements (cancel latency, events of a 2,000-file transfer) and prints the numbers. Run with `--release --nocapture`. | Off (the tests are `#[ignore]`) |
 
