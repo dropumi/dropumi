@@ -151,7 +151,8 @@ Whether iOS 27 shipped these features, and whether they apply outside the EU, is
 | Only potentially trustworthy origins are secure contexts: `https`, `wss` or `file` schemes; `127.0.0.0/8` or `::1`; `localhost` and `*.localhost`. Inference: a private LAN IP over `http` is not on that list, so such a page is not a secure context. | [F85] |
 | `crypto.subtle` and `crypto.randomUUID()` are secure-context-only; `crypto.getRandomValues()` is not marked secure-context-only. | [F87] |
 | Service Workers, the Notifications API, the Web Share API and the Web Crypto API are restricted to secure contexts. | [F86] |
-| MDN does not mark `RTCPeerConnection` as secure-context-only. Cross-browser behaviour on `http://<LAN-IP>` pages: Requires investigation. | [F88] |
+| MDN does not mark `RTCPeerConnection` as secure-context-only. Measured 2026-10-18 on `http://<LAN-IP>` pages (not secure contexts): a DataChannel opened between Safari 27.0.1 and Chrome 155 on macOS 27.0.1, Safari on iOS 27.0.1 and Chrome 155 on Android 16, with no STUN or TURN (ADR-0011, WEB-4). Firefox: Not tested. | [F88]; ADR-0011 |
+| Measured 2026-10-18 (ADR-0011, WEB-2): on `http://<LAN-IP>` all five browsers above report no secure context and lack `crypto.subtle`, `randomUUID`, Service Workers and Web Share; `getRandomValues` and WebAssembly work. | ADR-0011 |
 | WebRTC endpoints can hide local IPs in ICE candidates behind mDNS `.local` names (IETF draft). | [F90] |
 | Chrome's Local Network Access permission prompt launched in Chrome 142. Only secure contexts can request it, and WebRTC connections are not yet gated by it. | [F89] |
 
@@ -160,8 +161,8 @@ Whether iOS 27 shipped these features, and whether they apply outside the EU, is
 | Option | Status | Security property |
 |---|---|---|
 | Plain HTTP + session token | Requires investigation [F85][F86] | Not encrypted, and not a secure context. Must never be labelled secure. |
-| HTTP page + WebRTC DataChannel, with the DTLS fingerprint passed by the native host | Requires investigation [F88][F90] | At best protects against passive eavesdroppers; no protection against an active attacker who replaces the page. |
-| Per-session self-signed HTTPS, certificate fingerprint shown in a QR code | Requires investigation [F85] | Sound only if the user really checks the fingerprint. Whether the page is a secure context after a certificate-warning click-through: UNVERIFIED. |
+| HTTP page + WebRTC DataChannel, with the DTLS fingerprint passed by the native host | The DataChannel opens on all five browsers tested (ADR-0011, WEB-4); the security property is unchanged [F88][F90] | At best protects against passive eavesdroppers; no protection against an active attacker who replaces the page. |
+| Per-session self-signed HTTPS, certificate fingerprint shown in a QR code | Requires investigation [F85]; partly measured (ADR-0011, WEB-3) | Sound only if the user really checks the fingerprint. With the key pinned, Chrome and Brave treat the page as a secure context. By hand, the click-through worked in Safari, Chrome and Brave on macOS, but the tester could not find the certificate fingerprint to compare it. Whether the page is a secure context after a click-through: not recorded. |
 | Public-CA certificate for a domain that resolves to LAN IPs | Unsupported (project policy) | Violates the spec's no-public-dependency rule (master spec §6). |
 | Installing a local CA on the visitor's device | Unsupported (project policy) | Too invasive; a long-lived trust anchor. |
 
