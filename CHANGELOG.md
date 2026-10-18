@@ -29,20 +29,22 @@ Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core ch
   - this device;
   - connect by address.
 - **Prompt safety.** No prompt is answered without a tap. There is no default button, Escape declines, and Accept is enabled after 600 ms. A nearby device is never labelled "Paired" before its key is checked.
+- **Refused devices.** When the receiver turns a device away, the app says so, at most once a minute: "A device that isn't paired tried to send" (with a shortcut to Everyone) when the device is known, otherwise only "A device was refused".
 - **Share Extension.** It hands shared files to the app through an App Group inbox: staged, listed in a manifest, renamed into place. It never loads the core.
 - **Bonjour.** Discovery advertises a random host name (proxy registration), never the system's, and does not hold up the receiver while the Local Network question is open.
 - **Mac.**
   - A menu-bar receiver keeps working when the window is closed; "Quit Dropumi completely" stops it.
   - Notifications have no Accept action.
   - Open at login is optional.
+  - The "…" menus open with VoiceOver's Open Menu command.
   - A receive folder you choose is kept as a bookmark.
 - **iPhone and iPad.** Receive while Dropumi is open; running transfers ask iOS for time to finish in the background.
 - **Design.** design.md tokens, Plus Jakarta Sans (OFL), and a darker accent for small text to keep 4.5:1 contrast.
 - **Tests.**
   - App-state tests on a fake core.
   - Hosted tests: test isolation, backup exclusion.
-  - UI state tests with the accessibility audit (iOS simulator).
-  - Opt-in interop tests that run the app's real core against the CLI on the iOS simulator and on macOS (`scripts/apple/interop.sh`).
+  - UI state tests with the accessibility audit, on an iPhone, on the Mac and on the iOS simulator.
+  - Opt-in interop tests that run the app's real core against the CLI on the iOS simulator, on macOS, and on a real iPhone or iPad over Wi-Fi (`scripts/apple/interop.sh`).
 - **CI.** `apple (app)` (not required; needs Xcode 27).
 - **Build.** The Xcode project is generated with xcodegen. The app build refuses a Rust core older than its sources.
 
