@@ -72,6 +72,15 @@ struct PromptPresenter: ViewModifier {
 /// How long Accept stays disabled after a prompt appears.
 let promptArmDelay: Duration = .milliseconds(600)
 
+/// The arming delay in force. UI tests (DEBUG builds only) may make it
+/// longer, never shorter.
+private var armDelay: Duration {
+    #if DEBUG
+    if let longer = UITestScenario.armDelayOverride { return longer }
+    #endif
+    return promptArmDelay
+}
+
 struct PromptScreen: View {
     let model: AppModel
     let prompt: Prompt
@@ -92,7 +101,7 @@ struct PromptScreen: View {
         .environment(\.colorScheme, onNavy ? .dark : colorScheme)
         .task(id: prompt.promptId) {
             armed = false
-            try? await Task.sleep(for: promptArmDelay)
+            try? await Task.sleep(for: armDelay)
             armed = true
         }
     }

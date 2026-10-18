@@ -136,6 +136,24 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
         return log
     }
 
+    /// Called after each recorded call, outside the lock, so that a UI-test
+    /// scenario can react as a core would (for example, close a prompt once
+    /// it is answered). Nil by default; the fake core still never answers a
+    /// prompt or creates trust by itself.
+    public var onCall: (@Sendable (Call) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return callHook
+        }
+        set {
+            lock.lock()
+            callHook = newValue
+            lock.unlock()
+        }
+    }
+    private var callHook: (@Sendable (Call) -> Void)?
+
     public func operation(_ id: UInt64) -> FakeOperation? {
         lock.lock()
         defer { lock.unlock() }
@@ -145,7 +163,9 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
     private func note(_ call: Call) {
         lock.lock()
         log.append(call)
+        let hook = callHook
         lock.unlock()
+        hook?(call)
     }
 
     private func fail(_ method: String) throws {

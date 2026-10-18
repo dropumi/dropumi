@@ -22,8 +22,13 @@ enum UITestScenario: String, CaseIterable {
     case codePairing = "code-pairing"
     case transfers
     case localNetworkDenied = "local-network-denied"
+    /// A prompt whose core closes it once it is answered, so a UI test sees
+    /// an answer as the prompt going away (prompt arming, PROMPT-1).
+    case offerClosesOnAnswer = "offer-closes-on-answer"
+    case codeClosesOnAnswer = "code-closes-on-answer"
 
     static let argument = "-dropumi-scenario"
+    static let armDelayArgument = "-dropumi-arm-delay-ms"
 
     static func fromLaunchArguments() -> UITestScenario? {
         let arguments = CommandLine.arguments
@@ -31,6 +36,17 @@ enum UITestScenario: String, CaseIterable {
               let index = arguments.firstIndex(of: argument), index + 1 < arguments.count
         else { return nil }
         return UITestScenario(rawValue: arguments[index + 1])
+    }
+
+    /// A longer arming delay for UI tests, so that a press can start reliably
+    /// while Accept is still disabled. Never shorter than `promptArmDelay`.
+    static var armDelayOverride: Duration? {
+        let arguments = CommandLine.arguments
+        guard arguments.contains(TestHost.uiTestArgument),
+              let index = arguments.firstIndex(of: armDelayArgument), index + 1 < arguments.count,
+              let milliseconds = Int(arguments[index + 1])
+        else { return nil }
+        return max(.milliseconds(milliseconds), promptArmDelay)
     }
 
     func makeModel() -> AppModel {
@@ -53,6 +69,12 @@ enum UITestScenario: String, CaseIterable {
     }
 
     func afterStart(_ model: AppModel) {
+        #if os(macOS)
+        // UI state tests check screens, not launch behaviour: macOS does not
+        // always open the main window at launch (see the device-test
+        // findings), so a UI-test launch opens it explicitly.
+        MainWindow.show()
+        #endif
         guard let core = model.core as? FakeCoreClient else { return }
         let paired = Fixtures.peer(name: "MacBook", trusted: true, alias: "Studio Mac")
         switch self {
@@ -93,6 +115,23 @@ enum UITestScenario: String, CaseIterable {
                     progress: TransferProgress(bytesDone: 11_300_000, bytesTotal: 18_200_000, filesDone: 0, filesTotal: 1)))
         case .localNetworkDenied:
             core.emit(.discoveryUnavailable(reason: "local network access is turned off for Dropumi"))
+        case .offerClosesOnAnswer, .codeClosesOnAnswer:
+            core.onCall = { [weak core] call in
+                switch call {
+                case let .answerOffer(id, _), let .answerCode(id, _):
+                    core?.emit(.promptClosed(id: id, reason: .answered))
+                default:
+                    break
+                }
+            }
+            if self == .offerClosesOnAnswer {
+                core.emit(
+                    .offerReceived(transferId: "aa", peer: Fixtures.peer(), files: 1, totalBytes: 2_300_000),
+                    .promptOpened(prompt: Fixtures.offer(
+                        files: [OfferedFile(name: "Lease-draft.pdf", size: 2_300_000)])))
+            } else {
+                core.emit(.promptOpened(prompt: Fixtures.code()))
+            }
         }
     }
 }

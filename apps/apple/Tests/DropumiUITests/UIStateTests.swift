@@ -23,9 +23,15 @@ final class UIStateTests: XCTestCase {
             if issue.auditType == .contrast, let element = issue.element, element.frame.intersects(tabBar) {
                 return true
             }
-            let element = issue.element.map { "\($0.elementType.rawValue) '\($0.label)' id='\($0.identifier)'" }
-                ?? "? \(issue.detailedDescription)"
-            issues.append("\(issue.compactDescription): \(element)")
+            // Likewise content scrolled partly above the screen, under the status
+            // bar (measured on an iPhone 15: the status pill at y = -19 after a swipe).
+            if issue.auditType == .contrast, let element = issue.element, element.frame.minY < 0 {
+                return true
+            }
+            let element = issue.element.map {
+                "\($0.elementType.rawValue) '\($0.label)' id='\($0.identifier)' frame=\($0.frame)"
+            } ?? "? \(issue.detailedDescription)"
+            issues.append("\(issue.compactDescription) [type \(issue.auditType.rawValue)]: \(element)")
             return true
         }
         XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n"), file: file, line: line)
@@ -60,15 +66,21 @@ final class UIStateTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Maya's iPhone"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Looks like Studio Mac"].exists)
         XCTAssertFalse(app.staticTexts["Paired"].exists)
-        // Audit with the list scrolled clear of the translucent tab bar.
+        // Audit with the list scrolled clear of the translucent tab bar. At rest,
+        // the audit reports rows under the tab bar without an element, so they
+        // cannot be told apart from the app's own; the status pill is audited
+        // at rest in testEmptyNearbyExplainsWhatToDo instead.
         app.swipeUp()
         try audit(app)
     }
 
     @MainActor
-    func testEmptyNearbyExplainsWhatToDo() {
+    func testEmptyNearbyExplainsWhatToDo() throws {
         let app = launch("nearby-empty")
         XCTAssertTrue(app.staticTexts["Looking for devices…"].waitForExistence(timeout: 10))
+        // At rest, with the status pill fully on screen.
+        XCTAssertTrue(app.staticTexts["visibility.pill"].exists)
+        try audit(app)
     }
 
     @MainActor
@@ -133,5 +145,99 @@ final class UIStateTests: XCTestCase {
         let app = launch("local-network-denied")
         XCTAssertTrue(app.staticTexts["Local network access is off"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Open Settings"].exists)
+    }
+
+    // MARK: Prompt arming (PROMPT-1)
+    //
+    // A press that starts while Accept or "Codes match" is still disabled,
+    // and is held until after the button arms, must not answer. In these
+    // scenarios the fake core closes a prompt once it is answered, so an
+    // answer shows as the prompt going away. The arming delay is made longer
+    // (never shorter) so that the press reliably starts inside it; each test
+    // has a positive control showing that an answer does close the prompt.
+
+    private let armDelayMs = 4_000
+    private let holdPastArming: TimeInterval = 6
+
+    @MainActor
+    private func launchArming(_ scenario: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-dropumi-ui-test", "-dropumi-scenario", scenario, "-dropumi-arm-delay-ms", String(armDelayMs),
+        ]
+        app.launch()
+        return app
+    }
+
+    /// True when `element` is still there after `seconds`, the window in which
+    /// the fake core's PromptClosed would arrive.
+    @MainActor
+    private func stays(_ element: XCUIElement, seconds: TimeInterval = 3) -> Bool {
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+        return XCTWaiter().wait(for: [gone], timeout: seconds) == .timedOut
+    }
+
+    @MainActor
+    private func waitUntilEnabled(_ element: XCUIElement) -> Bool {
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: element)
+        return XCTWaiter().wait(for: [enabled], timeout: TimeInterval(armDelayMs) / 1000 + 5) == .completed
+    }
+
+    @MainActor
+    private func pressedBeforeArmingNeverAnswers(scenario: String, button: String) {
+        let app = launchArming(scenario)
+        let control = app.buttons[button]
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        XCTAssertFalse(control.isEnabled, "the press must start before the button arms")
+        control.press(forDuration: holdPastArming)
+        XCTAssertTrue(stays(control), "a press that started before arming answered the prompt")
+        XCTAssertTrue(control.isEnabled, "the press must end after the button armed")
+    }
+
+    /// The positive control: a press after arming answers. `held` uses the same
+    /// long hold as the negative test, so that test cannot pass only because a
+    /// long hold never fires a button.
+    @MainActor
+    private func pressAfterArmingAnswers(scenario: String, button: String, held: Bool = false) {
+        let app = launchArming(scenario)
+        let control = app.buttons[button]
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntilEnabled(control))
+        if held {
+            control.press(forDuration: holdPastArming)
+        } else {
+            control.tap()
+        }
+        XCTAssertFalse(stays(control), "an armed button did not answer the prompt")
+    }
+
+    @MainActor
+    func testAcceptPressedBeforeArmingNeverAccepts() {
+        pressedBeforeArmingNeverAnswers(scenario: "offer-closes-on-answer", button: "offer.accept")
+    }
+
+    @MainActor
+    func testAcceptAfterArmingAnswers() {
+        pressAfterArmingAnswers(scenario: "offer-closes-on-answer", button: "offer.accept")
+    }
+
+    @MainActor
+    func testAcceptHeldAfterArmingAnswers() {
+        pressAfterArmingAnswers(scenario: "offer-closes-on-answer", button: "offer.accept", held: true)
+    }
+
+    @MainActor
+    func testCodesMatchPressedBeforeArmingNeverConfirms() {
+        pressedBeforeArmingNeverAnswers(scenario: "code-closes-on-answer", button: "code.match")
+    }
+
+    @MainActor
+    func testCodesMatchAfterArmingConfirms() {
+        pressAfterArmingAnswers(scenario: "code-closes-on-answer", button: "code.match")
+    }
+
+    @MainActor
+    func testCodesMatchHeldAfterArmingConfirms() {
+        pressAfterArmingAnswers(scenario: "code-closes-on-answer", button: "code.match", held: true)
     }
 }
