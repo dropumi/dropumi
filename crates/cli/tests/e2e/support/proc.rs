@@ -357,10 +357,16 @@ pub fn args(v: &[&str]) -> Vec<String> {
 
 /// Starts a loopback receiver and returns it with its port.
 pub fn receiver(dev: &Device, dir: &Path, extra: &[&str]) -> (Proc, u16) {
+    receiver_on(dev, dir, "127.0.0.1", extra)
+}
+
+/// Starts a receiver bound to `host` (a real device's interop tests bind
+/// the Mac's LAN address) and returns it with its port.
+pub fn receiver_on(dev: &Device, dir: &Path, host: &str, extra: &[&str]) -> (Proc, u16) {
     let mut a = args(&[
         "receive",
         "--bind",
-        "127.0.0.1",
+        host,
         "--port",
         "0",
         "--no-mdns",
@@ -373,12 +379,17 @@ pub fn receiver(dev: &Device, dir: &Path, extra: &[&str]) -> (Proc, u16) {
     (p, u16::try_from(port).unwrap())
 }
 
-/// Starts a sender.
+/// Starts a loopback sender.
 pub fn sender(dev: &Device, files: &[PathBuf], port: u16, extra: &[&str]) -> Proc {
+    sender_to(dev, files, "127.0.0.1", port, extra)
+}
+
+/// Starts a sender to `host:port`.
+pub fn sender_to(dev: &Device, files: &[PathBuf], host: &str, port: u16, extra: &[&str]) -> Proc {
     let mut a = vec!["send".to_owned()];
     a.extend(files.iter().map(|f| f.display().to_string()));
     a.push("--to".into());
-    a.push(format!("127.0.0.1:{port}"));
+    a.push(format!("{host}:{port}"));
     a.extend(args(extra));
     Proc::spawn(&format!("sender {}", dev.name), dev.config(), &a)
 }

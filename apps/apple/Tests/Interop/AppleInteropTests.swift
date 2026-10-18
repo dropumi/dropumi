@@ -36,6 +36,12 @@ nonisolated enum Interop {
         return value
     }
 
+    /// This device's IPv4 addresses on Wi-Fi or Ethernet (comma-separated),
+    /// so the harness can reach a real device over the LAN.
+    static func wifiAddresses() -> String {
+        LocalAddresses.ipv4().filter { $0.interface.hasPrefix("en") }.map(\.text).joined(separator: ",")
+    }
+
     /// One status line for the harness.
     static func status(_ event: String, _ fields: [String: String] = [:]) {
         var object = fields
@@ -117,7 +123,7 @@ struct AppleInteropTests {
         let cliFingerprint = try Interop.value("DROPUMI_CLI_FP")
         await model.finishOnboarding(visibility: .everyone)
         let port = try await until("receiving") { model.receiver?.port }
-        Interop.status("listening", ["port": String(port)])
+        Interop.status("listening", ["port": String(port), "addresses": Interop.wifiAddresses()])
         let prompt = try await waitForPrompt(model)
         guard case let .offer(_, _, peer, code, files, _, _, _) = prompt else {
             throw InteropFailure(message: "expected an offer")
@@ -172,7 +178,9 @@ struct AppleInteropTests {
     private func bonjourAdvertise(_ model: AppModel) async throws {
         await model.finishOnboarding(visibility: .pairedOnly)
         let receiver = try await until("advertising", model) { model.receiver?.instance != nil ? model.receiver : nil }
-        Interop.status("advertising", ["instance": receiver.instance ?? "", "port": String(receiver.port)])
+        Interop.status("advertising", [
+            "instance": receiver.instance ?? "", "port": String(receiver.port), "addresses": Interop.wifiAddresses(),
+        ])
         let banner = try await until("the refused sender") { model.banner }
         Interop.status("refused", ["title": banner.title])
         #expect(model.prompts.isEmpty, "a sender that isn't paired never reaches a prompt")
