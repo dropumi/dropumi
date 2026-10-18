@@ -698,7 +698,7 @@ public final class AppModel {
             }
             Task { await refreshTrusted() }
         case let .sessionClosed(peer, code):
-            if code == "not_authorized", let peer, !peer.trusted { noticeUnpairedSender() }
+            if code == "not_authorized" { noticeRefused(peer) }
         case let .warning(message):
             showWarning(message)
         case .eventsDropped:
@@ -750,13 +750,33 @@ public final class AppModel {
         historyStore.save(history)
     }
 
-    private func noticeUnpairedSender() {
+    /// The core refused a connection (`not_authorized`). Rate-limited, and
+    /// never in place of another notice: any host on the network can cause it.
+    ///
+    /// Without a peer the refusal came during the handshake and its reason is
+    /// not known: a device that isn't paired, a pairing request while no
+    /// pairing window is open (from paired devices too), a paired device
+    /// while a window is open, or an unreadable list of paired devices. So the
+    /// notice says only that a device was refused, and never offers Everyone
+    /// (as on Android).
+    private func noticeRefused(_ peer: PeerInfo?) {
+        if let peer, peer.trusted { return }
+        guard banner == nil else { return }
         let now = clock()
         if let last = lastUnpairedNotice, now.timeIntervalSince(last) < 60 { return }
         lastUnpairedNotice = now
-        banner = Banner(style: .info, title: String(localized: "A device that isn't paired tried to send"),
-                        message: String(localized: "Pair with it, or let everyone send for 10 minutes."),
-                        action: .openEveryone)
+        if peer == nil {
+            banner = Banner(
+                style: .info, title: String(localized: "A device was refused"),
+                message: String(localized: """
+                    A device on this network tried to connect and was turned away. \
+                    To pair with it, choose Wait for a device under Pair a device first.
+                    """))
+        } else {
+            banner = Banner(style: .info, title: String(localized: "A device that isn't paired tried to send"),
+                            message: String(localized: "Pair with it, or let everyone send for 10 minutes."),
+                            action: .openEveryone)
+        }
     }
 
     private func resync() {

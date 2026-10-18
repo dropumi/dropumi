@@ -56,6 +56,50 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
         #expect(model.banner == nil)
     }
 
+    // MARK: Refused connections
+
+    /// The core refuses a device it does not know during the handshake and
+    /// reports no peer (found on an iPhone 15 against the CLI, Paired only).
+    /// The reason is not known then, so the notice says only that a device
+    /// was refused and offers no Everyone shortcut.
+    @Test func refusalWithoutAPeerSaysOnlyThatADeviceWasRefused() throws {
+        let (model, _) = try makeModel()
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        let banner = try #require(model.banner)
+        #expect(banner.title == "A device was refused")
+        #expect(banner.action == nil)
+    }
+
+    @Test func refusedPeerThatIsNotPairedOffersEveryone() throws {
+        let (model, _) = try makeModel()
+        model.apply([.sessionClosed(peer: Fixtures.peer(), code: "not_authorized")])
+        let banner = try #require(model.banner)
+        #expect(banner.title == "A device that isn't paired tried to send")
+        #expect(banner.action == .openEveryone)
+    }
+
+    @Test func refusedPairedPeerShowsNothing() throws {
+        let (model, _) = try makeModel()
+        model.apply([.sessionClosed(peer: Fixtures.peer(trusted: true), code: "not_authorized")])
+        #expect(model.banner == nil)
+    }
+
+    /// Any host on the network can cause a refusal: it never replaces another
+    /// notice, and it is shown at most once a minute.
+    @Test func refusalNeverReplacesANoticeAndIsRateLimited() throws {
+        let (model, _) = try makeModel()
+        let other = Banner(style: .warning, title: "Receiving stopped", message: "")
+        model.banner = other
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        #expect(model.banner?.title == "Receiving stopped")
+        model.banner = nil
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        #expect(model.banner?.title == "A device was refused")
+        model.banner = nil
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        #expect(model.banner == nil, "a second refusal within a minute is not shown again")
+    }
+
     @Test func successOnlyAfterFinishedCompleted() async throws {
         let (model, _) = try makeModel()
         model.apply([
