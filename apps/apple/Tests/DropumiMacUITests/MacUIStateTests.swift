@@ -22,6 +22,16 @@ final class MacUIStateTests: XCTestCase {
         let sheet = app.sheets.element(boundBy: 0)
         let sheetFrame = sheet.exists ? sheet.frame : .null
         try app.performAccessibilityAudit { issue in
+            // The code digits: the audit reports "Contrast failed" on them on
+            // macOS 27.0.1, though they measure 13.00:1 on screen (#F5F8FB on
+            // #192E46: `screencapture -R` of the element's frame, WCAG
+            // luminance of its darkest and lightest pixels; 2026-10-18). The
+            // iPhone's audit checks the same SasCodeView's contrast and passes.
+            // XCUITest cannot capture the built-in display here, so the
+            // measurement cannot run in this test.
+            if issue.auditType == .contrast, issue.element?.identifier == "code.digits" {
+                return true
+            }
             // Behind a presented sheet the window's content is inert, and
             // where the sheet covers it the audit measures the sheet's pixels;
             // its contrast there is not its own (the same empty-state text
@@ -42,14 +52,17 @@ final class MacUIStateTests: XCTestCase {
                 return true
             }
             // SwiftUI's own split-view panes (TabView .sidebarAdaptable: groups
-            // with no identifier spanning the window's height) and the Touch
-            // Bar are system elements the app cannot describe: labelling the
-            // tab view's content left them unchanged (macOS 27.0.1, 2026-10-18).
+            // with no identifier spanning the window's height), the root group
+            // of every sheet (no identifier, exactly the sheet's frame) and the
+            // Touch Bar are system elements the app cannot describe: labelling
+            // the tab view's or the sheet's content left them unchanged and
+            // put the label on an inner element (macOS 27.0.1, 2026-10-18).
             if issue.auditType == .sufficientElementDescription, let element = issue.element,
                element.identifier.isEmpty,
                element.elementType == .touchBar
                 || (element.elementType == .group && element.frame.minY == windowFrame.minY
-                    && element.frame.height == windowFrame.height) {
+                    && element.frame.height == windowFrame.height)
+                || (element.elementType == .group && element.frame == sheetFrame) {
                 return true
             }
             let element = issue.element.map {
