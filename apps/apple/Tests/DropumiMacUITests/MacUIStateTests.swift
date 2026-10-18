@@ -22,12 +22,18 @@ final class MacUIStateTests: XCTestCase {
         let sheet = app.sheets.element(boundBy: 0)
         let sheetFrame = sheet.exists ? sheet.frame : .null
         try app.performAccessibilityAudit { issue in
-            // Behind a presented sheet the window's content is inert; its
-            // contrast there is not its own (the same empty-state text passes
-            // with no sheet, testEmptyNearbyExplainsWhatToDo). Everything inside
-            // the sheet is still audited.
+            // Behind a presented sheet the window's content is inert, and
+            // where the sheet covers it the audit measures the sheet's pixels;
+            // its contrast there is not its own (the same empty-state text
+            // passes with no sheet, testEmptyNearbyExplainsWhatToDo). An
+            // element is behind the sheet when it lies outside the sheet's
+            // frame, or when no element of the sheet has its identifier.
+            // Everything inside the sheet is still audited.
             if issue.auditType == .contrast, let element = issue.element, !sheetFrame.isNull,
-               !sheetFrame.contains(element.frame) {
+               !sheetFrame.contains(element.frame)
+                || (!element.identifier.isEmpty
+                    && !sheet.descendants(matching: .any).matching(identifier: element.identifier)
+                        .element(boundBy: 0).exists) {
                 return true
             }
             // Scrolling content passes under the translucent tab bar; its
