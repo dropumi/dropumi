@@ -248,12 +248,13 @@ def main():
     folder = None
     scheme = "http"
     try:
-        if args.https and args.cert and args.key:
-            cert, key = args.cert, args.key
-            fingerprint = openssl("x509", "-noout", "-fingerprint", "-sha256", "-in", cert)
-        elif args.https:
-            folder = tempfile.mkdtemp(prefix="dropumi-research-")
-            cert, key, fingerprint = self_signed(folder, address)
+        if args.https:
+            if args.cert and args.key:
+                cert, key = args.cert, args.key
+                fingerprint = openssl("x509", "-noout", "-fingerprint", "-sha256", "-in", cert)
+            else:
+                folder = tempfile.mkdtemp(prefix="dropumi-research-")
+                cert, key, fingerprint = self_signed(folder, address)
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(cert, key)
             server.socket = context.wrap_socket(server.socket, server_side=True)
