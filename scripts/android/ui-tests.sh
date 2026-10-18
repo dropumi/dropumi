@@ -38,6 +38,15 @@
 # any other. On an image that allows the link, both tests run in full and
 # must pass.
 #
+# Devices with a secure lock screen. LockScreenTest#promptNeverShowsOverTheLockScreen
+# locks the screen and must be able to unlock it again, so it never runs where
+# a PIN, pattern or password is set: there it fails on purpose with "needs a
+# device without a secure lock screen (it must be unlocked again)". The script
+# prints it as "not runnable on this device (secure lock screen)" and does not
+# count it, but only for that exact assertion of that test; any other failure
+# of it fails the run. Its sibling, promptWindowRequestsNoLockScreenFlags, runs
+# everywhere.
+#
 # Usage: bash scripts/android/ui-tests.sh [--no-build] [--class SPEC]
 #          [--exclude-local-or-device]
 #   ANDROID_SERIAL picks the device when several are connected.
@@ -46,7 +55,8 @@
 #                              services, NSD), as a CI emulator job would
 #                              (there is none; ADR-0013 S-AN4)
 # Gradle needs JDK 17 (JAVA_HOME). Exit status: 0 when both passes report
-# OK, or when their only failures are the link-step failures above; 1
+# OK, or when their only failures are the link-step and lock-screen
+# failures above; 1
 # otherwise. The full output of each pass is kept in a temporary folder
 # whose path is printed.
 set -euo pipefail
@@ -144,8 +154,10 @@ logs="$(mktemp -d)"
 status=0
 
 # Prints one line per failed test in a pass log ($1): "link<TAB>label<TAB>test"
-# for a failure of the two hard-link tests' link step (see the header), and
-# "other<TAB><TAB>test" for any other failure. A failure's status keys come
+# for a failure of the two hard-link tests' link step (see the header),
+# "lock<TAB>label<TAB>test" for LockScreenTest's precondition on a device with a
+# secure lock screen (the test must never try to defeat one, so it cannot run
+# there), and "other<TAB><TAB>test" for any other failure. A failure's status keys come
 # in any order (it differs per API level) before its
 # INSTRUMENTATION_STATUS_CODE: -2 line; only the first three stack lines
 # are read.
@@ -153,7 +165,11 @@ classify_failures() {
   awk '
     function reset() { cls = ""; tst = ""; s1 = ""; s2 = ""; s3 = ""; in_stack = 0; n = 0 }
     function trim(s) { sub(/^[ \t]+/, "", s); return s }
-    BEGIN { reset(); g = "io.github.dropumi.files.DocumentGuardTest" }
+    BEGIN {
+      reset(); g = "io.github.dropumi.files.DocumentGuardTest"
+      lk = "io.github.dropumi.prompt.LockScreenTest#promptNeverShowsOverTheLockScreen"
+      lmsg = "java.lang.AssertionError: needs a device without a secure lock screen (it must be unlocked again)"
+    }
     /^INSTRUMENTATION_STATUS: [a-z_]+=/ {
       rest = substr($0, 25); eq = index(rest, "=")
       key = substr(rest, 1, eq - 1); val = substr(rest, eq + 1)
@@ -171,6 +187,8 @@ classify_failures() {
           index(s2, "at org.junit.Assert.fail(") == 1 &&
           index(s3, "at " g ".linkToIdentityKey(") == 1
         if (link) print "link\t" substr(s1, 27) "\t" name
+        else if (name == lk && s1 == lmsg && index(s2, "at org.junit.Assert.fail(") == 1)
+          print "lock\tsecure lock screen\t" name
         else print "other\t\t" name
       }
       reset()
@@ -193,20 +211,22 @@ run_pass() {
   local result failures link other broken=no
   result="$(grep -E '^(OK \(|Tests run:|FAILURES!!!)' "${log}" | tr '\n' ' ' || true)"
   failures="$(classify_failures "${log}")"
-  link="$(grep -c '^link' <<< "${failures}" || true)"
+  link="$(grep -c -E '^(link|lock)' <<< "${failures}" || true)"
   other="$(grep -c '^other' <<< "${failures}" || true)"
   if grep -qE '^INSTRUMENTATION_FAILED|Process crashed' "${log}"; then broken=yes; fi
   if [[ "${broken}" == no ]] && grep -q '^OK (' "${log}" && ! grep -q '^FAILURES!!!' "${log}"; then
     echo "${name}: ${result}"
   elif [[ "${broken}" == no && "${other}" == 0 && "${link}" -gt 0 ]] \
     && grep -qE "^Tests run: [0-9]+,  Failures: ${link}\$" "${log}"; then
-    echo "${name}: passed except ${link} not runnable on this image: ${result}"
+    echo "${name}: passed except ${link} not runnable on this image or device: ${result}"
   else
     echo "${name}: FAILED ${result}"
     { grep -E '^INSTRUMENTATION_FAILED|Process crashed' "${log}" || true; } | sed 's/^/  /'
     status=1
   fi
-  awk -F '\t' '$1 == "link" { print "  " $2 ": " $3 } $1 == "other" { print "  failed: " $3 }' <<< "${failures}"
+  awk -F '\t' '$1 == "link" { print "  " $2 ": " $3 }
+    $1 == "lock" { print "  not runnable on this device (" $2 "): " $3 }
+    $1 == "other" { print "  failed: " $3 }' <<< "${failures}"
 }
 
 sdk_int="$("${adb}" shell getprop ro.build.version.sdk | tr -d '\r')"
