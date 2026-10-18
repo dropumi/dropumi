@@ -155,7 +155,7 @@ class OverlayProtectionTest {
             compose.waitUntil(TIMEOUT_MS) { exists("confirmation") }
             assertTrue(scenario.rootFiltersObscuredTouches())
             val hides = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-            if (hides) assertTrue("overlays hidden while it shows", ourWindowDump().contains(HIDE_OVERLAYS))
+            if (hides) assertTrue("overlays hidden while it shows", hidesOverlays(ourWindowDump()))
             for (flags in obscuredFlags()) {
                 scenario.tap("confirmation.confirm", flags)
                 assertTrue(exists("confirmation"))
@@ -168,7 +168,7 @@ class OverlayProtectionTest {
             compose.waitUntil(TIMEOUT_MS) { model.state.value.visibility == ReceiveVisibility.EVERYONE }
             compose.waitUntil(TIMEOUT_MS) { !exists("confirmation") }
             assertFalse(scenario.rootFiltersObscuredTouches())
-            if (hides) compose.waitUntil(TIMEOUT_MS) { !ourWindowDump().contains(HIDE_OVERLAYS) }
+            if (hides) compose.waitUntil(TIMEOUT_MS) { !hidesOverlays(ourWindowDump()) }
         }
     }
 
@@ -232,10 +232,10 @@ class OverlayProtectionTest {
     fun overlayWindowsHiddenOnlyWhilePromptShows() {
         val hides = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         launchShowing("prompt.offer").use {
-            assertEquals(hides, ourWindowDump().contains(HIDE_OVERLAYS))
+            assertEquals(hides, hidesOverlays(ourWindowDump()))
             fake.core.emit(NodeEvent.PromptClosed(1u, PromptCloseReason.WITHDRAWN))
             compose.waitUntil(TIMEOUT_MS) { !exists("prompt.offer") }
-            compose.waitUntil(TIMEOUT_MS) { !ourWindowDump().contains(HIDE_OVERLAYS) }
+            compose.waitUntil(TIMEOUT_MS) { !hidesOverlays(ourWindowDump()) }
         }
     }
 
@@ -251,9 +251,22 @@ class OverlayProtectionTest {
         return dump.substring(start, end)
     }
 
+    /**
+     * Whether the window hides other apps' overlays. AOSP names the flag in
+     * the dump; Samsung One UI (Galaxy A54, Android 16) prints the private
+     * flags as hex instead (`pfl=10088840`), so the bit is read from there.
+     */
+    private fun hidesOverlays(dump: String): Boolean {
+        if (dump.contains(HIDE_OVERLAYS)) return true
+        val hex = Regex("""\bpfl=([0-9a-fA-F]+)\b""").find(dump)?.groupValues?.get(1) ?: return false
+        return (hex.toLong(16) and HIDE_OVERLAYS_BIT) != 0L
+    }
+
     private companion object {
         const val TIMEOUT_MS = 10_000L
         const val HIDE_OVERLAYS = "HIDE_NON_SYSTEM_OVERLAY_WINDOWS"
+        /** WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS (1 << 19). */
+        const val HIDE_OVERLAYS_BIT = 0x0008_0000L
         const val ARMED_AFTER_MS = 700L
         const val SHARED = "content://io.github.dropumi.test.documents/document/1"
 
