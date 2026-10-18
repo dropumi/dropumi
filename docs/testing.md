@@ -222,7 +222,7 @@ local run"). No platform is ever labelled "supported".
 | iPhone 15, iPad Air (5th generation), the Mac on a LAN | Device matrix | Not tested |
 | Android app | Milestone 2c | Not tested (no app yet) |
 | GitHub runner `macos-latest`, job `apple (app)` | Package tests, iOS simulator app tests, unsigned macOS build | Not tested (pending CI; needs Xcode 27, gate G5) |
-| Browser companion | Proposal and research prototype only ([ADR-0011](adr/0011-browser-companion.md)) | Not tested |
+| Browser companion | Proposal only. The research page (`poc/web/`, never deployed) was measured on 2026-10-18 on Safari, Chrome and Brave (macOS 27.0.1), Safari (iOS 27.0.1) and Chrome (Android 16) over one Wi-Fi network: secure context per origin, APIs, HTTP throughput and WebRTC DataChannels ([ADR-0011](adr/0011-browser-companion.md)) | Not tested (no browser path exists; research measurements only) |
 
 Other local checks on the same machine: `cargo +1.89.0 check --workspace --all-targets --all-features --locked`
 (MSRV) finished; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked` finished with
