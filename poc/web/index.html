@@ -32,6 +32,7 @@
   <legend>1. Offer (on device A)</legend>
   <button id="makeOffer">Create offer</button>
   <textarea id="offer" placeholder="Offer SDP appears here; copy it to device B" readonly></textarea>
+  <button data-copy="offer">Copy offer</button>
 </fieldset>
 
 <fieldset>
@@ -39,6 +40,7 @@
   <textarea id="offerIn" placeholder="Paste device A's offer here"></textarea>
   <button id="makeAnswer">Create answer</button>
   <textarea id="answer" placeholder="Answer SDP appears here; copy it back to device A" readonly></textarea>
+  <button data-copy="answer">Copy answer</button>
 </fieldset>
 
 <fieldset>
@@ -53,9 +55,12 @@
   <button id="run" disabled>Send</button>
 </fieldset>
 
+<p id="err" role="alert" style="color:#b00020"></p>
+
 <fieldset>
   <legend>Result (copy into ADR-0011; contains no addresses)</legend>
   <pre id="out"></pre>
+  <button data-copy="out">Copy result</button>
 </fieldset>
 
 <script>
@@ -65,9 +70,30 @@ const CONFIG = { iceServers: [] };
 const CHUNK = 64 * 1024;
 const $ = (id) => document.getElementById(id);
 const log = (o) => { $("out").textContent = JSON.stringify(o, null, 2); };
+// Sends the Result block back to the serving computer (serve.py --results);
+// best effort, and nothing else is sent.
+const report = (what) => {
+  fetch("/result", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ kind: what }, result)),
+  }).catch(() => {});
+};
+// Every button reports its error on the page instead of failing silently.
+const guarded = (fn) => async () => {
+  $("err").textContent = "";
+  try { await fn(); } catch (e) {
+    $("err").textContent = "Error: " + (e && e.message ? e.message : String(e));
+    (result.errors = result.errors || []).push(e && e.message ? e.message : "Error");
+    log(result);
+    report("webrtc");
+  }
+};
 let pc = null;
 let channel = null;
+const runTag = (new URLSearchParams(location.search).get("tag") || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
 const result = {
+  tag: runTag,
   secureContext: window.isSecureContext,
   origin: location.protocol + "//" + (location.hostname === "localhost" ? "localhost" : "<lan-host>"),
   userAgent: navigator.userAgent,
@@ -101,10 +127,29 @@ function candidateSummary(sdp) {
   });
 }
 
+// The candidate pair the connection uses: types and protocol only, never
+// the addresses.
+async function selectedPair(conn) {
+  const stats = await conn.getStats();
+  let pair = null;
+  stats.forEach((s) => {
+    if (s.type === "transport" && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+  });
+  if (!pair) stats.forEach((s) => { if (s.type === "candidate-pair" && s.nominated && s.state === "succeeded") pair = s; });
+  if (!pair) return null;
+  const side = (id) => {
+    const c = stats.get(id);
+    return c ? { type: c.candidateType, protocol: c.protocol, mdnsName: !!(c.address && c.address.endsWith(".local")) } : null;
+  };
+  return { local: side(pair.localCandidateId), remote: side(pair.remoteCandidateId) };
+}
+
 function setup(conn) {
-  conn.addEventListener("connectionstatechange", () => {
+  conn.addEventListener("connectionstatechange", async () => {
     result.connectionState = conn.connectionState;
+    if (conn.connectionState === "connected") result.selectedPair = await selectedPair(conn);
     log(result);
+    if (conn.connectionState === "connected" || conn.connectionState === "failed") report("webrtc");
   });
 }
 
@@ -124,6 +169,7 @@ function wire(ch) {
         channel.send(JSON.stringify({ ack: received }));
         result.receivedBytes = received;
         log(result);
+        report("webrtc");
         received = 0;
       } else if (msg.ack !== undefined) {
         const seconds = (performance.now() - result.started) / 1000;
@@ -132,6 +178,7 @@ function wire(ch) {
         result.mibPerSecond = Number((msg.ack / 1048576 / seconds).toFixed(1));
         delete result.started;
         log(result);
+        report("webrtc");
       }
     } else {
       received += e.data.byteLength;
@@ -139,7 +186,7 @@ function wire(ch) {
   });
 }
 
-$("makeOffer").onclick = async () => {
+async function createOffer() {
   pc = new RTCPeerConnection(CONFIG);
   setup(pc);
   wire(pc.createDataChannel("dropumi-poc", { ordered: true }));
@@ -148,9 +195,9 @@ $("makeOffer").onclick = async () => {
   $("offer").value = pc.localDescription.sdp;
   result.localCandidates = candidateSummary(pc.localDescription.sdp);
   log(result);
-};
+}
 
-$("makeAnswer").onclick = async () => {
+async function createAnswer() {
   pc = new RTCPeerConnection(CONFIG);
   setup(pc);
   pc.addEventListener("datachannel", (e) => wire(e.channel));
@@ -161,15 +208,15 @@ $("makeAnswer").onclick = async () => {
   result.localCandidates = candidateSummary(pc.localDescription.sdp);
   result.remoteCandidates = candidateSummary($("offerIn").value);
   log(result);
-};
+}
 
-$("connect").onclick = async () => {
+async function connectAnswer() {
   await pc.setRemoteDescription({ type: "answer", sdp: $("answerIn").value });
   result.remoteCandidates = candidateSummary($("answerIn").value);
   log(result);
-};
+}
 
-$("run").onclick = async () => {
+async function send() {
   const total = Math.max(1, Math.min(1024, Number($("mb").value))) * 1048576;
   const chunk = new Uint8Array(CHUNK);
   crypto.getRandomValues(chunk.subarray(0, 65536));
@@ -185,7 +232,81 @@ $("run").onclick = async () => {
     sent += n;
   }
   channel.send(JSON.stringify({ done: true }));
-};
+}
+
+$("makeOffer").onclick = guarded(createOffer);
+$("makeAnswer").onclick = guarded(createAnswer);
+$("connect").onclick = guarded(connectAnswer);
+$("run").onclick = guarded(send);
+
+// Auto mode (?auto=offer|answer&room=R[&mb=N]): the serving computer relays
+// the offer and the answer (/signal), as an app serving this page could, so
+// two pages connect with no copying; the offering side then measures.
+const params = new URLSearchParams(location.search);
+const auto = params.get("auto");
+const room = params.get("room") || "";
+const signalUrl = (role) => "/signal?room=" + encodeURIComponent(room) + "&role=" + role;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fetchSignal(role) {
+  for (let i = 0; i < 300; i++) {  // about 90 s
+    const r = await fetch(signalUrl(role), { cache: "no-store" });
+    if (r.status === 200) return r.text();
+    await pause(300);
+  }
+  throw new Error("no " + role + " arrived from the other page");
+}
+async function postSignal(role, sdp) {
+  const r = await fetch(signalUrl(role), { method: "POST", body: sdp });
+  if (!r.ok) throw new Error("the server refused the " + role + ": " + r.status);
+}
+function channelOpened(ms) {
+  if (result.channelOpen) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("the channel did not open within " + ms / 1000 + " s")), ms);
+    channel.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
+}
+if ((auto === "offer" || auto === "answer") && /^[A-Za-z0-9]{1,64}$/.test(room)) {
+  result.auto = auto;
+  guarded(async () => {
+    if (auto === "offer") {
+      await createOffer();
+      await postSignal("offer", $("offer").value);
+      $("answerIn").value = await fetchSignal("answer");
+      await connectAnswer();
+      await channelOpened(60000);
+      if (params.has("mb")) $("mb").value = params.get("mb");
+      await send();
+    } else {
+      $("offerIn").value = await fetchSignal("offer");
+      await createAnswer();
+      await postSignal("answer", $("answer").value);
+    }
+  })();
+}
+
+// Copy buttons. navigator.clipboard needs a secure context; elsewhere the
+// text is selected and copied with execCommand, or left selected.
+document.querySelectorAll("[data-copy]").forEach((button) => {
+  button.onclick = async () => {
+    const el = $(button.dataset.copy);
+    const text = "value" in el ? el.value : el.textContent;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        if ("select" in el) { el.select(); } else {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+        }
+        if (!document.execCommand("copy")) throw new Error("copy refused");
+      }
+      button.textContent = "Copied";
+    } catch (e) { button.textContent = "Select and copy by hand"; }
+  };
+});
 </script>
 </body>
 </html>

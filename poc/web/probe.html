@@ -1,0 +1,206 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!--
+  Research prototype for ADR-0011 (browser companion): what a page served by
+  the app on the local network can do in this browser. Served by
+  poc/web/serve.py over plain HTTP or self-signed HTTPS. No dependencies, no
+  requests except to the serving computer. Never deployed; not a Dropumi
+  feature.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dropumi research prototype: local page probe</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 1rem; max-width: 46rem; }
+  .banner { background: #fff3cd; border: 1px solid #e0c97a; padding: .5rem .75rem; border-radius: 6px; }
+  button, input { font: inherit; margin: .25rem .25rem .25rem 0; padding: .35rem .8rem; }
+  pre { background: #f4f6f8; padding: .5rem; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+  fieldset { margin: .75rem 0; }
+  #drop { border: 2px dashed #8aa; padding: 1rem; text-align: center; }
+</style>
+</head>
+<body>
+<p class="banner"><strong>Research prototype.</strong> Not a Dropumi feature, not secure, not deployed. It only records what a page served on this network can do in this browser.</p>
+
+<fieldset>
+  <legend>1. Capabilities (automatic)</legend>
+  <button id="again">Run again</button>
+</fieldset>
+
+<fieldset>
+  <legend>2. Speed to the serving computer</legend>
+  <label>Megabytes <input id="mb" type="number" value="64" min="1" max="512"></label>
+  <button id="speed">Measure upload and download</button>
+</fieldset>
+
+<fieldset>
+  <legend>3. Files (needs you)</legend>
+  <input id="pick" type="file" multiple>
+  <div id="drop">Drop files here</div>
+  <button id="save">Save a test file (Blob download)</button>
+  <button id="share">Share a test file</button>
+  <button id="copy">Copy the result</button>
+</fieldset>
+
+<fieldset>
+  <legend>Result (copy into ADR-0011; contains no addresses or names)</legend>
+  <pre id="out"></pre>
+</fieldset>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const runTag = (new URLSearchParams(location.search).get("tag") || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
+const result = {
+  tag: runTag,
+  page: location.protocol + "//" + (location.hostname === "localhost" ? "localhost" : "<lan-host>"),
+  userAgent: navigator.userAgent,
+  // Brave reports Chrome's user agent; its brands and navigator.brave tell them apart.
+  brands: navigator.userAgentData ? navigator.userAgentData.brands.map((b) => b.brand + " " + b.version) : null,
+  brave: !!navigator.brave,
+};
+const show = () => { $("out").textContent = JSON.stringify(result, null, 2); };
+const failure = (e) => (e && e.name ? e.name : String(e));
+// Sends the Result block back to the serving computer (serve.py --results);
+// best effort, and nothing else is sent.
+const report = (what) => {
+  fetch("/result", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ kind: what }, result)),
+  }).catch(() => {});
+};
+
+async function capabilities() {
+  const c = {};
+  c.isSecureContext = window.isSecureContext;
+  c.getRandomValues = (() => {
+    try { crypto.getRandomValues(new Uint8Array(16)); return true; } catch (e) { return failure(e); }
+  })();
+  c.randomUUID = typeof crypto.randomUUID === "function";
+  c.subtle = !!crypto.subtle;
+  if (crypto.subtle) {
+    try { await crypto.subtle.digest("SHA-256", new Uint8Array(1)); c.subtleSha256 = true; } catch (e) { c.subtleSha256 = failure(e); }
+    try { await crypto.subtle.generateKey({ name: "X25519" }, false, ["deriveBits"]); c.subtleX25519 = true; } catch (e) { c.subtleX25519 = failure(e); }
+  }
+  try {
+    // The smallest valid module: magic number and version.
+    await WebAssembly.instantiate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+    c.webAssembly = true;
+  } catch (e) { c.webAssembly = failure(e); }
+  c.webSocket = typeof WebSocket === "function";
+  c.rtcPeerConnection = typeof RTCPeerConnection === "function";
+  if (c.rtcPeerConnection) {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel("probe");
+      await pc.setLocalDescription(await pc.createOffer());
+      pc.close();
+      c.rtcOffer = true;
+    } catch (e) { c.rtcOffer = failure(e); }
+  }
+  c.serviceWorker = "serviceWorker" in navigator;
+  c.clipboardApi = !!(navigator.clipboard && navigator.clipboard.writeText);
+  c.webShare = typeof navigator.share === "function";
+  c.webShareFiles = typeof navigator.canShare === "function"
+    && navigator.canShare({ files: [new File(["x"], "x.txt", { type: "text/plain" })] });
+  c.showOpenFilePicker = typeof window.showOpenFilePicker === "function";
+  c.notifications = typeof Notification === "function";
+  c.fetchStreamingUpload = (() => {
+    // A request with a stream body reports duplex support by reading it.
+    let duplexRead = false;
+    try {
+      const req = new Request("/upload", {
+        method: "POST",
+        body: new ReadableStream(),
+        get duplex() { duplexRead = true; return "half"; },
+      });
+      return duplexRead && !req.headers.has("Content-Type");
+    } catch (e) { return failure(e); }
+  })();
+  result.capabilities = c;
+  show();
+  report("probe");
+}
+
+$("again").onclick = capabilities;
+
+$("speed").onclick = async () => {
+  const mib = Math.max(1, Math.min(512, Number($("mb").value)));
+  const body = new Uint8Array(mib * 1048576);
+  for (let i = 0; i < body.length; i += 65536) crypto.getRandomValues(body.subarray(i, i + 65536));
+  const s = {};
+  try {
+    let t = performance.now();
+    const up = await (await fetch("/upload", { method: "POST", body, cache: "no-store" })).json();
+    let seconds = (performance.now() - t) / 1000;
+    s.uploadBytes = up.bytes;
+    s.uploadMiBPerSecond = Number((up.bytes / 1048576 / seconds).toFixed(1));
+    t = performance.now();
+    const reader = (await fetch("/download?mib=" + mib, { cache: "no-store" })).body.getReader();
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got += value.byteLength;
+    }
+    seconds = (performance.now() - t) / 1000;
+    s.downloadBytes = got;
+    s.downloadMiBPerSecond = Number((got / 1048576 / seconds).toFixed(1));
+  } catch (e) { s.error = failure(e); }
+  result.speed = s;
+  show();
+  report("probe");
+};
+
+const describeFiles = (files) => ({ count: files.length, bytes: Array.from(files).reduce((n, f) => n + f.size, 0) });
+$("pick").onchange = () => { result.filePicker = describeFiles($("pick").files); show(); };
+$("drop").ondragover = (e) => e.preventDefault();
+$("drop").ondrop = (e) => { e.preventDefault(); result.dragAndDrop = describeFiles(e.dataTransfer.files); show(); };
+
+$("save").onclick = () => {
+  const url = URL.createObjectURL(new Blob(["Dropumi research prototype test file\n"], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "dropumi-probe.txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  result.blobDownload = "started; record whether the file arrived";
+  show();
+};
+
+$("share").onclick = async () => {
+  try {
+    await navigator.share({ files: [new File(["Dropumi research prototype\n"], "dropumi-probe.txt", { type: "text/plain" })] });
+    result.share = true;
+  } catch (e) { result.share = failure(e); }
+  show();
+};
+
+$("copy").onclick = async () => {
+  const text = $("out").textContent;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents($("out"));
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      if (!document.execCommand("copy")) throw new Error("copy refused");
+    }
+    $("copy").textContent = "Copied";
+  } catch (e) { $("copy").textContent = "Copy failed: select the text by hand"; }
+};
+
+// ?auto=1: also run the speed test, so a tester only opens the link.
+capabilities().then(() => {
+  if (new URLSearchParams(location.search).has("auto")) $("speed").click();
+});
+</script>
+</body>
+</html>
