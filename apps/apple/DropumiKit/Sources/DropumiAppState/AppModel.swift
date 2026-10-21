@@ -182,9 +182,10 @@ public final class AppModel {
     /// The window was closed for the background: it opens again when the
     /// app is back in front, if the screen is still shown.
     private var reopenOnActive = false
-    /// An outcome came while no pairing screen was shown: it stays until
-    /// seen.
-    private var outcomeArrivedWhileAway = false
+    /// An outcome the pairing screen shows when it is back: it came while
+    /// no pairing screen was shown, or a prompt covered the screen showing
+    /// it (iOS).
+    private var outcomeKeptWhileAway = false
     /// A tap is closing this device's window or starting the request.
     private var pairStarting = false
     /// Cancel was tapped while `pairStarting`.
@@ -198,7 +199,8 @@ public final class AppModel {
     /// The opening window was closed and then asked for again: it opens
     /// once the first has ended.
     private var reopenAfterOpening = false
-    /// How the last window ended.
+    /// How the last window ended; unknown again once the next one starts
+    /// opening.
     private var lastWindowResult: PairingResult?
     /// Why this device cancelled each of its pairing operations.
     private var cancelReasons: [UInt64: PairingCancelReason] = [:]
@@ -304,7 +306,7 @@ public final class AppModel {
     }
 
     /// iOS: the app is in front again. Still on the pairing screen, this
-    /// device gets ready to pair again.
+    /// device gets ready to pair again, unless a result came meanwhile.
     public func becomeActive() async {
         isInBackground = false
         if reopenOnActive {
@@ -727,14 +729,14 @@ public final class AppModel {
 
     /// The pairing screen appeared. The first one browses and makes this
     /// device ready to pair (it opens a window), unless this device is
-    /// already pairing, or an outcome that came meanwhile is still to be
-    /// seen.
+    /// already pairing, or an outcome that came meanwhile (or that a prompt
+    /// covered) is still to be seen.
     public func enterPairingScreen() {
         pairingScreenClients += 1
         beginBrowsing()
         guard pairingScreenClients == 1 else { return }
-        let away = outcomeArrivedWhileAway
-        outcomeArrivedWhileAway = false
+        let away = outcomeKeptWhileAway
+        outcomeKeptWhileAway = false
         // A request started just before the screen appeared, or a device
         // pairing with this one: the screen shows it.
         if pairStarting || requestRunning || windowEngaged { return }
@@ -751,7 +753,8 @@ public final class AppModel {
     /// The pairing screen went away. The last one stops browsing and closes
     /// this device's window, unless a device is pairing through it (the iOS
     /// code prompt covers the screen). A request keeps running; an outcome
-    /// that comes meanwhile is shown when the screen is back.
+    /// that comes meanwhile is shown when the screen is back, and so is one
+    /// a prompt covered.
     public func leavePairingScreen() {
         guard pairingScreenClients > 0 else { return }
         pairingScreenClients -= 1
@@ -763,7 +766,14 @@ public final class AppModel {
         }
         switch pairingFlow.phase {
         case .finished, .paused:
-            pairingFlow = PairingFlow()
+            if currentPrompt != nil {
+                // On iOS any prompt (an offer too) covers the screen, which
+                // then goes away: the result waits for a tap when it is
+                // back.
+                outcomeKeptWhileAway = true
+            } else {
+                pairingFlow = PairingFlow()
+            }
         case .opening, .waiting:
             pairingFlow.phase = .idle
         case .idle, .switching, .asking, .comparing:
@@ -775,7 +785,7 @@ public final class AppModel {
     /// to pair again.
     public func startWaiting() {
         if pairing?.result != nil { pairing = nil }
-        outcomeArrivedWhileAway = false
+        outcomeKeptWhileAway = false
         pairingFlow = PairingFlow()
         requestWindow()
     }
@@ -811,7 +821,7 @@ public final class AppModel {
         guard !pairStarting, !requestRunning, !windowEngaged else { return false }
         pairStarting = true
         requestAborted = false
-        outcomeArrivedWhileAway = false
+        outcomeKeptWhileAway = false
         pairingFlow = PairingFlow(phase: windowActive ? .switching(name: name) : .asking(name: name))
         return true
     }
@@ -865,6 +875,14 @@ public final class AppModel {
         }
         guard let pairing, pairing.result == nil, operations[pairing.operation] != nil else {
             self.pairing = nil
+            // Nothing is asking any more: this device gets ready again.
+            switch pairingFlow.phase {
+            case .switching, .asking:
+                pairingFlow = PairingFlow(note: .cancelled)
+                requestWindow()
+            case .idle, .opening, .waiting, .comparing, .paused, .finished:
+                break
+            }
             return
         }
         cancelOperation(pairing.operation, .user)
@@ -873,7 +891,7 @@ public final class AppModel {
     /// Done: the outcome was seen.
     public func dismissPairing() {
         if pairing?.result != nil { pairing = nil }
-        outcomeArrivedWhileAway = false
+        outcomeKeptWhileAway = false
         pairingFlow = PairingFlow()
     }
 
@@ -926,6 +944,8 @@ public final class AppModel {
         windowAttempt += 1
         pendingWindowCancel = nil
         reopenAfterOpening = false
+        // A close of this window must not report how an earlier one ended.
+        lastWindowResult = nil
         let task = Task { [weak self] in
             guard let self else { return }
             await self.openWindowWhenFree(forScreen: forScreen)
@@ -1229,14 +1249,18 @@ public final class AppModel {
             if shown {
                 requestWindow()
             } else {
-                outcomeArrivedWhileAway = true
+                outcomeKeptWhileAway = true
             }
         case let .paused(outcome):
             pairingFlow = PairingFlow(phase: .paused(outcome))
-            if !shown { outcomeArrivedWhileAway = true }
+            // A card waits for a tap, also when the app comes back to the
+            // front (the end can come after the background closed it).
+            reopenOnActive = false
+            if !shown { outcomeKeptWhileAway = true }
         case let .finished(outcome):
             pairingFlow = PairingFlow(phase: .finished(outcome))
-            if !shown { outcomeArrivedWhileAway = true }
+            reopenOnActive = false
+            if !shown { outcomeKeptWhileAway = true }
         }
     }
 

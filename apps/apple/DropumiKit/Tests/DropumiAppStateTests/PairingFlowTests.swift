@@ -451,6 +451,58 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
         #expect(s.isWaiting)
     }
 
+    /// iOS: an offer from the device just paired covers the pairing screen,
+    /// which then goes away. When the offer closes, "Paired with" is still
+    /// there and this device is not ready to pair without a tap.
+    @Test func promptOverAResultKeepsItAndOpensNoWindow() async throws {
+        let s = try await onThePairScreen()
+        try #require(s.core.attemptOnWindow() != nil)
+        await s.settle()
+        let paired = Fixtures.peer(trusted: true, alias: mayaName)
+        s.core.emit(.promptClosed(id: 2, reason: .answered))
+        s.core.endWindow(s.window, with: .paired(peer: paired))
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .finished(.paired(paired)))
+        let offer = Fixtures.offer(id: 3, peer: paired)
+        s.core.emit(.promptOpened(prompt: offer))
+        await s.settle()
+        s.model.leavePairingScreen()
+        await s.settle()
+        s.core.emit(.promptClosed(id: offer.promptId, reason: .answered))
+        await s.settle()
+        s.model.enterPairingScreen()
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .finished(.paired(paired)))
+        s.timer.fireAll()
+        await s.model.idle()
+        #expect(windowOpens(s.core) == 1)
+        #expect(!s.model.receivingPausedForPairing)
+    }
+
+    /// iOS: a prompt covers "Time's up": it is still there when the prompt
+    /// closes, and only Start again makes this device ready.
+    @Test func promptOverTimeUpKeepsStartAgain() async throws {
+        let s = try await onThePairScreen()
+        s.clock.advance(by: 300)
+        s.core.endWindow(s.window, with: .failed(error: .timeout))
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .paused(.timeUp))
+        let offer = Fixtures.offer(id: 3)
+        s.core.emit(.promptOpened(prompt: offer))
+        await s.settle()
+        s.model.leavePairingScreen()
+        s.core.emit(.promptClosed(id: offer.promptId, reason: .answered))
+        await s.settle()
+        s.model.enterPairingScreen()
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .paused(.timeUp))
+        #expect(windowOpens(s.core) == 1)
+        s.model.startWaiting()
+        await s.settle()
+        #expect(windowOpens(s.core) == 2)
+        #expect(s.isWaiting)
+    }
+
     /// Stop ends being ready without a card or a banner, and nothing opens
     /// the window again.
     @Test func stopEndsBeingReadyQuietly() async throws {
@@ -517,6 +569,33 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
         #expect(core.windowOperation == nil)
         #expect(requests(core) == [maya])
         #expect(!core.pairCalledWhileWindowOpen)
+        #expect(model.pairingFlow.phase == .asking(name: mayaName))
+    }
+
+    /// Pair another device, then a tap while the next window still waits for
+    /// the receiver the last one paused: the window never opens, and the
+    /// device is asked. How the last window ended (paired) does not count
+    /// for this one.
+    @Test func tapWhileTheNextWindowWaitsForTheResumeStillAsks() async throws {
+        let (model, core, timer) = try makeModel()
+        await model.start()
+        await model.finishOnboarding()
+        let paused = try #require(model.receiver)
+        model.enterPairingScreen()
+        await model.settle { core.emittedBatches }
+        let window = try #require(core.windowOperation)
+        let paired = Fixtures.peer(trusted: true, alias: "Studio Mac")
+        core.endWindow(window, with: .paired(peer: paired), resume: false)
+        await model.settle { core.emittedBatches }
+        #expect(model.pairingFlow.phase == .finished(.paired(paired)))
+        model.startWaiting()
+        model.startPairing(with: maya, name: mayaName)
+        #expect(model.pairingFlow.phase == .switching(name: mayaName))
+        await timer.waitForPending(PairingTiming().windowCloseWait)
+        core.emit(.receiverStarted(info: paused))
+        await model.settle { core.emittedBatches }
+        #expect(windowOpens(core) == 1)
+        #expect(requests(core) == [maya])
         #expect(model.pairingFlow.phase == .asking(name: mayaName))
     }
 
@@ -856,6 +935,41 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
         await s.settle()
         #expect(windowOpens(s.core) == 1)
         #expect(s.model.pairingFlow.phase == .comparing)
+    }
+
+    /// A device that is not pairing uses the window up before the core has
+    /// the background's close: back in front, "Pairing didn't start" stays
+    /// and waits for Start again.
+    @Test func strayBeforeTheBackgroundCloseStillNeedsStartAgain() async throws {
+        let s = try await onThePairScreen()
+        s.model.enterBackground()
+        s.core.endWindow(s.window, with: .failed(error: .notAuthorized))
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .paused(.usedUp))
+        await s.model.becomeActive()
+        await s.settle()
+        s.timer.fireAll()
+        await s.model.idle()
+        #expect(s.model.pairingFlow.phase == .paused(.usedUp))
+        #expect(windowOpens(s.core) == 1)
+    }
+
+    /// A device gets as far as the code before the core has the
+    /// background's close: back in front, its result stays and this device
+    /// is not ready to pair without a tap.
+    @Test func codeBeforeTheBackgroundCloseKeepsTheResult() async throws {
+        let s = try await onThePairScreen()
+        s.model.enterBackground()
+        try #require(s.core.attemptOnWindow() != nil)
+        s.core.endWindow(s.window, with: .failed(error: .connectionLost))
+        await s.settle()
+        #expect(s.model.pairingFlow.phase == .finished(.connectionLost(name: nil)))
+        await s.model.becomeActive()
+        await s.settle()
+        s.timer.fireAll()
+        await s.model.idle()
+        #expect(s.model.pairingFlow.phase == .finished(.connectionLost(name: nil)))
+        #expect(windowOpens(s.core) == 1)
     }
 
     /// Back in front with the pairing screen gone: no window opens.
