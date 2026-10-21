@@ -118,6 +118,12 @@ final class MacUIStateTests: XCTestCase {
         element.label.isEmpty ? (element.value as? String ?? "") : element.label
     }
 
+    /// The first element of any type in `scope` with this identifier.
+    @MainActor
+    private func element(_ scope: XCUIElement, _ identifier: String) -> XCUIElement {
+        scope.descendants(matching: .any).matching(identifier: identifier).element(boundBy: 0)
+    }
+
     @MainActor
     func testOnboardingEndsOnNearby() {
         let app = launch("onboarding")
@@ -144,6 +150,7 @@ final class MacUIStateTests: XCTestCase {
             + window.staticTexts.allElementsBoundByIndex.map(spoken))
             .flatMap { $0.components(separatedBy: ", ") }
         XCTAssertFalse(parts.contains("Paired"), parts.joined(separator: " | "))
+        XCTAssertTrue(window.buttons["nearby.pair"].exists)
         // The audit includes the "…" menu's actions: it must offer AXShowMenu.
         try audit(app)
     }
@@ -157,6 +164,7 @@ final class MacUIStateTests: XCTestCase {
         paired.click()
         XCTAssertTrue(text(in: window, containing: "Studio Mac").waitForExistence(timeout: 10))
         XCTAssertTrue(window.menuButtons["Actions"].exists)
+        XCTAssertTrue(element(window, "paired.pair").exists)
         // The audit includes the row's "…" menu: it must offer AXShowMenu.
         try audit(app)
     }
@@ -223,6 +231,308 @@ final class MacUIStateTests: XCTestCase {
         let app = launch("local-network-denied")
         XCTAssertTrue(app.staticTexts["Local network access is off"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Open Settings"].exists)
+    }
+
+    // MARK: Pair a device
+    //
+    // The pairing scenarios open Pair a device from Settings, on a fake core
+    // that pairs like the real one: showing the screen makes this device
+    // ready to pair.
+
+    /// The Pair button next to a nearby device; VoiceOver reads it "Pair
+    /// with ‹name›".
+    @MainActor
+    private func pairButton(_ window: XCUIElement, _ name: String) -> XCUIElement {
+        window.buttons.matching(NSPredicate(format: "label == %@", "Pair with \(name)")).element(boundBy: 0)
+    }
+
+    /// Whether `element`, or a static text in it, says `string`: macOS may
+    /// keep a combined element's text in its label, its value or a child.
+    @MainActor
+    private func says(_ element: XCUIElement, _ string: String) -> Bool {
+        spoken(element).contains(string) || text(in: element, containing: string).exists
+    }
+
+    /// Whether a static text or an element's label in `scope` contains
+    /// `string`. (Only static texts' values are matched: other values need
+    /// not be strings.)
+    @MainActor
+    private func shows(_ scope: XCUIElement, containing string: String) -> Bool {
+        text(in: scope, containing: string).exists
+            || scope.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", string))
+                .element(boundBy: 0).exists
+    }
+
+    /// Clicks Pair next to Maya's iPhone once this device is ready to pair.
+    @MainActor
+    private func askMaya(_ window: XCUIElement) {
+        let pair = pairButton(window, "Maya's iPhone")
+        XCTAssertTrue(pair.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        pair.click()
+    }
+
+    /// The result card's title, a heading: macOS reads it from its label.
+    @MainActor
+    private func resultTitle(_ window: XCUIElement) -> XCUIElement {
+        element(window, "pair.result.title")
+    }
+
+    @MainActor
+    func testPairingShowsReadyStateAndNearbyDevices() throws {
+        let app = launch("pairing-ready")
+        let window = mainWindow(app)
+        let ready = element(window, "pair.countdown")
+        XCTAssertTrue(ready.waitForExistence(timeout: 10))
+        // One element: the minutes left are its value.
+        XCTAssertEqual(ready.label, "Ready to pair")
+        XCTAssertTrue((ready.value as? String ?? "").contains("minute"), String(describing: ready.value))
+        // The name and the devices can arrive just after the window opens.
+        XCTAssertTrue(
+            text(in: window, containing: "Other devices see this one as “Dropumi-1A2B”.").waitForExistence(timeout: 5))
+        XCTAssertTrue(pairButton(window, "Maya's iPhone").waitForExistence(timeout: 5))
+        XCTAssertTrue(text(in: window, containing: "Receiving files is paused until you leave this screen.").exists)
+        // The window's port, whatever this Mac's addresses are.
+        for address in window.staticTexts.matching(identifier: "pair.address").allElementsBoundByIndex {
+            XCTAssertTrue(spoken(address).hasSuffix(":47321"), spoken(address))
+        }
+        XCTAssertTrue(window.buttons["pair.stop"].exists)
+        XCTAssertTrue(text(app, "How to pair").exists)
+        for step in [
+            "1. Open Pair a device on the other device too.",
+            "2. On one of them, tap Pair next to the other.",
+            "3. Check that both screens show the same code. Then tap Codes match on both.",
+        ] {
+            XCTAssertTrue(shows(window, containing: step), step)
+        }
+        XCTAssertTrue(text(app, "Nearby devices").exists)
+        XCTAssertTrue(pairButton(window, "Maya's iPhone").exists)
+        XCTAssertTrue(pairButton(window, "Studio Mac").exists)
+        XCTAssertTrue(text(app, "Not paired").exists)
+        XCTAssertTrue(text(app, "Looks like Studio Mac").exists)
+        // A name in the list is a claim: nothing says "Paired".
+        let parts = (window.buttons.allElementsBoundByIndex.map(\.label)
+            + window.staticTexts.allElementsBoundByIndex.map(spoken))
+            .flatMap { $0.components(separatedBy: ", ") }
+        XCTAssertFalse(parts.contains("Paired"), parts.joined(separator: " | "))
+        XCTAssertTrue(window.buttons["pair.byAddress"].exists)
+        try audit(app)
+    }
+
+    @MainActor
+    func testPairingWithNoDevicesExplainsWhatToDo() throws {
+        let app = launch("pairing-empty")
+        let window = mainWindow(app)
+        XCTAssertTrue(text(app, "Looking for devices…").waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            text(app, "Open Pair a device on the other device. Both need to be on the same Wi-Fi network.").exists)
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        XCTAssertFalse(window.buttons.matching(identifier: "pair.peer").element(boundBy: 0).exists)
+        XCTAssertTrue(window.buttons["pair.byAddress"].exists)
+        XCTAssertTrue(text(
+            app,
+            "Android phones aren't listed here. Type the address the phone shows on its Pair a device screen."
+        ).exists)
+        try audit(app)
+    }
+
+    @MainActor
+    func testTappingPairAsksThatDevice() throws {
+        let app = launch("pairing-ready")
+        let window = mainWindow(app)
+        askMaya(window)
+        XCTAssertTrue(text(app, "Asking “Maya's iPhone”…").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(app, "A code appears on both devices. Check that they match.").exists)
+        // The list and the ready card make way for the request.
+        XCTAssertFalse(pairButton(window, "Studio Mac").exists)
+        XCTAssertFalse(window.buttons["pair.stop"].exists)
+        try audit(app)
+        // Cancel: ready to pair again, with a note.
+        window.buttons["pair.cancel"].click()
+        let note = element(window, "pair.note")
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        XCTAssertTrue(says(note, "Pairing cancelled."), spoken(note))
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    func testStopLeavesThePairingScreen() throws {
+        let app = launch("pairing-ready")
+        let window = mainWindow(app)
+        let stop = window.buttons["pair.stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        try audit(app)
+        stop.click()
+        // Back where it was opened from.
+        XCTAssertTrue(element(window, "settings.pair").waitForExistence(timeout: 10))
+        XCTAssertFalse(element(window, "pair.countdown").exists)
+    }
+
+    /// Escape is Stop while no prompt is up.
+    @MainActor
+    func testEscapeStopsPairing() throws {
+        let app = launch("pairing-ready")
+        let window = mainWindow(app)
+        XCTAssertTrue(window.buttons["pair.stop"].waitForExistence(timeout: 10))
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        try audit(app)
+        // A text, so the window is key without pressing anything.
+        text(app, "How to pair").click()
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(element(window, "settings.pair").waitForExistence(timeout: 10))
+        XCTAssertFalse(window.buttons["pair.stop"].exists)
+    }
+
+    @MainActor
+    func testPairedResultNamesTheDeviceAndDoneGoesBack() throws {
+        let app = launch("pairing-paired")
+        let window = mainWindow(app)
+        let title = resultTitle(window)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(spoken(title), "Paired with “Maya's iPhone”")
+        XCTAssertTrue(text(
+            app,
+            "You can now send files to each other without a code. Each time, Dropumi checks that it's the same device."
+        ).exists)
+        XCTAssertEqual(window.buttons["pair.again"].label, "Pair another device")
+        try audit(app)
+        window.buttons["pair.done"].click()
+        XCTAssertTrue(element(window, "settings.pair").waitForExistence(timeout: 10))
+        XCTAssertFalse(resultTitle(window).exists)
+    }
+
+    @MainActor
+    func testNotReadySaysWhatToDo() throws {
+        let app = launch("pairing-not-ready")
+        let window = mainWindow(app)
+        askMaya(window)
+        let note = element(window, "pair.note")
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        let expected = "“Maya's iPhone” isn't waiting to pair. Open Pair a device on “Maya's iPhone” too, "
+            + "then tap it here again. If you both tapped at once, let only one of you tap."
+        XCTAssertTrue(says(note, expected), spoken(note))
+        // Not the text about sending files.
+        XCTAssertFalse(shows(window, containing: "Only paired devices"))
+        // This device is ready to pair again.
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        try audit(app)
+    }
+
+    @MainActor
+    func testCodesDontMatchIsAttributedToYou() throws {
+        let app = launch("pairing-codes")
+        let window = mainWindow(app)
+        askMaya(window)
+        let mismatch = app.buttons["code.mismatch"]
+        XCTAssertTrue(mismatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntilEnabled(mismatch))
+        mismatch.click()
+        let title = resultTitle(window)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(spoken(title), "You said the codes don't match")
+        XCTAssertTrue(text(
+            app,
+            "Nothing was saved. If the codes were different, another device may have answered. "
+                + "Pair only when both devices are in front of you."
+        ).exists)
+        XCTAssertFalse(shows(window, containing: "didn't confirm"))
+        XCTAssertTrue(window.buttons["pair.done"].exists)
+        XCTAssertEqual(window.buttons["pair.again"].label, "Try again")
+        try audit(app)
+    }
+
+    @MainActor
+    func testOtherDeviceDecliningIsAttributedToIt() throws {
+        let app = launch("pairing-codes")
+        let window = mainWindow(app)
+        askMaya(window)
+        let match = app.buttons["code.match"]
+        XCTAssertTrue(match.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntilEnabled(match))
+        match.click()
+        let title = resultTitle(window)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(spoken(title), "“Maya's iPhone” didn't confirm the code")
+        XCTAssertTrue(
+            text(app, "It said the codes don't match, stopped, or didn't answer in time. Nothing was saved.").exists)
+        XCTAssertFalse(shows(window, containing: "You said"))
+        XCTAssertEqual(window.buttons["pair.again"].label, "Try again")
+        XCTAssertTrue(window.buttons["pair.done"].exists)
+        try audit(app)
+    }
+
+    @MainActor
+    func testReadyTimeEndingOffersStartAgain() throws {
+        let app = launch("pairing-time-up")
+        let window = mainWindow(app)
+        let title = resultTitle(window)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(spoken(title), "Time's up")
+        XCTAssertTrue(text(app, "No device asked to pair in 5 minutes. Nothing was saved.").exists)
+        XCTAssertFalse(shows(window, containing: "No answer"))
+        // One way on: it never gets ready again by itself.
+        let again = window.buttons["pair.again"]
+        XCTAssertEqual(again.label, "Start again")
+        XCTAssertFalse(window.buttons["pair.done"].exists)
+        XCTAssertFalse(element(window, "pair.countdown").exists)
+        try audit(app)
+        again.click()
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    func testUsedUpReadinessSaysPairingDidNotStart() throws {
+        let app = launch("pairing-used-up")
+        let window = mainWindow(app)
+        let title = resultTitle(window)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(spoken(title), "Pairing didn't start")
+        XCTAssertTrue(text(app, "A device connected, but not to pair. Nothing was saved.").exists)
+        XCTAssertEqual(window.buttons["pair.again"].label, "Start again")
+        XCTAssertFalse(element(window, "pair.countdown").exists)
+        // The pairing screen says it; no banner on top.
+        XCTAssertFalse(text(app, "A device was refused").exists)
+        try audit(app)
+    }
+
+    @MainActor
+    func testRefusalBannerOpensPairing() throws {
+        let app = launch("refused-device")
+        let window = mainWindow(app)
+        XCTAssertTrue(text(app, "A device was refused").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(
+            app,
+            "A device on this network tried to connect and was turned away. "
+                + "If it was trying to pair, open Pair a device on both devices."
+        ).exists)
+        let action = window.buttons["banner.action"]
+        XCTAssertEqual(action.label, "Pair a device")
+        action.click()
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        XCTAssertFalse(text(app, "A device was refused").exists)
+        // Audited here: the banner covers the screen's top, whose contrast
+        // the audit would measure on the banner.
+        try audit(app)
+    }
+
+    @MainActor
+    func testEmptyPairedDevicesOffersPairing() throws {
+        let app = launch("paired-devices-empty")
+        let window = mainWindow(app)
+        XCTAssertTrue(text(app, "No paired devices").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(
+            app, "Pair a device to send to each other without a code. You can also add one by its fingerprint.").exists)
+        let pair = window.buttons["paired.emptyPair"]
+        XCTAssertEqual(pair.label, "Pair a device")
+        XCTAssertTrue(window.buttons["paired.emptyAdd"].exists)
+        XCTAssertTrue(element(window, "paired.pair").exists)
+        try audit(app)
+        pair.click()
+        XCTAssertTrue(element(window, "pair.countdown").waitForExistence(timeout: 10))
+        // Stop goes back to Paired devices.
+        window.buttons["pair.stop"].click()
+        XCTAssertTrue(window.buttons["paired.emptyPair"].waitForExistence(timeout: 10))
     }
 
     // MARK: Prompt arming (PROMPT-1)

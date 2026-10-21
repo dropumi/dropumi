@@ -12,6 +12,7 @@ import DropumiAppState
 import DropumiBindings
 import DropumiCore
 import Foundation
+import Observation
 #if os(macOS)
 import AppKit
 
@@ -73,6 +74,27 @@ enum UITestScenario: String, CaseIterable {
     /// an answer as the prompt going away (prompt arming, PROMPT-1).
     case offerClosesOnAnswer = "offer-closes-on-answer"
     case codeClosesOnAnswer = "code-closes-on-answer"
+    // Pair a device (opened from Settings), on a fake core that pairs like
+    // the real one: showing the screen opens this device's window.
+    /// Ready to pair, with two devices nearby. Asking one gets no answer.
+    case pairingReady = "pairing-ready"
+    /// Ready to pair, with no device nearby.
+    case pairingEmpty = "pairing-empty"
+    /// A device pairs with this one.
+    case pairingPaired = "pairing-paired"
+    /// Asking a device that isn't ready to pair: it refuses (NotAuthorized).
+    case pairingNotReady = "pairing-not-ready"
+    /// Asking a device shows a code. Any answer ends the pairing as the core
+    /// reports a "no" from either device (PairingRejected).
+    case pairingCodes = "pairing-codes"
+    /// The five minutes run out with nobody asking.
+    case pairingTimeUp = "pairing-time-up"
+    /// A device connects to this one, but not to pair.
+    case pairingUsedUp = "pairing-used-up"
+    /// Nearby, after the core refused a connection.
+    case refusedDevice = "refused-device"
+    /// Paired devices, with none.
+    case pairedDevicesEmpty = "paired-devices-empty"
 
     static let argument = "-dropumi-scenario"
     static let armDelayArgument = "-dropumi-arm-delay-ms"
@@ -107,15 +129,42 @@ enum UITestScenario: String, CaseIterable {
         try? paths.prepare()
         let settings = SettingsStore(defaults: TestHost.defaults())
         settings.onboarded = self != .onboarding
-        return AppModel(core: FakeCoreClient(), paths: paths, settings: settings, inbox: nil)
+        // Pairing as the core does it, in every scenario (only a pairing
+        // screen opens a window). Set before the model starts: a pairing
+        // screen shown at launch opens its window at once.
+        let core = FakeCoreClient()
+        core.scriptPairingLikeTheCore()
+        guard self == .pairingTimeUp else {
+            return AppModel(core: core, paths: paths, settings: settings, inbox: nil)
+        }
+        let testClock = Self.testClock
+        return AppModel(core: core, paths: paths, settings: settings, inbox: nil, clock: { testClock.now })
     }
+
+    /// The model's clock in the time-up scenario. It stands still until the
+    /// scenario moves it past the window's end, instead of waiting five
+    /// minutes.
+    private static let testClock = TestClock()
 
     /// The tab the scenario starts on.
     var initialTab: AppTab {
         switch self {
         case .transfers: .transfers
         case .pairedDevices: .settings
-        default: .nearby
+        default: initialSettingsPath.isEmpty ? .nearby : .settings
+        }
+    }
+
+    /// The screens the scenario starts on, in Settings.
+    var initialSettingsPath: [SettingsRoute] {
+        switch self {
+        case .pairingReady, .pairingEmpty, .pairingPaired, .pairingNotReady, .pairingCodes, .pairingTimeUp,
+             .pairingUsedUp:
+            [.pairing]
+        case .pairedDevicesEmpty:
+            [.trustedDevices]
+        default:
+            []
         }
     }
 
@@ -128,13 +177,15 @@ enum UITestScenario: String, CaseIterable {
         #endif
         guard let core = model.core as? FakeCoreClient else { return }
         let paired = Fixtures.peer(name: "MacBook", trusted: true, alias: "Studio Mac")
+        let maya = Fixtures.nearby("Maya's iPhone", instance: "dropumi-00000001")
+        let studio = Fixtures.nearby("Studio Mac", instance: "dropumi-00000002", hintAlias: "Studio Mac")
         switch self {
-        case .onboarding, .nearbyEmpty:
+        case .onboarding, .nearbyEmpty, .pairingEmpty, .pairedDevicesEmpty:
             break
         case .nearby:
             core.emit(
-                .peerFound(peer: Fixtures.nearby("Maya's iPhone", instance: "dropumi-00000001")),
-                .peerFound(peer: Fixtures.nearby("Studio Mac", instance: "dropumi-00000002", hintAlias: "Studio Mac")),
+                .peerFound(peer: maya),
+                .peerFound(peer: studio),
                 .peerFound(peer: Fixtures.nearby("Pixel 8", instance: "dropumi-00000003")))
         case .offerUnverified:
             let offer = Fixtures.offer(files: [
@@ -186,6 +237,111 @@ enum UITestScenario: String, CaseIterable {
             } else {
                 core.emit(.promptOpened(prompt: Fixtures.code()))
             }
+        case .pairingReady:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+        case .pairingPaired:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+            Self.onceReadyToPair(model) { window in
+                // As the core ends a pairing both people confirmed: the
+                // device is stored, then the window reports it.
+                let peer = Fixtures.peer(trusted: true, alias: "Maya's iPhone")
+                _ = try? core.trustFingerprint(peer.fingerprint, alias: peer.alias)
+                core.endWindow(window, with: .paired(peer: peer))
+            }
+        case .pairingNotReady:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+            Self.eachRequest(model) { request in
+                // No window is open there: the device refuses the connection.
+                core.emit(.pairingFinished(operation: request, result: .failed(error: .notAuthorized)))
+            }
+        case .pairingCodes:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+            Self.eachRequest(model) { request in
+                // The device accepted: both show the code, as the core reports it.
+                let peer = Fixtures.peer()
+                core.emit(.connected(operation: request, peer: peer))
+                core.emit(.sessionCode(operation: request, peer: peer, code: "654321"))
+                core.emit(.promptOpened(prompt: Fixtures.code(
+                    id: Self.codePromptBase + request, operation: request, peer: peer)))
+            }
+            // Either answer closes the prompt and ends the pairing.
+            core.onCall = { [weak core, base = Self.codePromptBase] call in
+                guard case let .answerCode(id, _) = call, id > base else { return }
+                core?.emit(
+                    .promptClosed(id: id, reason: .answered),
+                    .pairingFinished(operation: id - base, result: .failed(error: .pairingRejected)))
+            }
+        case .pairingTimeUp:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+            Self.onceReadyToPair(model) { window in
+                // Nobody asked in five minutes: the core ends the window.
+                Self.testClock.advance(by: 5 * 60)
+                core.endWindow(window, with: .failed(error: .timeout))
+            }
+        case .pairingUsedUp:
+            core.emit(.peerFound(peer: maya), .peerFound(peer: studio))
+            Self.onceReadyToPair(model) { window in
+                // A device connected to send, not to pair: refused, and the
+                // window ends.
+                core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
+                core.endWindow(window, with: .failed(error: .notAuthorized))
+            }
+        case .refusedDevice:
+            core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
+        }
+    }
+
+    // MARK: Pairing scripts
+    //
+    // A scenario delivers a pairing operation's events only once the model
+    // holds the operation, as the core's events reach a started operation.
+    // The model's observable state says when: no polling and no sleeps.
+
+    /// The code prompts of `pairing-codes` have this id plus their request.
+    private static let codePromptBase: UInt64 = 1_000
+
+    /// Runs `body` with this device's window once the model holds it and it
+    /// listens. Once only: a window opened again stays ready.
+    private static func onceReadyToPair(_ model: AppModel, _ body: @escaping @MainActor (UInt64) -> Void) {
+        once({
+            guard let session = model.pairing, case .window = session.role, session.result == nil,
+                  session.port != nil
+            else { return nil }
+            return session.operation
+        }, then: body)
+    }
+
+    /// Runs `body` with each request of this device (a tap on Pair) once the
+    /// model holds it.
+    private static func eachRequest(
+        _ model: AppModel, after previous: UInt64? = nil, _ body: @escaping @MainActor (UInt64) -> Void
+    ) {
+        once({
+            guard let session = model.pairing, case .initiator = session.role, session.result == nil,
+                  session.operation != previous
+            else { return nil }
+            return session.operation
+        }, then: { request in
+            body(request)
+            Self.eachRequest(model, after: request, body)
+        })
+    }
+
+    /// Runs `body` with the value of `value()` once it is not nil. `value()`
+    /// reads the model's observable state, and is read again after each
+    /// change to what it read.
+    private static func once(
+        _ value: @escaping @MainActor () -> UInt64?, then body: @escaping @MainActor (UInt64) -> Void
+    ) {
+        if let ready = value() {
+            body(ready)
+            return
+        }
+        withObservationTracking {
+            _ = value()
+        } onChange: {
+            // Called before the change is made: read it after.
+            Task { @MainActor in Self.once(value, then: body) }
         }
     }
 }
