@@ -187,6 +187,10 @@ struct BannerHost: View {
 /// Who may send, as the status pill and the sidebar say it.
 struct VisibilityText {
     static func label(_ model: AppModel, now: Date) -> Text {
+        // The window replaces the receiver while it is open.
+        if readyToPair(model) {
+            return Text("Ready to pair")
+        }
         guard model.receiver != nil else {
             return Text(model.visibility == .off ? "Not receiving" : "Starting…")
         }
@@ -207,6 +211,12 @@ struct VisibilityText {
         guard let until = model.receiver?.everyoneUntil else { return nil }
         return max(0, Int((Double(until) / 1000 - now.timeIntervalSince1970).rounded(.down)))
     }
+
+    /// This device's pairing window is open: it waits for a device to pair.
+    static func readyToPair(_ model: AppModel) -> Bool {
+        guard let pairing = model.pairing, case .window = pairing.role else { return false }
+        return pairing.result == nil
+    }
 }
 
 /// The status pill: who may send to this device right now.
@@ -217,7 +227,7 @@ struct VisibilityPill: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 8) {
                 Circle()
-                    .fill(model.receiver != nil ? DS.success : DS.textSecondary)
+                    .fill(dot)
                     .frame(width: 8, height: 8)
                 VisibilityText.label(model, now: context.date)
                     .font(DSFont.meta)
@@ -230,6 +240,11 @@ struct VisibilityPill: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("visibility.pill")
+    }
+
+    private var dot: Color {
+        if VisibilityText.readyToPair(model) { return DS.accent }
+        return model.receiver != nil ? DS.success : DS.textSecondary
     }
 }
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //
-// Paired devices: rename, remove, or add one by its full 52-character
-// fingerprint. There is no Send button here on purpose: sending goes through
-// a nearby device or an address, where the key is checked (D10).
+// Paired devices: rename, remove, pair a device, or add one by its full
+// 52-character fingerprint. There is no Send button here on purpose: sending
+// goes through a nearby device or an address, where the key is checked (D10).
 
 import DropumiAppState
 import DropumiBindings
@@ -11,6 +11,7 @@ import SwiftUI
 
 struct TrustedDevicesScreen: View {
     @Environment(AppModel.self) private var model
+    @Environment(Router.self) private var router
     @State private var renaming: TrustedDeviceInfo?
     @State private var removing: TrustedDeviceInfo?
     @State private var adding = false
@@ -19,9 +20,7 @@ struct TrustedDevicesScreen: View {
         ScreenScroll {
             ScreenHeader("Paired devices", subtitle: Text("These devices can send to this one when you choose Paired only."))
             if model.trusted.isEmpty {
-                EmptyStateView(
-                    symbol: Icons.shield, title: String(localized: "No paired devices"),
-                    message: String(localized: "Pair a device by comparing a code, or add one by its fingerprint."))
+                empty
             }
             VStack(spacing: 0) {
                 ForEach(model.trusted, id: \.fingerprint) { device in
@@ -47,6 +46,17 @@ struct TrustedDevicesScreen: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    router.openPairing()
+                } label: {
+                    Label("Pair a device", systemImage: Icons.pair)
+                }
+                #if os(macOS)
+                .help(Text("Pair a device"))
+                #endif
+                .accessibilityIdentifier("paired.pair")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     adding = true
                 } label: {
                     Label("Add by fingerprint", systemImage: Icons.add)
@@ -69,6 +79,27 @@ struct TrustedDevicesScreen: View {
         } message: { _ in
             Text("It can no longer send to this device while Paired only is on. You can pair again later.")
         }
+    }
+
+    private var empty: some View {
+        VStack(spacing: 12) {
+            EmptyStateView(
+                symbol: Icons.shield, title: String(localized: "No paired devices"),
+                message: String(localized: "Pair a device to send to each other without a code. You can also add one by its fingerprint."))
+            Button("Pair a device") { router.openPairing() }
+                .buttonStyle(PrimaryPillButtonStyle())
+                .frame(maxWidth: 260)
+                .accessibilityIdentifier("paired.emptyPair")
+            Button("Add by fingerprint") { adding = true }
+                .buttonStyle(.plain)
+                .font(DSFont.smallButton)
+                .foregroundStyle(DS.accentText)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("paired.emptyAdd")
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("paired.empty")
     }
 
     private func subtitle(_ device: TrustedDeviceInfo) -> String {

@@ -10,6 +10,8 @@ enum NearbyRoute: Hashable {
     /// The Send screen, optionally with a nearby device chosen.
     case send(preselected: String?)
     case connectByAddress
+    case pairing
+    case pairByAddress
 }
 
 enum SettingsRoute: Hashable {
@@ -17,6 +19,7 @@ enum SettingsRoute: Hashable {
     case trustedDevices
     case pairing
     case connectByAddress
+    case pairByAddress
 }
 
 /// Where the user is.
@@ -37,8 +40,50 @@ final class Router {
         }
     }
 
+    /// Pair a device, on top of the current tab's screens, so Done goes back
+    /// to where it was opened. Already open: back to it. Only one pairing
+    /// screen is ever alive: the other tab's goes.
     func openPairing() {
-        tab = .settings
-        settingsPath = [.pairing]
+        switch tab {
+        case .nearby:
+            settingsPath = Self.cut(settingsPath, at: .pairing)
+            nearbyPath = Self.cut(nearbyPath, after: .pairing) ?? nearbyPath + [.pairing]
+        case .settings:
+            nearbyPath = Self.cut(nearbyPath, at: .pairing)
+            settingsPath = Self.cut(settingsPath, after: .pairing) ?? settingsPath + [.pairing]
+        case .transfers:
+            nearbyPath = Self.cut(nearbyPath, at: .pairing)
+            tab = .settings
+            settingsPath = [.pairing]
+        }
+    }
+
+    /// Pair by address, from the pairing screen of the current tab.
+    func openPairByAddress() {
+        switch tab {
+        case .nearby:
+            nearbyPath.append(.pairByAddress)
+        case .settings, .transfers:
+            settingsPath.append(.pairByAddress)
+        }
+    }
+
+    /// Mac: the main window closed. A pairing screen shown again later would
+    /// make this device ready to pair without anyone asking.
+    func closePairing() {
+        nearbyPath = Self.cut(nearbyPath, at: .pairing)
+        settingsPath = Self.cut(settingsPath, at: .pairing)
+    }
+
+    /// The path without `route` and what follows it.
+    private static func cut<Route: Equatable>(_ path: [Route], at route: Route) -> [Route] {
+        guard let index = path.firstIndex(of: route) else { return path }
+        return Array(path[..<index])
+    }
+
+    /// The path up to and including `route`, or nil if it has none.
+    private static func cut<Route: Equatable>(_ path: [Route], after route: Route) -> [Route]? {
+        guard let index = path.firstIndex(of: route) else { return nil }
+        return Array(path[...index])
     }
 }

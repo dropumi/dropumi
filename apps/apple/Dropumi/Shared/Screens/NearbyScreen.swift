@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //
-// Nearby: this device on the radar, nearby devices, and a Send button per
-// device. Names come from the network and are shown verbatim; a device is
-// never labelled "Paired" here, because nothing has checked its key yet
-// (D9). Browsing runs only while this screen is visible.
+// Nearby: this device on the radar, nearby devices, a Send button per
+// device, and the way to Pair a device. Names come from the network and are
+// shown verbatim; a device is never labelled "Paired" here, because nothing
+// has checked its key yet (D9). Browsing runs only while this screen is
+// visible.
 
 import DropumiAppState
 import DropumiBindings
@@ -168,7 +169,9 @@ struct NearbyScreen: View {
                     .accessibilityElement(children: .combine)
                     .contextMenu {
                         Button {
-                            Task { await model.pair(with: .nearby(instance: peer.instance), name: peer.name) }
+                            // Asks at once, so the pairing screen shows the
+                            // request instead of getting ready to pair.
+                            model.startPairing(with: .nearby(instance: peer.instance), name: peer.name)
                             router.openPairing()
                         } label: {
                             Label("Pair with this device", systemImage: Icons.pair)
@@ -177,6 +180,16 @@ struct NearbyScreen: View {
                     }
                 }
             }
+            Button {
+                router.openPairing()
+            } label: {
+                Label("Pair a device", systemImage: Icons.pair)
+            }
+            .buttonStyle(.plain)
+            .font(DSFont.smallButton)
+            .foregroundStyle(DS.accentText)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("nearby.pair")
         }
     }
 }

@@ -75,6 +75,8 @@ struct MainView: View {
                             switch route {
                             case let .send(preselected): SendScreen(preselected: preselected)
                             case .connectByAddress: ConnectByAddressScreen()
+                            case .pairing: PairingScreen()
+                            case .pairByAddress: ConnectByAddressScreen(mode: .pair)
                             }
                         }
                 }
@@ -94,6 +96,7 @@ struct MainView: View {
                             case .trustedDevices: TrustedDevicesScreen()
                             case .pairing: PairingScreen()
                             case .connectByAddress: ConnectByAddressScreen()
+                            case .pairByAddress: ConnectByAddressScreen(mode: .pair)
                             }
                         }
                 }
