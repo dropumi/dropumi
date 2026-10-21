@@ -61,13 +61,17 @@ private func makeModel(inbox: ShareInbox? = nil) throws -> (AppModel, FakeCoreCl
     /// The core refuses a device it does not know during the handshake and
     /// reports no peer (found on an iPhone 15 against the CLI, Paired only).
     /// The reason is not known then, so the notice says only that a device
-    /// was refused and offers no Everyone shortcut.
+    /// was refused and offers Pair a device, never an Everyone shortcut.
     @Test func refusalWithoutAPeerSaysOnlyThatADeviceWasRefused() throws {
         let (model, _) = try makeModel()
         model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
         let banner = try #require(model.banner)
         #expect(banner.title == "A device was refused")
-        #expect(banner.action == nil)
+        #expect(banner.message == """
+            A device on this network tried to connect and was turned away. \
+            If it was trying to pair, open Pair a device on both devices.
+            """)
+        #expect(banner.action == .openPairing)
     }
 
     @Test func refusedPeerThatIsNotPairedOffersEveryone() throws {

@@ -164,6 +164,7 @@ struct BannerHost: View {
         case .retryReceiving: return String(localized: "Try again")
         case .openEveryone: return String(localized: "Let everyone send for 10 minutes")
         case .openSettings: return String(localized: "Open Settings")
+        case .openPairing: return String(localized: "Pair a device")
         case nil: return nil
         }
     }
@@ -177,6 +178,8 @@ struct BannerHost: View {
             Task { await model.setVisibility(.everyone) }
         case .openSettings:
             router.tab = .settings
+        case .openPairing:
+            router.openPairing()
         }
     }
 }

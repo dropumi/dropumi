@@ -871,7 +871,8 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
     }
 
     /// While this device waits to pair, a refused connection is told on the
-    /// pairing screen, not in a banner; away from it, the banner is back.
+    /// pairing screen, not in a banner; away from it, the banner is back and
+    /// offers Pair a device.
     @Test func refusalIsNotShownWhileThisDeviceWaitsToPair() async throws {
         let s = try await onThePairScreen()
         s.core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
@@ -882,6 +883,44 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
         s.core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
         await s.settle()
         #expect(s.model.banner?.title == "A device was refused")
+        #expect(s.model.banner?.action == .openPairing)
+    }
+
+    /// The screen gone but this device's window still opening: no banner
+    /// until the window has ended.
+    @Test func refusalIsNotShownWhileThisDevicesWindowIsOpening() async throws {
+        let (model, core, _) = try makeModel()
+        await model.start()
+        await model.finishOnboarding()
+        let gate = core.holdNext("openPairingWindow")
+        model.enterPairingScreen()
+        await gate.reached()
+        model.leavePairingScreen()
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        #expect(model.banner == nil)
+        gate.open()
+        await model.settle { core.emittedBatches }
+        #expect(core.windowOperation == nil)
+        model.apply([.sessionClosed(peer: nil, code: "not_authorized")])
+        #expect(model.banner?.action == .openPairing)
+    }
+
+    /// The screen gone but a device still comparing a code through this
+    /// device's window: no banner while the window is open.
+    @Test func refusalIsNotShownWhileThisDevicesWindowIsOpen() async throws {
+        let s = try await onThePairScreen()
+        try #require(s.core.attemptOnWindow() != nil)
+        await s.settle()
+        s.model.leavePairingScreen()
+        await s.settle()
+        s.core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
+        await s.settle()
+        #expect(s.model.banner == nil)
+        s.core.endWindow(s.window, with: .failed(error: .pairingRejected))
+        await s.settle()
+        s.core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
+        await s.settle()
+        #expect(s.model.banner?.action == .openPairing)
     }
 
     /// Reset right after leaving the pairing screen: the core refuses it

@@ -20,7 +20,7 @@ import Observation
 /// A notice at the top of the screen.
 public struct Banner: Equatable, Identifiable, Sendable {
     public enum Style: Sendable { case info, warning, danger }
-    public enum Action: Equatable, Sendable { case retryReceiving, openEveryone, openSettings }
+    public enum Action: Equatable, Sendable { case retryReceiving, openEveryone, openSettings, openPairing }
     public let id = UUID()
     public let style: Style
     public let title: String
@@ -1476,12 +1476,12 @@ public final class AppModel {
     /// not known: a device that isn't paired, a pairing request while no
     /// pairing window is open (from paired devices too), a paired device
     /// while a window is open, or an unreadable list of paired devices. So the
-    /// notice says only that a device was refused, and never offers Everyone
-    /// (as on Android).
+    /// notice says only that a device was refused and offers Pair a device;
+    /// as on Android, it never offers Everyone.
     private func noticeRefused(_ peer: PeerInfo?) {
         if let peer, peer.trusted { return }
-        // While this device waits to pair, the pairing screen says what
-        // happened to its window.
+        // While the pairing screen is shown or this device's window is
+        // opening or open, the pairing screen says what happened to it.
         if peer == nil, pairingScreenClients > 0 || windowActive { return }
         guard banner == nil else { return }
         let now = clock()
@@ -1492,8 +1492,9 @@ public final class AppModel {
                 style: .info, title: String(localized: "A device was refused"),
                 message: String(localized: """
                     A device on this network tried to connect and was turned away. \
-                    To pair with it, choose Wait for a device under Pair a device first.
-                    """))
+                    If it was trying to pair, open Pair a device on both devices.
+                    """),
+                action: .openPairing)
         } else {
             banner = Banner(style: .info, title: String(localized: "A device that isn't paired tried to send"),
                             message: String(localized: "Pair with it, or let everyone send for 10 minutes."),
