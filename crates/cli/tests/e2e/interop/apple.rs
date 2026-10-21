@@ -411,6 +411,50 @@ fn pairing_codes_match(platform: Platform) {
     assert_eq!(cli.trusted(), vec![app_fp]);
 }
 
+/// The app waits on its pairing screen and the CLI pairs with the address
+/// the app shows, as someone typing it would: by address only.
+fn cli_pairs_with_waiting_app(platform: Platform) {
+    let cli = Device::new("Cli");
+    let app = AppTest::start(
+        platform,
+        "app-waits",
+        &[("DROPUMI_CLI_FP", &cli.fingerprint)],
+    );
+    let app_fp = app.wait("ready", platform.launch_timeout())["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let waiting = app.wait("waiting", STEP);
+    let port = waiting["port"].as_str().unwrap().parse::<u16>().unwrap();
+    let address = format!("{}:{port}", platform.app_host(&waiting));
+    let mut i = Proc::spawn("pair-to", cli.config(), &args(&["pair", "--to", &address]));
+    let sas = i.wait_event("sas");
+    assert_eq!(
+        sas["peer"]["fingerprint"],
+        app_fp.as_str(),
+        "the CLI reached the app's key"
+    );
+    let app_code = app.wait("code", STEP);
+    assert_eq!(
+        app_code["code"], sas["code"],
+        "both sides show the same code"
+    );
+    assert_eq!(app_code["matches"], "true", "the app saw the CLI's key");
+    i.cmd("confirm");
+    assert_eq!(i.wait_exit(EXIT), 0, "{}", i.stderr());
+    let paired = app.wait("paired", STEP);
+    assert_eq!(paired["paired"], "true");
+    assert_eq!(paired["shown"], "true", "the screen shows the pairing");
+    assert_eq!(paired["trusted"], cli.fingerprint.as_str());
+    let receiving = app.wait("receiving", STEP);
+    assert_eq!(
+        receiving["banner"], "",
+        "the window's pause is not a receiving problem"
+    );
+    app.finish();
+    assert_eq!(cli.trusted(), vec![app_fp]);
+}
+
 fn bonjour_cli_finds_app_at_random_host(platform: Platform) {
     let app = AppTest::start(platform, "bonjour-advertise", &[]);
     let app_fp = app.wait("ready", platform.launch_timeout())["fingerprint"]
@@ -555,6 +599,14 @@ fn apple_macos_pairing_codes_match() {
 
 #[test]
 #[ignore = "opt-in: DROPUMI_TEST_APPLE=1 (scripts/apple/interop.sh)"]
+fn apple_macos_cli_pairs_with_waiting_app() {
+    if enabled() {
+        cli_pairs_with_waiting_app(Platform::MacOs);
+    }
+}
+
+#[test]
+#[ignore = "opt-in: DROPUMI_TEST_APPLE=1 (scripts/apple/interop.sh)"]
 fn apple_ios_sim_app_sends_to_cli_after_code() {
     if enabled() {
         app_sends_to_cli_after_code(Platform::IosSimulator);
@@ -574,6 +626,14 @@ fn apple_ios_sim_cli_sends_to_app_after_code() {
 fn apple_ios_sim_pairing_codes_match() {
     if enabled() {
         pairing_codes_match(Platform::IosSimulator);
+    }
+}
+
+#[test]
+#[ignore = "opt-in: DROPUMI_TEST_APPLE=1 (scripts/apple/interop.sh)"]
+fn apple_ios_sim_cli_pairs_with_waiting_app() {
+    if enabled() {
+        cli_pairs_with_waiting_app(Platform::IosSimulator);
     }
 }
 
@@ -598,6 +658,14 @@ fn apple_ios_device_cli_sends_to_app_after_code() {
 fn apple_ios_device_pairing_codes_match() {
     if enabled() && device_enabled() {
         pairing_codes_match(Platform::IosDevice);
+    }
+}
+
+#[test]
+#[ignore = "opt-in: DROPUMI_TEST_APPLE=1 and DROPUMI_TEST_APPLE_DEVICE; a real iPhone or iPad on Wi-Fi"]
+fn apple_ios_device_cli_pairs_with_waiting_app() {
+    if enabled() && device_enabled() {
+        cli_pairs_with_waiting_app(Platform::IosDevice);
     }
 }
 
