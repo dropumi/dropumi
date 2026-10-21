@@ -739,6 +739,29 @@ private func receivingWithAPairingWindow() async throws -> PausedForPairing {
         #expect(s.isWaiting)
     }
 
+    /// The screen left and came back while its window was closing, and a
+    /// stray connection used that window up before the close landed: the
+    /// result shows, and the window asked for on return never opens behind
+    /// it.
+    @Test func strayWhileTheNextWindowWaitsOpensNoWindowBehindTheResult() async throws {
+        let s = try await onThePairScreen()
+        s.model.leavePairingScreen()
+        s.model.enterPairingScreen()
+        s.core.emit(.sessionClosed(peer: nil, code: "not_authorized"))
+        s.core.endWindow(s.window, with: .failed(error: .notAuthorized))
+        await s.settle()
+        s.timer.fireAll()
+        await s.model.idle()
+        #expect(s.model.pairingFlow == PairingFlow(phase: .paused(.usedUp)))
+        #expect(windowOpens(s.core) == 1)
+        #expect(s.core.windowOperation == nil)
+        #expect(!s.model.receivingPausedForPairing)
+        s.model.startWaiting()
+        await s.settle()
+        #expect(windowOpens(s.core) == 2)
+        #expect(s.isWaiting)
+    }
+
     /// An attempt that reached a code never makes this device ready again
     /// by itself, on either side.
     @Test func attemptThatShowedACodeNeverReopensTheWindow() async throws {

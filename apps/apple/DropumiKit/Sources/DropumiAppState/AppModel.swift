@@ -1084,9 +1084,20 @@ public final class AppModel {
         syncPairingHold()
     }
 
-    /// The pairing screen is shown, in front, and nothing else is pairing.
+    /// The pairing screen is shown, in front, nothing else is pairing, and
+    /// it shows no result: a result waits for a tap (Start again, Try
+    /// again), so no window opens behind it.
     private var wantsWindow: Bool {
         pairingScreenClients > 0 && !isInBackground && onboarded && !pairStarting && !requestRunning
+            && !showingResult
+    }
+
+    /// The pairing screen shows a result card.
+    private var showingResult: Bool {
+        switch pairingFlow.phase {
+        case .finished, .paused: true
+        default: false
+        }
     }
 
     /// This device's request is running.
