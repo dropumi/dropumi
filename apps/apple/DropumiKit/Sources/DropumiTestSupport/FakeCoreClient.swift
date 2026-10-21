@@ -573,6 +573,7 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
 /// sleep.
 @MainActor public final class ManualTimer: ModelTimer {
     private var scheduled: [(delay: Duration, fire: @MainActor () -> Void)] = []
+    private var watchers: [(delay: Duration, resume: CheckedContinuation<Void, Never>)] = []
 
     public init() {}
 
@@ -583,6 +584,18 @@ nonisolated public final class FakeCoreClient: CoreClient, @unchecked Sendable {
 
     public func schedule(after delay: Duration, _ fire: @escaping @MainActor () -> Void) {
         scheduled.append((delay, fire))
+        let due = watchers.filter { $0.delay == delay }
+        watchers.removeAll { $0.delay == delay }
+        for watcher in due {
+            watcher.resume.resume()
+        }
+    }
+
+    /// Returns once a timer with this delay is pending, so a test fires it
+    /// only after the model has started waiting.
+    public func waitForPending(_ delay: Duration) async {
+        if pending.contains(delay) { return }
+        await withCheckedContinuation { watchers.append((delay, $0)) }
     }
 
     /// Fires every pending timer, in order. Timers they set stay pending.

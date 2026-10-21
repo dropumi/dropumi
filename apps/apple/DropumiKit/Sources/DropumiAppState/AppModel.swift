@@ -82,6 +82,19 @@ public struct PairingSession: Equatable, Sendable {
     public var port: UInt16?
     public var expiresAt: Date?
     public var result: PairingResult?
+    /// The device on the other end, once connected: only a claim until
+    /// `PairingFinished(.paired)`, and never shown as paired before.
+    public var peer: PeerInfo?
+    /// A code was shown for this attempt (`SessionCode` or a code prompt).
+    public var reachedCode = false
+    /// When that code expires.
+    public var codeExpiresAt: Date?
+
+    init(operation: UInt64, role: Role, expiresAt: Date? = nil) {
+        self.operation = operation
+        self.role = role
+        self.expiresAt = expiresAt
+    }
 }
 
 /// Something the UI should show next.
@@ -160,6 +173,46 @@ public final class AppModel {
     private var resumeEpoch = 0
     private var holdActive: Bool { windowStarts > 0 || windowOperation != nil || resumeExpected }
 
+    // The pairing screen. Showing it makes this device ready to pair (it
+    // opens a window); tapping a device closes that window and asks the
+    // device. Each verdict comes from PairingClassifier.
+
+    /// Pairing screens on show.
+    private var pairingScreenClients = 0
+    /// The window was closed for the background: it opens again when the
+    /// app is back in front, if the screen is still shown.
+    private var reopenOnActive = false
+    /// An outcome came while no pairing screen was shown: it stays until
+    /// seen.
+    private var outcomeArrivedWhileAway = false
+    /// A tap is closing this device's window or starting the request.
+    private var pairStarting = false
+    /// Cancel was tapped while `pairStarting`.
+    private var requestAborted = false
+    /// A window opening: waiting for the one before, or the core call.
+    private var windowOpenTask: Task<Void, Never>?
+    /// Counts window opens, so a close knows a newer one began.
+    private var windowAttempt = 0
+    /// Why the opening window is to be closed once it is registered.
+    private var pendingWindowCancel: PairingCancelReason?
+    /// The opening window was closed and then asked for again: it opens
+    /// once the first has ended.
+    private var reopenAfterOpening = false
+    /// How the last window ended.
+    private var lastWindowResult: PairingResult?
+    /// Why this device cancelled each of its pairing operations.
+    private var cancelReasons: [UInt64: PairingCancelReason] = [:]
+    /// This device's answer to each code, written before it is sent: the
+    /// result can arrive before the call returns.
+    private var codeAnswers: [UInt64: Bool] = [:]
+    /// Window opens and requests whose core call has not returned yet.
+    private var pairingStartsUnderWay = 0
+    /// Events for an operation whose start has not returned yet.
+    private var early: [UInt64: [NodeEvent]] = [:]
+    private static let earlyOperations = 16
+    private static let earlyEventsPerOperation = 64
+    private var pairingTasks: [UUID: Task<Void, Never>] = [:]
+
     private struct Waiter {
         let id: Int
         let ready: @MainActor () -> Bool
@@ -229,9 +282,15 @@ public final class AppModel {
     /// iOS: the app went to the background. Stop accepting new connections
     /// (the listener closes and the advertisement is withdrawn); running
     /// transfers finish. Called before `start()`, it keeps `start()` from
-    /// receiving.
+    /// receiving. A pairing window nobody is pairing through closes (it
+    /// opens again when the app is back in front on the pairing screen); a
+    /// code comparison under way is kept.
     public func enterBackground() {
         isInBackground = true
+        if windowActive, !windowEngaged, windowCloseReason == nil {
+            reopenOnActive = pairingScreenClients > 0
+            beginClosingWindow(.background)
+        }
         // Queued behind the receiver changes already under way, so a
         // receiver that is still starting stops accepting once it is up.
         chainReceiver { await $0.stopAcceptingInBackground() }
@@ -244,9 +303,14 @@ public final class AppModel {
         await work { core.stopAccepting() }
     }
 
-    /// iOS: the app is in front again.
+    /// iOS: the app is in front again. Still on the pairing screen, this
+    /// device gets ready to pair again.
     public func becomeActive() async {
         isInBackground = false
+        if reopenOnActive {
+            reopenOnActive = false
+            requestWindow()
+        }
         if onboarded {
             await applyVisibility()
         }
@@ -280,6 +344,7 @@ public final class AppModel {
     public func renameDevice(_ name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard await pairingLeavesIdentityAlone(title: String(localized: "The name was not changed")) else { return }
         let wasReceiving = receiver != nil
         if wasReceiving { await stopReceivingAndWait() }
         let before = identity?.name
@@ -296,6 +361,7 @@ public final class AppModel {
     }
 
     public func resetIdentity() async {
+        guard await pairingLeavesIdentityAlone(title: String(localized: "The identity was not reset")) else { return }
         let wasReceiving = receiver != nil
         if wasReceiving { await stopReceivingAndWait() }
         let before = identity?.fingerprint
@@ -312,6 +378,25 @@ public final class AppModel {
             }
         }
         if wasReceiving { await applyVisibility() }
+    }
+
+    /// The core refuses identity changes while pairing (`check_quiet`).
+    /// Waits for a window this device is closing (the pairing screen was
+    /// just left) and for the receiver it paused; says so, and returns
+    /// false, while pairing is under way.
+    private func pairingLeavesIdentityAlone(title: String) async -> Bool {
+        if windowCloseReason != nil {
+            _ = await waitUntil(timeout: timing.windowCloseWait) { [weak self] in self?.windowGone ?? true }
+        }
+        if pairStarting || requestRunning || windowActive {
+            banner = Banner(style: .warning, title: title,
+                            message: String(localized: "Pairing is under way. Finish or stop it first."))
+            return false
+        }
+        if holdActive {
+            _ = await waitUntil(timeout: timing.resumeWait) { [weak self] in self?.holdActive != true }
+        }
+        return true
     }
 
     private func showNewIdentity() {
@@ -609,11 +694,19 @@ public final class AppModel {
     /// The prompt to show now.
     public var currentPrompt: Prompt? { prompts.first }
 
+    /// Sends the user's answer. A code answer is noted first: the pairing
+    /// can end before the call returns, and only this device's answer tells
+    /// "you said no" from "the other device said no".
     public func answer(_ prompt: Prompt, yes: Bool) async {
         let id = prompt.promptId
         guard !answering.contains(id) else { return }
         answering.insert(id)
         defer { answering.remove(id) }
+        var pairingOperation: UInt64?
+        if case let .code(_, operation?, _, _, .pairing, _) = prompt {
+            pairingOperation = operation
+            codeAnswers[operation] = yes
+        }
         do {
             switch prompt {
             case .offer:
@@ -622,42 +715,254 @@ public final class AppModel {
                 try await work { [core] in try core.answerCode(id, confirmed: yes) }
             }
         } catch DropumiError.PromptNotFound {
+            if let pairingOperation { codeAnswers[pairingOperation] = nil }
             prompts.removeAll { $0.promptId == id }
         } catch {
+            if let pairingOperation { codeAnswers[pairingOperation] = nil }
             show(error, title: String(localized: "The answer was not sent"))
         }
     }
 
     // MARK: Pairing
 
+    /// The pairing screen appeared. The first one browses and makes this
+    /// device ready to pair (it opens a window), unless this device is
+    /// already pairing, or an outcome that came meanwhile is still to be
+    /// seen.
+    public func enterPairingScreen() {
+        pairingScreenClients += 1
+        beginBrowsing()
+        guard pairingScreenClients == 1 else { return }
+        let away = outcomeArrivedWhileAway
+        outcomeArrivedWhileAway = false
+        // A request started just before the screen appeared, or a device
+        // pairing with this one: the screen shows it.
+        if pairStarting || requestRunning || windowEngaged { return }
+        switch pairingFlow.phase {
+        case .finished, .paused:
+            if away { return }
+        default:
+            break
+        }
+        pairingFlow = PairingFlow(note: away ? pairingFlow.note : nil)
+        requestWindow()
+    }
+
+    /// The pairing screen went away. The last one stops browsing and closes
+    /// this device's window, unless a device is pairing through it (the iOS
+    /// code prompt covers the screen). A request keeps running; an outcome
+    /// that comes meanwhile is shown when the screen is back.
+    public func leavePairingScreen() {
+        guard pairingScreenClients > 0 else { return }
+        pairingScreenClients -= 1
+        endBrowsing()
+        guard pairingScreenClients == 0 else { return }
+        reopenOnActive = false
+        if windowActive, !windowEngaged {
+            beginClosingWindow(.leaving)
+        }
+        switch pairingFlow.phase {
+        case .finished, .paused:
+            pairingFlow = PairingFlow()
+        case .opening, .waiting:
+            pairingFlow.phase = .idle
+        case .idle, .switching, .asking, .comparing:
+            break
+        }
+    }
+
+    /// Start again, Try again, Pair another device: this device gets ready
+    /// to pair again.
+    public func startWaiting() {
+        if pairing?.result != nil { pairing = nil }
+        outcomeArrivedWhileAway = false
+        pairingFlow = PairingFlow()
+        requestWindow()
+    }
+
+    /// Stop: this device is no longer ready to pair. The screen then goes
+    /// away.
+    public func stopPairing() {
+        reopenOnActive = false
+        pairingFlow = PairingFlow()
+        if windowActive {
+            beginClosingWindow(.user)
+        }
+    }
+
+    /// Asks another device to pair (a tap). A tap while this device is
+    /// already pairing is ignored. This device's own window closes first:
+    /// it is the one asking now.
+    public func startPairing(with target: SendTarget, name: String) {
+        guard beginRequest(name: name) else { return }
+        track { await $0.runRequest(target, name: name) }
+    }
+
+    /// `startPairing(with:name:)`, returning once the core has answered.
+    /// Without the pairing screen, a request that cannot start shows a
+    /// banner.
     public func pair(with target: SendTarget, name: String) async {
+        guard beginRequest(name: name) else { return }
+        await runRequest(target, name: name)
+    }
+
+    /// The part of a tap that runs at once, so a second tap finds it.
+    private func beginRequest(name: String) -> Bool {
+        guard !pairStarting, !requestRunning, !windowEngaged else { return false }
+        pairStarting = true
+        requestAborted = false
+        outcomeArrivedWhileAway = false
+        pairingFlow = PairingFlow(phase: windowActive ? .switching(name: name) : .asking(name: name))
+        return true
+    }
+
+    private func runRequest(_ target: SendTarget, name: String) async {
+        defer { pairStarting = false }
+        // The core takes a request while the window is open; it is closed
+        // first so that nothing else uses it meanwhile.
+        if windowActive, case .paired? = await closeOwnWindow(.dialing) {
+            // A device paired with this one meanwhile: that is shown.
+            return
+        }
+        if requestAborted {
+            pairStarting = false
+            pairingFlow = PairingFlow(note: .cancelled)
+            requestWindow()
+            return
+        }
+        pairingFlow.phase = .asking(name: name)
+        pairingStartsUnderWay += 1
+        defer { endPairingStart() }
         do {
             let op = try await work { [core] in try core.pair(target) }
             let id = op.id()
             operations[id] = op
-            pairing = PairingSession(operation: id, role: .initiator(name: name), port: nil, expiresAt: nil, result: nil)
+            pairing = PairingSession(operation: id, role: .initiator(name: name))
+            pairStarting = false
+            // Prompts first: a kept end is then classified with the code.
+            codePromptsShown(for: id)
+            replayEarly(id)
+            if requestAborted { cancelOperation(id, .user) }
         } catch {
-            show(error, title: String(localized: "Pairing could not start"))
+            pairStarting = false
+            if pairingScreenClients > 0 {
+                let note = requestAborted ? .cancelled : PairingClassifier.classify(requestError: error, name: name)
+                pairingFlow = PairingFlow(note: note)
+                requestWindow()
+            } else {
+                pairingFlow = PairingFlow()
+                show(error, title: String(localized: "Pairing could not start"))
+            }
         }
     }
 
-    /// Lets one device pair with this one for five minutes. The core pauses
-    /// a running receiver before the call returns and resumes it when the
-    /// window ends; receiving settings wait until then (the pairing hold).
+    /// Cancel, while asking a device: this device gets ready to pair again,
+    /// with "Pairing cancelled.". On this device's window: Stop.
+    public func cancelPairing() {
+        if pairStarting {
+            requestAborted = true
+            return
+        }
+        guard let pairing, pairing.result == nil, operations[pairing.operation] != nil else {
+            self.pairing = nil
+            return
+        }
+        cancelOperation(pairing.operation, .user)
+    }
+
+    /// Done: the outcome was seen.
+    public func dismissPairing() {
+        if pairing?.result != nil { pairing = nil }
+        outcomeArrivedWhileAway = false
+        pairingFlow = PairingFlow()
+    }
+
+    /// Lets one device pair with this one for five minutes, without the
+    /// pairing screen (which opens its own window), and returns once the
+    /// core has answered. The core pauses a running receiver before the
+    /// call returns and resumes it when the window ends; receiving settings
+    /// wait until then (the pairing hold).
     public func openPairingWindow() async {
-        // The window before may still be resuming the receiver it paused.
+        guard !pairStarting, !requestRunning else { return }
+        if windowOpenTask == nil, windowOperation.map({ cancelReasons[$0] != nil }) ?? true {
+            pairingFlow = PairingFlow(phase: .opening)
+            startWindowOpen(forScreen: false)
+        }
+        await windowOpenTask?.value
+    }
+
+    /// The pairing screen wants this device ready to pair. Only these ask:
+    /// the screen appearing, Start again, a request of this device that
+    /// ended before a code, and the app back in front on the screen.
+    private func requestWindow() {
+        guard pairingScreenClients > 0, onboarded, !pairStarting, !requestRunning else { return }
+        guard !isInBackground else {
+            reopenOnActive = true
+            return
+        }
+        if let window = windowOperation, cancelReasons[window] == nil {
+            // Already open (without the screen).
+            if windowEngaged {
+                pairingFlow.phase = .comparing
+            } else if let session = pairing, session.operation == window, session.port != nil,
+                      let expiresAt = session.expiresAt {
+                pairingFlow.phase = .waiting(expiresAt: expiresAt)
+            } else {
+                pairingFlow.phase = .opening
+            }
+            return
+        }
+        pairingFlow.phase = .opening
+        if windowOpenTask != nil {
+            // One is opening; if it is being closed, the next opens after it.
+            if pendingWindowCancel != nil { reopenAfterOpening = true }
+            return
+        }
+        startWindowOpen(forScreen: true)
+    }
+
+    @discardableResult
+    private func startWindowOpen(forScreen: Bool) -> Task<Void, Never> {
+        windowAttempt += 1
+        pendingWindowCancel = nil
+        reopenAfterOpening = false
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.openWindowWhenFree(forScreen: forScreen)
+            self.windowOpenTask = nil
+            self.checkWaiters()
+            if self.reopenAfterOpening {
+                self.reopenAfterOpening = false
+                self.requestWindow()
+            }
+        }
+        windowOpenTask = task
+        checkWaiters()
+        return task
+    }
+
+    private func openWindowWhenFree(forScreen: Bool) async {
+        // The window before may still be ending, or resuming the receiver
+        // it paused.
         _ = await waitUntil(timeout: timing.resumeWait) { [weak self] in
             guard let self else { return true }
             return self.windowOperation == nil && !self.resumeExpected
+        }
+        // Closed (or no longer wanted) before it opened.
+        guard pendingWindowCancel == nil, !forScreen || wantsWindow else { return }
+        guard windowOperation == nil else {
+            // The window before never reported its end.
+            pairingFlow.phase = .paused(.couldNotWait(ErrorCatalog.text(for: .busy).message))
+            return
         }
         windowStarts += 1
         syncPairingHold()
         // Behind the receiver changes under way, which the core refuses once
         // the window is open.
-        await chainReceiver { await $0.openWindowNow() }.value
+        await chainReceiver { await $0.openWindowNow(forScreen: forScreen) }.value
     }
 
-    private func openWindowNow() async {
+    private func openWindowNow(forScreen: Bool) async {
         defer {
             windowStarts -= 1
             syncPairingHold()
@@ -670,52 +975,269 @@ public final class AppModel {
         // Only a stop from here on is this window's pause.
         if windowOperation == nil { windowPausedReceiver = false }
         let minutes = timing.windowMinutes
+        pairingStartsUnderWay += 1
+        defer { endPairingStart() }
         do {
             let op = try await work { [core] in try core.openPairingWindow(minutes: minutes) }
             let id = op.id()
             operations[id] = op
             windowOperation = id
+            lastWindowResult = nil
             pairing = PairingSession(
-                operation: id, role: .window, port: nil,
-                expiresAt: clock().addingTimeInterval(TimeInterval(minutes) * 60), result: nil)
+                operation: id, role: .window, expiresAt: clock().addingTimeInterval(TimeInterval(minutes) * 60))
+            // Prompts first: a kept end is then classified with the code.
+            codePromptsShown(for: id)
+            replayEarly(id)
+            // Closed while it opened, or no longer wanted: closed now.
+            let reason = pendingWindowCancel ?? (forScreen && !wantsWindow ? .leaving : nil)
+            pendingWindowCancel = nil
+            if let reason { cancelOperation(id, reason) }
         } catch {
             // Refused before the core paused anything.
             if windowOperation == nil { windowPausedReceiver = false }
-            pairingFlow.phase = .paused(PairingClassifier.classify(windowError: error))
-            show(error, title: String(localized: "Pairing could not start"))
+            // Unless it was closed meanwhile, the screen says why.
+            if pendingWindowCancel == nil {
+                pairingFlow.phase = .paused(PairingClassifier.classify(windowError: error))
+                if pairingScreenClients == 0 {
+                    show(error, title: String(localized: "Pairing could not start"))
+                }
+            }
         }
+    }
+
+    /// Starts closing this device's window, opening or open. At once, so a
+    /// window asked for next finds this one closing.
+    private func beginClosingWindow(_ reason: PairingCancelReason) {
+        reopenAfterOpening = false
+        if let window = windowOperation {
+            cancelOperation(window, reason)
+        }
+        if windowOpenTask != nil, pendingWindowCancel == nil {
+            // Closed as soon as the core has opened it.
+            pendingWindowCancel = reason
+        }
+    }
+
+    /// Closes this device's window, opening or open, and waits until it has
+    /// ended (bounded). Returns how it ended, or nil if it did not say in
+    /// time or a newer window began meanwhile.
+    private func closeOwnWindow(_ reason: PairingCancelReason) async -> PairingResult? {
+        beginClosingWindow(reason)
+        let attempt = windowAttempt
+        _ = await waitUntil(timeout: timing.windowCloseWait) { [weak self] in
+            guard let self else { return true }
+            return self.windowGone || self.windowAttempt != attempt
+        }
+        return windowGone ? lastWindowResult : nil
+    }
+
+    /// Cancels one of this device's pairing operations, once, noting why.
+    /// Tracked, so the test hook `idle()` waits until the core has it.
+    private func cancelOperation(_ operation: UInt64, _ reason: PairingCancelReason) {
+        guard cancelReasons[operation] == nil, let handle = operations[operation] else { return }
+        cancelReasons[operation] = reason
+        track { await $0.work { handle.cancel() } }
     }
 
     /// The window's operation ended: the core resumes the receiver it
     /// paused, if any, and the hold lasts until it has.
-    private func windowEnded() {
+    private func windowEnded(_ result: PairingResult?) {
         windowOperation = nil
+        lastWindowResult = result
         if windowPausedReceiver {
             windowPausedReceiver = false
-            resumeExpected = true
-            // Bounded: if the core's resume never comes (or was not for this
-            // window), the settings still apply.
-            resumeEpoch += 1
-            let epoch = resumeEpoch
-            timer.schedule(after: timing.resumeWait) { [weak self] in
-                guard let self, self.resumeExpected, self.resumeEpoch == epoch else { return }
-                self.resumeExpected = false
-                self.syncPairingHold()
+            // The resume can be applied first, when the end was reported
+            // before the window's call returned.
+            if receiver == nil {
+                resumeExpected = true
+                // Bounded: if the core's resume never comes (or was not for
+                // this window), the settings still apply.
+                resumeEpoch += 1
+                let epoch = resumeEpoch
+                timer.schedule(after: timing.resumeWait) { [weak self] in
+                    guard let self, self.resumeExpected, self.resumeEpoch == epoch else { return }
+                    self.resumeExpected = false
+                    self.syncPairingHold()
+                }
             }
         }
         syncPairingHold()
     }
 
-    public func cancelPairing() {
-        guard let pairing, let handle = operations[pairing.operation] else {
-            self.pairing = nil
-            return
-        }
-        Task.detached { handle.cancel() }
+    /// The pairing screen is shown, in front, and nothing else is pairing.
+    private var wantsWindow: Bool {
+        pairingScreenClients > 0 && !isInBackground && onboarded && !pairStarting && !requestRunning
     }
 
-    public func dismissPairing() {
-        pairing = nil
+    /// This device's request is running.
+    private var requestRunning: Bool {
+        guard let pairing, pairing.result == nil, case .initiator = pairing.role else { return false }
+        return true
+    }
+
+    /// No window of this device is opening or open.
+    private var windowGone: Bool { windowOperation == nil && windowOpenTask == nil }
+
+    private var windowActive: Bool { !windowGone }
+
+    /// A device is pairing through this device's window: it connected, or
+    /// a code was shown.
+    private var windowEngaged: Bool {
+        guard let window = windowOperation, let pairing, pairing.operation == window else { return false }
+        return pairing.peer != nil || pairing.reachedCode
+    }
+
+    /// Why this device is closing its window, if it is.
+    private var windowCloseReason: PairingCancelReason? {
+        if let window = windowOperation, let reason = cancelReasons[window] { return reason }
+        return windowOpenTask != nil ? pendingWindowCancel : nil
+    }
+
+    /// Runs pairing work in the background; the test hook `idle()` waits
+    /// for it.
+    private func track(_ body: @escaping @MainActor (AppModel) async -> Void) {
+        let id = UUID()
+        pairingTasks[id] = Task { [weak self] in
+            guard let self else { return }
+            await body(self)
+            self.pairingTasks[id] = nil
+        }
+    }
+
+    // MARK: Pairing events
+
+    /// Keeps an event for a pairing operation whose start has not returned
+    /// yet: the core reports some before it does. Returns whether the event
+    /// was taken (kept, or dropped past the bounds; the end is always kept).
+    private func keepEarly(_ event: NodeEvent, for operation: UInt64) -> Bool {
+        guard pairingStartsUnderWay > 0, operations[operation] == nil else { return false }
+        var kept = early[operation] ?? []
+        let isEnd: Bool
+        if case .pairingFinished = event { isEnd = true } else { isEnd = false }
+        let room = kept.count < Self.earlyEventsPerOperation
+            && (early[operation] != nil || early.count < Self.earlyOperations)
+        if isEnd || room {
+            kept.append(event)
+            early[operation] = kept
+        }
+        return true
+    }
+
+    private func replayEarly(_ operation: UInt64) {
+        for event in early.removeValue(forKey: operation) ?? [] {
+            apply(event)
+        }
+    }
+
+    private func endPairingStart() {
+        pairingStartsUnderWay -= 1
+        // Events kept for an operation that never came.
+        if pairingStartsUnderWay == 0 { early.removeAll() }
+    }
+
+    /// Code prompts the core opened for this operation before its start
+    /// returned.
+    private func codePromptsShown(for operation: UInt64) {
+        for case let .code(_, op?, peer, _, _, expiresAtMs) in prompts where op == operation {
+            pairingEngaged(operation, peer: peer, code: true, codeExpiresAt: Self.date(ms: expiresAtMs))
+        }
+    }
+
+    private static func date(ms: UInt64) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+    }
+
+    /// A device is pairing through the current attempt: it connected, or a
+    /// code was shown. Its name stays a claim.
+    private func pairingEngaged(_ operation: UInt64, peer: PeerInfo, code: Bool, codeExpiresAt: Date? = nil) {
+        guard var session = pairing, session.operation == operation, session.result == nil else { return }
+        session.peer = peer
+        if code { session.reachedCode = true }
+        if let codeExpiresAt { session.codeExpiresAt = codeExpiresAt }
+        pairing = session
+        // An attempt this device is ending shows its own next step.
+        guard cancelReasons[operation] == nil else { return }
+        switch pairingFlow.phase {
+        case .finished, .paused:
+            break
+        case .idle, .opening, .waiting, .switching, .asking, .comparing:
+            pairingFlow.phase = .comparing
+        }
+    }
+
+    /// This device's window listens.
+    private func windowListening(_ operation: UInt64, port: UInt16) {
+        guard var session = pairing, session.operation == operation, case .window = session.role else { return }
+        let expiresAt = clock().addingTimeInterval(TimeInterval(timing.windowMinutes) * 60)
+        session.port = port
+        session.expiresAt = expiresAt
+        pairing = session
+        if case .opening = pairingFlow.phase, cancelReasons[operation] == nil {
+            pairingFlow.phase = .waiting(expiresAt: expiresAt)
+        }
+    }
+
+    private func pairingFinished(_ operation: UInt64, _ result: PairingResult) {
+        operations[operation] = nil
+        let running = pairing.map { $0.operation == operation && $0.result == nil } ?? false
+        if pairing?.operation == operation {
+            pairing?.result = result
+        }
+        if operation == windowOperation { windowEnded(result) }
+        if running, let session = pairing {
+            let facts = facts(of: session, result: result)
+            applyVerdict(PairingClassifier.classify(facts), facts)
+        }
+        codeAnswers[operation] = nil
+        cancelReasons[operation] = nil
+        track { await $0.refreshTrusted() }
+    }
+
+    private func facts(of session: PairingSession, result: PairingResult) -> PairingFacts {
+        let now = clock()
+        let answer = codeAnswers[session.operation]
+        var name: String?
+        var windowElapsed = false
+        switch session.role {
+        case let .initiator(listed):
+            name = listed
+        case .window:
+            windowElapsed = session.expiresAt.map { now >= $0.addingTimeInterval(-2) } ?? false
+        }
+        let codeExpired = answer == nil && (session.codeExpiresAt.map { now >= $0.addingTimeInterval(-1) } ?? false)
+        return PairingFacts(
+            role: session.role, result: result, reachedCode: session.reachedCode, localAnswer: answer,
+            localCodeExpired: codeExpired, windowElapsed: windowElapsed, listening: session.port != nil,
+            cancelReason: cancelReasons[session.operation], name: name)
+    }
+
+    private func applyVerdict(_ verdict: PairingVerdict, _ facts: PairingFacts) {
+        let shown = pairingScreenClients > 0
+        switch verdict {
+        case .silent:
+            // This device ended it: a tap goes on to ask, and the screen
+            // after Stop, or with no screen, shows nothing.
+            guard facts.cancelReason == .user || !shown else { break }
+            switch pairingFlow.phase {
+            case .opening, .waiting, .comparing:
+                pairingFlow.phase = .idle
+            case .idle, .switching, .asking, .paused, .finished:
+                break
+            }
+        case let .waitAgain(note):
+            pairingFlow = PairingFlow(note: note)
+            if shown {
+                requestWindow()
+            } else {
+                outcomeArrivedWhileAway = true
+            }
+        case let .paused(outcome):
+            pairingFlow = PairingFlow(phase: .paused(outcome))
+            if !shown { outcomeArrivedWhileAway = true }
+        case let .finished(outcome):
+            pairingFlow = PairingFlow(phase: .finished(outcome))
+            if !shown { outcomeArrivedWhileAway = true }
+        }
     }
 
     // MARK: History
@@ -766,11 +1288,23 @@ public final class AppModel {
         case let .peerLost(instance):
             nearby.removeAll { $0.instance == instance }
         case let .connected(operation, peer):
-            if let operation { record(for: operation)?.peer = peer }
+            guard let operation else { break }
+            if let r = record(for: operation) {
+                r.peer = peer
+            } else if pairing?.operation == operation {
+                pairingEngaged(operation, peer: peer, code: false)
+            } else {
+                _ = keepEarly(event, for: operation)
+            }
         case let .sessionCode(operation, peer, code):
-            if let operation, let r = record(for: operation) {
+            guard let operation else { break }
+            if let r = record(for: operation) {
                 r.peer = peer
                 r.sessionCode = code
+            } else if pairing?.operation == operation {
+                pairingEngaged(operation, peer: peer, code: true)
+            } else {
+                _ = keepEarly(event, for: operation)
             }
         case let .offerSent(operation, transferId, peer, _, totalBytes):
             if let r = record(for: operation) {
@@ -796,6 +1330,10 @@ public final class AppModel {
             if case let .offer(_, transferId, _, _, files, _, _, _) = prompt,
                let r = active.first(where: { $0.transferId == transferId && $0.direction == .incoming }) {
                 r.fileNames = files.map(\.name)
+            }
+            // A code for a start that has not returned is found when it does.
+            if case let .code(_, operation?, peer, _, _, expiresAtMs) = prompt {
+                pairingEngaged(operation, peer: peer, code: true, codeExpiresAt: Self.date(ms: expiresAtMs))
             }
         case let .promptClosed(id, _):
             prompts.removeAll { $0.promptId == id }
@@ -826,14 +1364,17 @@ public final class AppModel {
                 finish(r, result: result)
             }
         case let .pairingWindowOpened(operation, port):
-            if pairing?.operation == operation { pairing?.port = port }
-        case let .pairingFinished(operation, result):
-            operations[operation] = nil
             if pairing?.operation == operation {
-                pairing?.result = result
+                windowListening(operation, port: port)
+            } else {
+                _ = keepEarly(event, for: operation)
             }
-            if operation == windowOperation { windowEnded() }
-            Task { await refreshTrusted() }
+        case let .pairingFinished(operation, result):
+            if operations[operation] == nil, pairing?.operation != operation, operation != windowOperation,
+               keepEarly(event, for: operation) {
+                break
+            }
+            pairingFinished(operation, result)
         case let .sessionClosed(peer, code):
             if code == "not_authorized" { noticeRefused(peer) }
         case let .warning(message):
@@ -939,6 +1480,9 @@ public final class AppModel {
     /// (as on Android).
     private func noticeRefused(_ peer: PeerInfo?) {
         if let peer, peer.trusted { return }
+        // While this device waits to pair, the pairing screen says what
+        // happened to its window.
+        if peer == nil, pairingScreenClients > 0 || windowActive { return }
         guard banner == nil else { return }
         let now = clock()
         if let last = lastUnpairedNotice, now.timeIntervalSince(last) < 60 { return }
@@ -979,7 +1523,7 @@ public final class AppModel {
                 apply(.pairingFinished(operation: op, result: result))
             } else if info == nil, op == windowOperation {
                 // Only finished operations are forgotten.
-                windowEnded()
+                windowEnded(nil)
             }
         }
         if resumeExpected, snapshot.receiver != nil {
@@ -992,8 +1536,9 @@ public final class AppModel {
 
     /// Waits until `ready()` holds or `timeout` has passed (nil: no limit),
     /// and returns whether it holds. Nothing polls: the condition is checked
-    /// after each batch of events and wherever the pairing hold changes
-    /// (`checkWaiters()`); the timeout comes from the model's timer.
+    /// after each batch of events and wherever the pairing hold or a window
+    /// open changes (`checkWaiters()`); the timeout comes from the model's
+    /// timer.
     private func waitUntil(timeout: Duration?, _ ready: @escaping @MainActor () -> Bool) async -> Bool {
         if ready() { return true }
         lastWaiter += 1
@@ -1050,13 +1595,16 @@ public final class AppModel {
     /// Test hook: the operation handles the model holds.
     var operationCount: Int { operations.count }
 
-    /// Test hook: waits until the receiver changes and window opens queued
-    /// so far (and those they queue) have run.
+    /// Test hook: waits until the receiver changes, discovery changes,
+    /// window opens and pairing work queued so far (and those they queue)
+    /// have run.
     func idle() async {
-        var last: Task<Void, Never>?
-        while let task = visibilityTask, task != last {
-            last = task
-            await task.value
+        var done = Set<Task<Void, Never>>()
+        while true {
+            let queued = [visibilityTask, discoveryTask, windowOpenTask].compactMap { $0 } + Array(pairingTasks.values)
+            guard let next = queued.first(where: { !done.contains($0) }) else { return }
+            await next.value
+            done.insert(next)
         }
     }
 
