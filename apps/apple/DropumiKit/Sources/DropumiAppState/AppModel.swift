@@ -113,6 +113,11 @@ public final class AppModel {
     public private(set) var active: [TransferRecord] = []
     public private(set) var history: [HistoryEntry]
     public private(set) var pairing: PairingSession?
+    /// What the pairing screen shows.
+    public private(set) var pairingFlow = PairingFlow()
+    /// This device's pairing window is opening or open, or the core is
+    /// resuming the receiver it paused: receiving settings apply after it.
+    public private(set) var receivingPausedForPairing = false
     public private(set) var draft: [OutgoingFile] = []
     public private(set) var isInBackground = false
     public var banner: Banner?
@@ -132,13 +137,47 @@ public final class AppModel {
     private var held: [String: [OutgoingFile]] = [:]
     private var eventTask: Task<Void, Never>?
     private var lastUnpairedNotice: Date?
+    private let timing: PairingTiming
+    private let timer: any ModelTimer
+
+    // The pairing hold. This device's pairing window is tracked by its own
+    // operation, never by the pairing shown on screen. Opening a window
+    // pauses a running receiver (ReceiverStopped); when the window ends
+    // (PairingFinished) the core resumes that receiver with the settings it
+    // had (ReceiverStarted, or ReceiverStopped if it could not). The core
+    // refuses receiver changes until then, so the model leaves the receiver
+    // alone, and then makes it match the settings of the moment.
+
+    /// Window opens under way.
+    private var windowStarts = 0
+    /// The open window's operation; cleared only by its PairingFinished.
+    private var windowOperation: UInt64?
+    /// A receiver stopped while the window was opening or open: the core
+    /// resumes it afterwards.
+    private var windowPausedReceiver = false
+    /// The window ended and the core is resuming the receiver it paused.
+    private var resumeExpected = false
+    private var resumeEpoch = 0
+    private var holdActive: Bool { windowStarts > 0 || windowOperation != nil || resumeExpected }
+
+    private struct Waiter {
+        let id: Int
+        let ready: @MainActor () -> Bool
+        let resume: (Bool) -> Void
+    }
+    private var waiters: [Waiter] = []
+    private var lastWaiter = 0
+    /// Test hook: batches applied from the core's event stream.
+    private(set) var streamBatches = 0
 
     public init(
         core: CoreClient,
         paths: AppPaths,
         settings: SettingsStore = SettingsStore(),
         inbox: ShareInbox? = nil,
-        clock: @escaping @Sendable () -> Date = { Date() }
+        clock: @escaping @Sendable () -> Date = { Date() },
+        timing: PairingTiming = PairingTiming(),
+        timer: any ModelTimer = SystemTimer()
     ) {
         self.core = core
         self.paths = paths
@@ -146,6 +185,8 @@ public final class AppModel {
         self.historyStore = HistoryStore(file: paths.historyFile)
         self.inbox = inbox
         self.clock = clock
+        self.timing = timing
+        self.timer = timer
         self.visibility = settings.visibility
         self.autoAcceptPaired = settings.autoAcceptPaired
         self.appearance = settings.appearance
@@ -162,6 +203,7 @@ public final class AppModel {
         let events = core.events
         eventTask = Task { [weak self] in
             for await batch in events {
+                self?.streamBatches += 1
                 self?.apply(batch)
             }
         }
@@ -192,11 +234,7 @@ public final class AppModel {
         isInBackground = true
         // Queued behind the receiver changes already under way, so a
         // receiver that is still starting stops accepting once it is up.
-        let previous = visibilityTask
-        visibilityTask = Task { [weak self] in
-            await previous?.value
-            await self?.stopAcceptingInBackground()
-        }
+        chainReceiver { await $0.stopAcceptingInBackground() }
     }
 
     private func stopAcceptingInBackground() async {
@@ -327,13 +365,16 @@ public final class AppModel {
 
     // MARK: Receiving
 
-    /// Changes who may send to this device.
+    /// Changes who may send to this device. During the pairing hold the
+    /// change is kept and applied when the hold ends (the core resumes the
+    /// paused receiver with its old settings; the model then changes it).
     public func setVisibility(_ value: ReceiveVisibility) async {
         visibility = value
         settings.visibility = value
         await applyVisibility()
     }
 
+    /// Like `setVisibility(_:)`, applied after the pairing hold.
     public func setAutoAcceptPaired(_ value: Bool) async {
         autoAcceptPaired = value
         settings.autoAcceptPaired = value
@@ -345,18 +386,71 @@ public final class AppModel {
     /// receiver is never started twice; `enterBackground()` queues behind
     /// them too.
     public func applyVisibility() async {
+        await chainReceiver { await $0.applyVisibilityNow() }.value
+    }
+
+    /// Queues `change` behind the receiver changes (and window opens)
+    /// already under way, so they run one after another.
+    @discardableResult
+    private func chainReceiver(_ change: @escaping @MainActor (AppModel) async -> Void) -> Task<Void, Never> {
         let previous = visibilityTask
         let task = Task { [weak self] in
             await previous?.value
-            await self?.applyVisibilityNow()
+            guard let self else { return }
+            await change(self)
         }
         visibilityTask = task
-        await task.value
+        return task
     }
+
+    /// Publishes the pairing hold. When it ends, the receiver is made to
+    /// match the settings of the moment (unless `reconcile` is false: the
+    /// caller does that itself).
+    private func syncPairingHold(reconcile: Bool = true) {
+        let held = holdActive
+        let was = receivingPausedForPairing
+        if held != was {
+            receivingPausedForPairing = held
+            if was, reconcile {
+                chainReceiver { await $0.matchReceiver() }
+            }
+        }
+        checkWaiters()
+    }
+
+    /// Makes a running receiver (or none) match the settings now. The core
+    /// also starts a receiver by itself: when a pairing window ends it
+    /// resumes the one the window paused, with the settings it had then,
+    /// and this may be after the user chose Off or left the app.
+    private func matchReceiver() async {
+        guard !holdActive, onboarded else { return }
+        if isInBackground {
+            await stopAcceptingInBackground()
+            return
+        }
+        if let receiver, matchesSettings(receiver) { return }
+        await applyVisibilityNow()
+    }
+
+    /// Whether a running receiver already has the chosen policy kind and
+    /// accept mode.
+    private func matchesSettings(_ info: ReceiverInfo) -> Bool {
+        guard info.accept == acceptMode else { return false }
+        switch (visibility, info.policy) {
+        case (.pairedOnly, .trustedOnly), (.everyone, .everyone): return true
+        default: return false
+        }
+    }
+
+    private var acceptMode: AcceptMode { autoAcceptPaired ? .autoTrusted : .prompt }
 
     private func applyVisibilityNow() async {
         guard !isInBackground else { return }
-        let accept: AcceptMode = autoAcceptPaired ? .autoTrusted : .prompt
+        // The core refuses receiver changes during the pairing hold, and
+        // resumes the receiver with its old settings afterwards; the change
+        // waits until then (syncPairingHold, ReceiverStarted).
+        guard !holdActive else { return }
+        let accept = acceptMode
         guard let policy = visibility.policy else {
             if receiver != nil {
                 let core = core
@@ -547,17 +641,69 @@ public final class AppModel {
         }
     }
 
-    /// Lets one device pair with this one for five minutes.
+    /// Lets one device pair with this one for five minutes. The core pauses
+    /// a running receiver before the call returns and resumes it when the
+    /// window ends; receiving settings wait until then (the pairing hold).
     public func openPairingWindow() async {
+        // The window before may still be resuming the receiver it paused.
+        _ = await waitUntil(timeout: timing.resumeWait) { [weak self] in
+            guard let self else { return true }
+            return self.windowOperation == nil && !self.resumeExpected
+        }
+        windowStarts += 1
+        syncPairingHold()
+        // Behind the receiver changes under way, which the core refuses once
+        // the window is open.
+        await chainReceiver { await $0.openWindowNow() }.value
+    }
+
+    private func openWindowNow() async {
+        defer {
+            windowStarts -= 1
+            syncPairingHold()
+        }
+        // A receiver that is still stopping would stop during the window and
+        // pass for its pause.
+        if receiverStopping {
+            _ = await waitUntil(timeout: timing.stopWait) { [weak self] in self?.receiverStopping != true }
+        }
+        // Only a stop from here on is this window's pause.
+        if windowOperation == nil { windowPausedReceiver = false }
+        let minutes = timing.windowMinutes
         do {
-            let op = try await work { [core] in try core.openPairingWindow(minutes: 5) }
+            let op = try await work { [core] in try core.openPairingWindow(minutes: minutes) }
             let id = op.id()
             operations[id] = op
+            windowOperation = id
             pairing = PairingSession(
-                operation: id, role: .window, port: nil, expiresAt: clock().addingTimeInterval(300), result: nil)
+                operation: id, role: .window, port: nil,
+                expiresAt: clock().addingTimeInterval(TimeInterval(minutes) * 60), result: nil)
         } catch {
+            // Refused before the core paused anything.
+            if windowOperation == nil { windowPausedReceiver = false }
+            pairingFlow.phase = .paused(PairingClassifier.classify(windowError: error))
             show(error, title: String(localized: "Pairing could not start"))
         }
+    }
+
+    /// The window's operation ended: the core resumes the receiver it
+    /// paused, if any, and the hold lasts until it has.
+    private func windowEnded() {
+        windowOperation = nil
+        if windowPausedReceiver {
+            windowPausedReceiver = false
+            resumeExpected = true
+            // Bounded: if the core's resume never comes (or was not for this
+            // window), the settings still apply.
+            resumeEpoch += 1
+            let epoch = resumeEpoch
+            timer.schedule(after: timing.resumeWait) { [weak self] in
+                guard let self, self.resumeExpected, self.resumeEpoch == epoch else { return }
+                self.resumeExpected = false
+                self.syncPairingHold()
+            }
+        }
+        syncPairingHold()
     }
 
     public func cancelPairing() {
@@ -586,25 +732,15 @@ public final class AppModel {
         for event in batch {
             apply(event)
         }
+        checkWaiters()
     }
 
     private func apply(_ event: NodeEvent) {
         switch event {
         case let .receiverStarted(info):
-            receiver = info
-            receiverStopping = false
+            receiverStarted(info)
         case let .receiverStopped(reason):
-            receiver = nil
-            receiverStopping = false
-            if reason == .listenerFailed || reason == .internal, !isInBackground, visibility != .off {
-                banner = Banner(style: .warning, title: String(localized: "Receiving stopped"),
-                                message: String(localized: "This device stopped listening for files."),
-                                action: .retryReceiving)
-            } else if reason == .stopped, onboarded, !isInBackground, visibility != .off {
-                // A stop that finished after the user turned receiving
-                // back on (or the app came back to the front meanwhile).
-                Task { await applyVisibility() }
-            }
+            receiverStopped(reason)
         case let .policyChanged(policy, accept, everyoneUntil):
             receiver = receiver.map {
                 ReceiverInfo(port: $0.port, instance: $0.instance, policy: policy, accept: accept, everyoneUntil: everyoneUntil)
@@ -696,6 +832,7 @@ public final class AppModel {
             if pairing?.operation == operation {
                 pairing?.result = result
             }
+            if operation == windowOperation { windowEnded() }
             Task { await refreshTrusted() }
         case let .sessionClosed(peer, code):
             if code == "not_authorized" { noticeRefused(peer) }
@@ -705,6 +842,47 @@ public final class AppModel {
             break
         case .resyncRequired:
             resync()
+        }
+    }
+
+    /// A receiver started. The model's own starts already set it (this event
+    /// can come before or after the call returns); one the model already
+    /// asked to stop is ignored. The core also starts one by itself after a
+    /// pairing window, with the settings it had: it is made to match the
+    /// settings now.
+    private func receiverStarted(_ info: ReceiverInfo) {
+        if receiverStopping, !resumeExpected { return }
+        receiver = info
+        receiverStopping = false
+        if resumeExpected {
+            resumeExpected = false
+            syncPairingHold()
+        } else {
+            chainReceiver { await $0.matchReceiver() }
+        }
+    }
+
+    private func receiverStopped(_ reason: ReceiverStopReason) {
+        // While a window opens or is open, this is its pause: the core
+        // resumes this receiver when the window ends.
+        if windowStarts > 0 || windowOperation != nil { windowPausedReceiver = true }
+        receiver = nil
+        receiverStopping = false
+        // The resume after a window failed: said below, like any other stop.
+        if resumeExpected {
+            resumeExpected = false
+            syncPairingHold(reconcile: false)
+        }
+        if reason == .listenerFailed || reason == .internal, !isInBackground, visibility != .off {
+            banner = Banner(style: .warning, title: String(localized: "Receiving stopped"),
+                            message: String(localized: "This device stopped listening for files."),
+                            action: .retryReceiving)
+        } else if reason == .stopped, onboarded, !isInBackground, visibility != .off, !holdActive {
+            // A stop that finished after the user turned receiving
+            // back on (or the app came back to the front meanwhile). A
+            // pairing window's pause is not restarted here: the core
+            // resumes the receiver after the window.
+            chainReceiver { await $0.applyVisibilityNow() }
         }
     }
 
@@ -785,6 +963,59 @@ public final class AppModel {
         receiverStopping = snapshot.receiverStopping
         prompts = snapshot.prompts
         nearby = snapshot.nearby
+        resyncPairing(snapshot)
+        // A receiver the core started (or stopped) may have been among the
+        // dropped events.
+        chainReceiver { await $0.matchReceiver() }
+    }
+
+    /// Pairing ends that were among the dropped events, so the window's
+    /// hold always ends.
+    private func resyncPairing(_ snapshot: NodeSnapshot) {
+        let session = pairing.flatMap { $0.result == nil ? $0.operation : nil }
+        for op in Set([windowOperation, session].compactMap { $0 }) {
+            let info = snapshot.operations.first { $0.id == op }
+            if case let .pairing(result)? = info?.result {
+                apply(.pairingFinished(operation: op, result: result))
+            } else if info == nil, op == windowOperation {
+                // Only finished operations are forgotten.
+                windowEnded()
+            }
+        }
+        if resumeExpected, snapshot.receiver != nil {
+            resumeExpected = false
+            syncPairingHold(reconcile: false)
+        }
+    }
+
+    // MARK: Waiting
+
+    /// Waits until `ready()` holds or `timeout` has passed (nil: no limit),
+    /// and returns whether it holds. Nothing polls: the condition is checked
+    /// after each batch of events and wherever the pairing hold changes
+    /// (`checkWaiters()`); the timeout comes from the model's timer.
+    private func waitUntil(timeout: Duration?, _ ready: @escaping @MainActor () -> Bool) async -> Bool {
+        if ready() { return true }
+        lastWaiter += 1
+        let id = lastWaiter
+        return await withCheckedContinuation { continuation in
+            waiters.append(Waiter(id: id, ready: ready, resume: { continuation.resume(returning: $0) }))
+            if let timeout {
+                timer.schedule(after: timeout) { [weak self] in self?.endWait(id, ready: false) }
+            }
+        }
+    }
+
+    /// Resumes every wait whose condition now holds, each exactly once.
+    private func checkWaiters() {
+        for waiter in waiters where waiter.ready() {
+            endWait(waiter.id, ready: true)
+        }
+    }
+
+    private func endWait(_ id: Int, ready: Bool) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).resume(ready)
     }
 
     // MARK: Helpers
@@ -818,6 +1049,31 @@ public final class AppModel {
 
     /// Test hook: the operation handles the model holds.
     var operationCount: Int { operations.count }
+
+    /// Test hook: waits until the receiver changes and window opens queued
+    /// so far (and those they queue) have run.
+    func idle() async {
+        var last: Task<Void, Never>?
+        while let task = visibilityTask, task != last {
+            last = task
+            await task.value
+        }
+    }
+
+    /// Test hook: waits until the model has applied every batch the core
+    /// delivered (`emitted()`, counted by the fake core) and has run the
+    /// work they queued. Work that makes the core deliver more is waited
+    /// for too, for at most 16 rounds.
+    func settle(emitted: () -> Int) async {
+        for _ in 0..<16 {
+            let wanted = emitted()
+            if eventTask != nil {
+                _ = await waitUntil(timeout: nil) { [weak self] in (self?.streamBatches ?? .max) >= wanted }
+            }
+            await idle()
+            if emitted() == wanted { return }
+        }
+    }
 }
 
 extension Prompt {
