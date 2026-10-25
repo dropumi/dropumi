@@ -91,10 +91,7 @@ struct TrustedDevicesScreen: View {
                 .frame(maxWidth: 260)
                 .accessibilityIdentifier("paired.emptyPair")
             Button("Add by fingerprint") { adding = true }
-                .buttonStyle(.plain)
-                .font(DSFont.smallButton)
-                .foregroundStyle(DS.accentText)
-                .frame(minHeight: 44)
+                .buttonStyle(TextLinkButtonStyle())
                 .accessibilityIdentifier("paired.emptyAdd")
         }
         .frame(maxWidth: .infinity)

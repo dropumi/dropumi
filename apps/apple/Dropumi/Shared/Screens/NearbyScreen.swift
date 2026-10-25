@@ -185,10 +185,7 @@ struct NearbyScreen: View {
             } label: {
                 Label("Pair a device", systemImage: Icons.pair)
             }
-            .buttonStyle(.plain)
-            .font(DSFont.smallButton)
-            .foregroundStyle(DS.accentText)
-            .frame(minHeight: 44)
+            .buttonStyle(TextLinkButtonStyle())
             .accessibilityIdentifier("nearby.pair")
         }
     }

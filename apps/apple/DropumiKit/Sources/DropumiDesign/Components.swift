@@ -26,6 +26,20 @@ public struct PrimaryPillButtonStyle: ButtonStyle {
     }
 }
 
+/// A text link ("Pair a device", "Add by fingerprint"): accent text with a
+/// 44 pt tall hit area, the minimum the accessibility audit accepts.
+public struct TextLinkButtonStyle: ButtonStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(DSFont.smallButton)
+            .foregroundStyle(DS.accentText)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
 /// `accent-soft` fill with `accent` text: "Send" pills and secondary actions.
 public struct SoftPillButtonStyle: ButtonStyle {
     public init() {}

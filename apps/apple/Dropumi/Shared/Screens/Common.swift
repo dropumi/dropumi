@@ -155,6 +155,9 @@ struct BannerHost: View {
                 .padding(.top, 8)
                 .frame(maxWidth: 560)
                 .transition(.move(edge: .top).combined(with: .opacity))
+                // Contain, so the banner's buttons keep their own
+                // identifiers (banner.action) instead of taking this one.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("banner")
         }
     }
