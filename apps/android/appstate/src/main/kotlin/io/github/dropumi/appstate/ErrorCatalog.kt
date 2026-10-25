@@ -49,9 +49,10 @@ object ErrorCatalog {
             "The other device only accepts files from devices it has paired with.",
             false,
         )
+        // Both devices get this code, whoever said no, so it blames no one.
         ErrorCode.PAIRING_REJECTED -> ErrorText(
-            "Pairing declined",
-            "The other device did not confirm the code. Nothing was saved.",
+            "Pairing not confirmed",
+            "The code was not confirmed on both devices. Nothing was saved.",
             false,
         )
         ErrorCode.SAS_REJECTED -> ErrorText(
