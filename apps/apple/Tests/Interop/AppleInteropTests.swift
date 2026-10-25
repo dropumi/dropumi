@@ -274,12 +274,25 @@ struct AppleInteropTests {
         #endif
     }
 
+    /// Waits for a prompt. A transfer that ends first (a send that failed
+    /// before any code) fails at once with its outcome and summary, rather
+    /// than as a timeout that hides why.
     private func waitForPrompt(_ model: AppModel) async throws -> Prompt {
-        try await until("a prompt") { model.currentPrompt }
+        let ended = model.history.first?.id
+        let found = try await until("a prompt", model) { () -> Result<Prompt, InteropFailure>? in
+            if let prompt = model.currentPrompt { return .success(prompt) }
+            if let entry = model.history.first, entry.id != ended {
+                Interop.status("ended_before_prompt", ["outcome": entry.outcome.rawValue, "summary": entry.summary])
+                return .failure(InteropFailure(
+                    message: "the transfer ended before a prompt: \(entry.outcome.rawValue): \(entry.summary)"))
+            }
+            return nil
+        }
+        return try found.get()
     }
 
     private func waitForHistory(_ model: AppModel) async throws -> HistoryEntry {
-        try await until("the transfer to end") { model.history.first }
+        try await until("the transfer to end", model) { model.history.first }
     }
 
     /// Waits, bounded, until `value` returns something. On timeout it
