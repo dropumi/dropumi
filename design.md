@@ -21,7 +21,7 @@ The logo is a drop inside open ripple rings. The drop is navy and the ripples ar
 
 ### UI tokens (light and dark)
 
-These are the colour variables in `dropumi-ui.pen`. Use them by name, never the raw hex, so both themes stay in sync.
+These are the colour variables in `dropumi-ui.pen`, except `accent-text`, which the apps use but which is not yet in `dropumi-ui.pen`. Use them by name, never the raw hex, so both themes stay in sync.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -33,6 +33,7 @@ These are the colour variables in `dropumi-ui.pen`. Use them by name, never the 
 | `border` | `#DCE5EB` | `#1F3652` | dividers and outlines |
 | `accent` | `#0E8A9B` | `#3CC4D4` | primary buttons, links, selected state |
 | `accent-soft` | `#D6EEF2` | `#123A4C` | selected tab, tiles, "Send" pills, drop zone |
+| `accent-text` | `#0B6E7C` | `#3CC4D4` | small teal text (captions, pills, links): at least 4.5:1 on `surface` and `accent-soft` (the apps' `accentText`) |
 | `ring` | `#0E94A640` | `#3CC4D440` | radar rings, drop-zone outline (25% alpha) |
 | `on-accent` | `#FFFFFF` | `#06111F` | text and icons on `accent` |
 | `success` | `#1E9E6A` | `#4FD3A0` | visible dot, completed transfers, toggles |
@@ -53,9 +54,10 @@ Used only on the full-screen **Receive** screen on mobile (always navy) and on t
 
 ### Contrast notes
 
-- `accent` light (`#0E8A9B`) on white is about 4.1:1. Use it for bold or large text and controls, not for small body copy.
+- `accent` light (`#0E8A9B`) on white is about 4.1:1. Use it for bold or large text and controls, not for small body copy; small teal text uses `accent-text`.
 - `text-secondary` is for captions of 12 px and up on `bg` or `surface`.
 - On dark, use `accent` (`#3CC4D4`) with `on-accent` (`#06111F`) text, which is high contrast.
+- Receive outline (`#3A5573`) is about 2.1:1 on navy, below the 3:1 a control's outline needs. The Android app raises its Decline outline to `#5B7A9C` (at least 3:1 on navy and on the Receive card; `TokensTest`); the Apple apps still use `#3A5573`.
 
 ## Typography
 
@@ -104,6 +106,19 @@ Used only on the full-screen **Receive** screen on mobile (always navy) and on t
 
 Lucide icons, 16–22 px, stroke style: `radar`, `arrow-left-right`, `settings`, `smartphone`, `laptop`, `monitor`, `upload`, `send`, `video`, `image`, `file-text`, `music`, `archive`, `circle-check`, `folder-down`, `shield-check`, `github`.
 
+## Android
+
+How the app in `apps/android` applies these rules ([ADR-0013](docs/adr/0013-android-app.md)):
+
+- **Units.** Design pixels are `dp`; type sizes are `sp`, so text follows the system font size.
+- **Touch targets** are at least 48 dp; smaller visuals (the 32 dp pills, icon buttons) get padded hit areas.
+- **Colour.** Material 3 is used for its components only. Dynamic colour is off on every API level, and the tokens above are mapped onto its colour scheme. The app's tokens are checked against this file by a unit test (`TokensTest`).
+- **Navigation.** Under 600 dp of window width a bottom navigation bar (Nearby, Transfers, Settings); wider windows (tablets, landscape) use a navigation rail and the wide layouts.
+- **Appearance.** Light or Dark on Android 8-9 (API 26-28, which have no system dark theme; Light by default); "Follow system" is added, and is the default, on API 29 and later.
+- **Text size.** Rows and pairs of buttons (the prompt's included) stack vertically from a font scale of 1.3, and the prompt content scrolls.
+- **Edge to edge** on every API level, with the system bar insets applied.
+- **Icons** are the Lucide icons, converted to vector drawables (`res/drawable/lucide_*.xml`, ISC). The font is the same Plus Jakarta Sans variable file; each weight sets its `wght` axis.
+
 ## Assets
 
 | What | Where |
@@ -122,6 +137,7 @@ Lucide icons, 16–22 px, stroke style: `radar`, `arrow-left-right`, `settings`,
   --bg: #F4F8FA;          --surface: #FFFFFF;     --surface-2: #E8F0F4;
   --text-primary: #0B1F3A; --text-secondary: #5B6B7D; --border: #DCE5EB;
   --accent: #0E8A9B;      --accent-soft: #D6EEF2; --ring: #0E94A640;
+  --accent-text: #0B6E7C;
   --on-accent: #FFFFFF;   --success: #1E9E6A;     --danger: #C93B3B;
   --navy: #0B1F3A;
   --font: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -131,6 +147,7 @@ Lucide icons, 16–22 px, stroke style: `radar`, `arrow-left-right`, `settings`,
     --bg: #07121F;          --surface: #0F2238;     --surface-2: #162C45;
     --text-primary: #F2F7FA; --text-secondary: #9DB0C2; --border: #1F3652;
     --accent: #3CC4D4;      --accent-soft: #123A4C; --ring: #3CC4D440;
+    --accent-text: #3CC4D4;
     --on-accent: #06111F;   --success: #4FD3A0;     --danger: #FF8080;
   }
 }

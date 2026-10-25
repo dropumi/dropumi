@@ -85,8 +85,7 @@ class TokensTest {
                 border = md("border"),
                 accent = md("accent"),
                 accentSoft = md("accent-soft"),
-                // Not in design.md yet: the Apple apps' accentText (DropumiDesign/Tokens.swift).
-                accentText = if (dark) Color(0xFF3CC4D4) else Color(0xFF0B6E7C),
+                accentText = md("accent-text"),
                 ring = md("ring"),
                 onAccent = md("on-accent"),
                 success = md("success"),
