@@ -4,7 +4,7 @@ Rules for coding agents and human contributors working in this repository. Keep 
 
 ## 1. Project snapshot and philosophy
 - Dropumi: a free, open-source (MPL-2.0), local-only, privacy-first AirDrop alternative with a Rust core. "Just drop it nearby." Repo: https://github.com/dropumi/dropumi, default branch `main`.
-- **Status:** pre-alpha and unaudited. Milestone 1 provides the Rust core, protocol v1 (draft) and the `dropumi` CLI. Milestone 2 adds `dropumi-ffi` (UniFFI bindings, ADR-0009) and native apps for iOS, iPadOS, macOS and Android (in progress); a browser companion is only proposed (ADR-0011). The current verification status per platform is in [docs/testing.md](docs/testing.md); never upgrade a label without new evidence.
+- **Status:** pre-alpha and unaudited. Milestone 1 provides the Rust core, protocol v1 (draft) and the `dropumi` CLI. Milestone 2 adds `dropumi-ffi` (UniFFI bindings, ADR-0009) and native apps for iOS, iPadOS, macOS and Android (Android: milestone 2c-1, the foreground app; background receiving, 2c-2, is not implemented); a browser companion is only proposed (ADR-0011). The current verification status per platform is in [docs/testing.md](docs/testing.md); never upgrade a label without new evidence.
 - **Principles:**
   - no accounts, cloud, telemetry or internet dependency;
   - authenticated encryption on every connection;
@@ -32,10 +32,10 @@ Rules for coding agents and human contributors working in this repository. Keep 
 | `crates/cli/` (`dropumi-cli`, bin `dropumi`) | Composition root: `args`, `commands/`, `output` (human and NDJSON), `control` (`--control-stdin`), `interaction`, `exit` (exit codes). `tests/e2e/` holds the two-process suites, `ffi_interop.rs` (the facade against the CLI) and `support/{proc,files,raw_peer,proxy}.rs`. |
 | `crates/ffi/` (`dropumi-ffi`) | Composition root for the apps (UniFFI, ADR-0009): `node` (`DropumiNode`, operations), `mailbox` (events), `prompts`, `discovery` (`PlatformDiscovery`), `source` (`ForeignFile`), `runtime`, `types`, `error`; `uniffi.toml`. Tests in `tests/` (Unix only). |
 | `crates/ffi-bindgen/` | Build tool: the pinned UniFFI generator binaries. Never shipped. |
-| `apps/apple/`, `apps/android/` | The apps. `apple/`: SwiftUI app for iPhone, iPad and Mac (ADR-0012); `project.yml` (xcodegen; the `.xcodeproj` is not committed), `Dropumi/`, `ShareExtension/`, `Tests/`, and `DropumiKit` (Swift package: XCFramework, built and not committed; generated bindings; Core, AppState, Design, Share, TestSupport). `android/core-bindings`: Gradle module with the generated Kotlin bindings. Generated files are committed and exempt from SPDX headers. |
+| `apps/apple/`, `apps/android/` | The apps. `apple/`: SwiftUI app for iPhone, iPad and Mac (ADR-0012); `project.yml` (xcodegen; the `.xcodeproj` is not committed), `Dropumi/`, `ShareExtension/`, `Tests/`, and `DropumiKit` (Swift package: XCFramework, built and not committed; generated bindings; Core, AppState, Design, Share, TestSupport). `android/`: Kotlin and Compose app for phones and tablets (ADR-0013): `app`, `core`, `appstate`, `core-bindings` (generated Kotlin bindings), and the test-only `testsupport` (fake core) and `overlayhelper`. Generated files are committed and exempt from SPDX headers. |
 | `poc/web/` | Research prototype for ADR-0011 (not a feature, never deployed). |
 | `docs/` | `feasibility.md`, `adr/`, `protocol/{v1,threat-model,discovery}.md`, `benchmarks/`, `cli.md`, `development.md`, `testing.md`, `dependencies.md` |
-| `scripts/` | `ci/check-architecture.sh` (dependency deny-lists, `ring` ban, `panic = "abort"` ban), `bench/loopback.sh` (loopback benchmarks), `ffi/` (bindings, XCFramework, Android library, 16 KB check, core source hash), `apple/` (core staleness check, interop runner, Mac icon) |
+| `scripts/` | `ci/check-architecture.sh` (dependency deny-lists, `ring` ban, `panic = "abort"` ban), `bench/loopback.sh` (loopback benchmarks), `ffi/` (bindings, XCFramework, Android library, 16 KB check, core source hash), `apple/` (core staleness check, interop runner, Mac icon), `android/` (core check, instrumented-test and interop runners, manifest and logging audits, Rust notices), `devices/interop.sh` (device-to-device runner), `device-tests/` (test files for the manual matrix) |
 | `.github/` | `workflows/{ci,codeql,audit,deploy-site}.yml` (`deploy-site` publishes `website/` to GitHub Pages), `dependabot.yml`, `ISSUE_TEMPLATE/`, `pull_request_template.md` |
 | `website/` | Project website (Astro). It has its own `AGENTS.md` for site work; generated lockfiles are exempt from the SPDX header rule. |
 | `branding/`, `design.md` | Brand and UI design (no code): logo files (`branding/final/`) and rules (`branding/GUIDELINES.md`), app-icon and store assets, the UI design source (`branding/dropumi-ui.pen`) and exports; `design.md` holds the design tokens and UI rules. |
@@ -100,9 +100,10 @@ Rules for coding agents and human contributors working in this repository. Keep 
   - mDNS tests are `#[ignore]`, named `mdns_*`, and run with `DROPUMI_TEST_MDNS=1` and `--ignored`;
   - the large-file test size is set with `DROPUMI_TEST_LARGE_MIB` (default 64);
   - `crates/ffi/tests/measure.rs` holds `#[ignore]` measurements (ADR-0009);
-  - app interop tests are `#[ignore]`, named `apple_*` (later `android_*`), and run with `DROPUMI_TEST_APPLE=1` (`scripts/apple/interop.sh`).
+  - app interop tests are `#[ignore]`, named `apple_*` or `android_*`, and run with `DROPUMI_TEST_APPLE=1` (`scripts/apple/interop.sh`) or `DROPUMI_TEST_ANDROID=1` (`scripts/android/interop.sh`);
+  - device-to-device tests are `#[ignore]`, named `devices_*`, and run with `DROPUMI_TEST_DEVICES=1` (`scripts/devices/interop.sh`), with `DROPUMI_TEST_APPLE_DEVICE`, `DROPUMI_TEST_LAN_ADDR` and `ANDROID_SERIAL` naming the devices.
 - The binding tests run the generated Swift (`swift test`) and Kotlin (Gradle, host JVM) against the real core.
-- App tests never use the real identity (temporary folders under XCTest). UI state tests run on a fake core that Release builds exclude; label them "UI state test (fake core)".
+- App tests never use the real identity (temporary folders under XCTest and in the Android JVM and instrumented tests). UI state tests run on a fake core that Release builds exclude; label them "UI state test (fake core)".
 - **Time budgets:** unit and application tests together < 30 s; end-to-end < 4 min per OS; any single test < 60 s.
 
 ## 9. Performance
@@ -121,7 +122,8 @@ Rules for coding agents and human contributors working in this repository. Keep 
 - **Never write "supported".** Always name the OS version, the architecture and the environment. A result from one OS never stands for another.
 
 ## 11. Dependency and license policy
-- MPL-2.0. The first line of every `.rs` file is `// SPDX-License-Identifier: MPL-2.0` (CI job `fmt` checks line 1). TOML, YAML and shell files start with `# SPDX-License-Identifier: MPL-2.0` (shell scripts on line 2, after the shebang; generated `pnpm-lock.yaml` files are exempt). Swift, Kotlin and `.kts` files start with `// SPDX-License-Identifier: MPL-2.0` (line 2 of `Package.swift`; the generated bindings are exempt). CI job `fmt` checks all of these.
+- MPL-2.0. The first line of every `.rs` file is `// SPDX-License-Identifier: MPL-2.0` (CI job `fmt` checks line 1). TOML, YAML, shell and R8 `.pro` files start with `# SPDX-License-Identifier: MPL-2.0` (shell scripts on line 2, after the shebang; generated `pnpm-lock.yaml` files are exempt). Swift, Kotlin, `.kts` and `.java` files start with `// SPDX-License-Identifier: MPL-2.0` (line 2 of `Package.swift`; the generated bindings are exempt). CI job `fmt` checks all of these.
+- Android XML files start with `<!-- SPDX-License-Identifier: MPL-2.0 -->` (line 2 after an `<?xml` declaration); the Lucide icons `res/drawable/lucide_*.xml` carry `ISC` (or `ISC AND MIT`) and a "Derived from Lucide" line instead.
 - **New dependencies:**
   - justify them in the PR and in `docs/dependencies.md`;
   - they must pass `cargo deny --locked check`;
@@ -141,7 +143,7 @@ The first block mirrors the CI jobs in `.github/workflows/ci.yml` (job names in 
 ```sh
 cargo fmt --all --check                                                          # fmt
 git ls-files -z -- '*.rs' | xargs -0 awk 'FNR == 1 && $0 != "// SPDX-License-Identifier: MPL-2.0" { print FILENAME; bad = 1 } END { exit bad }'  # fmt
-git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' ':!*pnpm-lock.yaml' | xargs -0 awk 'FNR == 1 && /^#!/ { next } FNR <= 2 { if ($0 != "# SPDX-License-Identifier: MPL-2.0") { print FILENAME; bad = 1 } nextfile } END { exit bad }'  # fmt
+git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' '*.pro' ':!*pnpm-lock.yaml' | xargs -0 awk 'FNR == 1 && /^#!/ { next } FNR <= 2 { if ($0 != "# SPDX-License-Identifier: MPL-2.0") { print FILENAME; bad = 1 } nextfile } END { exit bad }'  # fmt
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings    # clippy
 cargo clippy --workspace --all-targets --no-default-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked  # docs
@@ -152,7 +154,8 @@ cargo deny --locked check                                                       
 cargo build --workspace --exclude dropumi-cli --exclude dropumi-ffi --exclude dropumi-ffi-bindgen --no-default-features --locked --target aarch64-apple-ios  # build (iOS)
 bash scripts/ffi/bindings.sh --check && bash scripts/ffi/build-apple.sh --profile dev --slices all && swift test --package-path apps/apple/DropumiKit  # ffi (apple)
 bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 && bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs  # ffi (android)
-cargo build --locked -p dropumi-ffi --lib && ./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest  # ffi (android)
+cargo build --locked -p dropumi-ffi --lib && ./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest :core:testDebugUnitTest :appstate:testDebugUnitTest :testsupport:testDebugUnitTest :app:testDebugUnitTest  # ffi (android)
+./apps/android/gradlew -p apps/android :app:assembleDebug :app:assembleRelease :app:assembleQa :app:lintRelease && bash scripts/android/check-manifest.sh release qa debug && bash scripts/android/check-logging.sh  # ffi (android)
 (cd apps/apple && xcodegen generate) && xcodebuild test -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-iOS -destination 'platform=iOS Simulator,name=iPhone 17'  # apple (app)
 ```
 Android builds need the NDK clang (see `docs/development.md`). CI also runs zizmor (with online audits), actionlint (Docker), CodeQL and the experimental `mdns-e2e` job.
@@ -161,6 +164,8 @@ zizmor --offline .github/                                                       
 cargo test -p dropumi-cli --test e2e --locked                                    # e2e only
 DROPUMI_TEST_MDNS=1 cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_
 bash scripts/apple/interop.sh                                                    # Apple app core vs CLI (opt-in)
+bash scripts/android/ui-tests.sh                                                 # Android instrumented tests, one emulator or device (local)
+bash scripts/android/interop.sh                                                  # Android app core vs CLI (opt-in)
 ```
 
 ## 13. Definition of Done (master spec §16)

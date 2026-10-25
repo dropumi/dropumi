@@ -63,7 +63,7 @@ $ bash scripts/ci/check-architecture.sh
 Use only these labels: Automated test passed, Manual device test passed, Build verified only, Not tested, Unsupported.
 Name the OS version, the architecture, and the environment (CI runner, local machine, physical device). Never write "supported".
 A result on one OS never stands for another. Until CI has run on this PR, CI rows read "Not tested (pending CI)".
-Android and iOS have no app yet: the CI jobs only build the core library crates ("Build verified only").
+Apps: name the image or device for each run, for example "Automated test passed (Android 16, API 36.1, arm64-v8a, Play emulator, macOS 27 arm64 host)". An emulator result is not a device result, an x86_64 result never stands for arm64-v8a, and one API level never stands for another.
 -->
 
 | Platform | OS version / architecture / environment | Status |
@@ -71,7 +71,8 @@ Android and iOS have no app yet: the CI jobs only build the core library crates 
 | Linux | | Not tested |
 | macOS | | Not tested |
 | Windows | | Not tested |
-| Android | | Not tested |
+| Android emulator (one row per API level, ABI and image) | | Not tested |
+| Android device (model, Android version) | | Not tested |
 | iOS / iPadOS | | Not tested |
 | Two devices on a real LAN | | Not tested |
 
@@ -102,6 +103,8 @@ Android and iOS have no app yet: the CI jobs only build the core library crates 
 - [ ] Every new `.rs` file has `// SPDX-License-Identifier: MPL-2.0` as its first line.
 - [ ] New dependencies are justified, listed in `docs/dependencies.md`, and pass `cargo deny --locked check` (or there are none).
 - [ ] Documentation is updated (`docs/`, ADRs, `docs/protocol/` for wire or security changes) and `CHANGELOG.md` `[Unreleased]` is updated for user-visible changes.
+- [ ] Android changes: the JVM tests (`:core-bindings`, `:core`, `:appstate`, `:testsupport`, `:app`), `:app:lintRelease`, `scripts/android/check-manifest.sh` and `scripts/android/check-logging.sh` pass; `scripts/android/ui-tests.sh` (and `scripts/android/interop.sh` for core or harness changes) ran on each image listed above, or that row says Not tested.
+- [ ] Android changes: no URI, path, peer string or exception text reaches logcat, and no new permission, exported component or provider was added without updating the manifest audit and ADR-0013.
 - [ ] No secrets, keys, trust stores, personal files or personal data are included.
 - [ ] Significant AI assistance is disclosed above.
 - [ ] I have the right to submit this contribution, and it is licensed under MPL-2.0.

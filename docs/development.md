@@ -17,8 +17,8 @@ troubleshoot common problems. Contribution workflow and rules: [`CONTRIBUTING.md
 | Xcode | with the iOS SDK; the recorded local build used Xcode 27 (Swift 6.4) | iOS cross build; the XCFramework and `swift test` for the FFI; the Apple apps (Xcode 27, iOS 27.0 simulator runtime) |
 | `xcodegen` | 2.46.0 (CI downloads the release and checks its SHA-256) | Generates `apps/apple/Dropumi.xcodeproj` from `apps/apple/project.yml` |
 | `rsvg-convert` (librsvg) | any | Only to re-render the Mac app icon (`scripts/apple/render-mac-icon.sh`) |
-| JDK | 17 or later for Gradle; the recorded run used Temurin 21 | The Kotlin binding tests (`apps/android`) |
-| Android SDK | platform 36 and NDK 27.1.12297006 (`ANDROID_HOME`, or `sdk.dir` in the untracked `apps/android/local.properties`) | The Android library and the Kotlin binding tests |
+| JDK | 17 or later for Gradle (`jvmToolchain(17)`); the 2026-10-16 runs used Homebrew OpenJDK 17.0.20.1 | The Android app and the Kotlin tests (`apps/android`) |
+| Android SDK | platform 36, build-tools 36.0.0 and NDK 27.1.12297006 (`ANDROID_HOME`, or `sdk.dir` in the untracked `apps/android/local.properties`); platform-tools and the emulator for the instrumented tests | The Android library, the app and its tests ([below](#the-android-app)) |
 | `jq`, `perl`, `/usr/bin/time` | system | Benchmark script only |
 
 ```sh
@@ -181,6 +181,118 @@ xcodebuild build -project apps/apple/Dropumi.xcodeproj -scheme Dropumi-macOS \
   - `-dropumi-ui-test -dropumi-scenario <name>` launches a Debug build on the fake core with temporary folders. The names are in `apps/apple/Dropumi/Shared/App/UITestScenarios.swift`.
   - Release builds exclude that file and the fake core (`Config/Release.xcconfig`).
 - **The Mac app icon** is rendered from `apps/apple/Design/macos-app-icon.svg`; the iPhone and iPad icons are `branding/mobile/ios`.
+
+## The Android app
+
+The app is Kotlin and Jetpack Compose for phones and tablets, in `apps/android` ([ADR-0013](adr/0013-android-app.md)):
+`:app` (the app), `:core` (the core client, NSD, content URIs and `UriGuard`, export), `:appstate` (`AppModel`),
+`:testsupport` (the fake core, used only by tests), `:core-bindings` (the generated bindings) and `:overlayhelper` (a
+test-only APK that draws an overlay window). minSdk 26, targetSdk and compileSdk 36; APKs hold `arm64-v8a` and `x86_64`
+only.
+
+**SDK packages.** Gradle needs JDK 17 (`JAVA_HOME`). Install, with the SDK's `sdkmanager`:
+
+```sh
+sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "platform-tools" "emulator"
+# Emulator images (arm64-v8a on an Apple silicon Mac); the recorded runs used these three:
+sdkmanager --install "system-images;android-26;google_apis;arm64-v8a" "system-images;android-28;google_apis;arm64-v8a" \
+  "system-images;android-36.1;google_apis_playstore;arm64-v8a"
+```
+
+**AVDs.** One per image, created with `avdmanager` and never committed. The recorded runs used `spike-api26` and
+`spike-api28` (`-k "system-images;android-26;google_apis;arm64-v8a"`, the same for 28, device `pixel_2`) and `Tablet`
+(Android 16, API 36.1, Play image, device `medium_tablet`). Start one at a time, headless if you like:
+`emulator -avd spike-api26 -no-window -no-audio -no-snapshot -no-boot-anim`, and stop it with `adb emu kill`. An x86_64
+image proves nothing for arm64-v8a, and one API level never stands for another ([`testing.md`](testing.md)).
+
+```sh
+bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile dev   # the core; the app build refuses a stale one
+export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+./apps/android/gradlew -p apps/android :app:assembleDebug                  # app/build/outputs/apk/debug/app-debug.apk
+cargo build --locked -p dropumi-ffi --lib                                   # the host library the binding tests load
+./apps/android/gradlew -p apps/android :core-bindings:testDebugUnitTest :core:testDebugUnitTest \
+  :appstate:testDebugUnitTest :testsupport:testDebugUnitTest :app:testDebugUnitTest :app:lintRelease
+bash scripts/android/ui-tests.sh                                            # instrumented tests on the one connected emulator or device
+bash scripts/android/interop.sh                                             # the app's core against the CLI (opt-in)
+bash scripts/devices/interop.sh android                                     # the app against the Apple apps (opt-in, below)
+```
+
+- **Core check.** `:app`'s `preBuild` runs `scripts/android/check-core-artifacts.sh`. It compares the stamp that
+  `build-android.sh` writes next to `jniLibs` with `scripts/ffi/core-sources-hash.sh`, refuses a core that lacks an
+  ABI, and never runs cargo. A release build with a dev-profile core only prints a warning; build the release core
+  (`--profile release`) for an APK you measure or hand out.
+- **Build types.**
+  - `debug` (`io.github.dropumi.debug`): not minified. The UI state tests and the real-core instrumented tests run
+    against it.
+  - `release`: minified and resource-shrunk with R8 (`app/proguard-rules.pro`), which also strips `android.util.Log`
+    calls. Without a signing file the APK is unsigned.
+  - `qa` (`io.github.dropumi.qa`): the release R8 rules plus keep rules for what the interop test code calls
+    (`app/src/androidTest/proguard-qa.pro`), signed with the debug key and not debuggable. Only the interop harness
+    uses it (`-Pdropumi.testBuildType=qa`). What `qa` cannot show about release is listed in ADR-0013 D10.
+- **Signing.** Release signing comes only from `apps/android/keystore.properties` (`storeFile`, `storePassword`,
+  `keyAlias`, `keyPassword`), which is gitignored like every `*.keystore`. CI never signs. Install builds with
+  `adb install` (ADR-0013 D14); there is no Play Store release.
+- **`scripts/android/ui-tests.sh`** builds the debug app, its test APK and the overlay helper (skip with `--no-build`),
+  installs them, and runs two passes: the UI state tests on the fake core plus the real-core tests, then the tests that
+  need the real-core interop Application. `--class SPEC` runs some tests only. It writes a random per-run token into the
+  helper, and an exit trap resets the helper's overlay permission and uninstalls it, and puts back the display size,
+  density, font scale and lock-screen setting the tests change. The debug app and its test APK stay installed. On
+  images that refuse `link()` inside the app's data (`EACCES` or `EPERM`; the arm64-v8a API 26, 28 and 36.1 emulators
+  and the Android 16 phone of run [2026-10-26-01](device-tests/runs/2026-10-26-01.md) do), two hard-link tests fail by
+  design with "not runnable on this image" and do not count against the exit status; any other failure does. With
+  several devices connected, set `ANDROID_SERIAL`.
+- **On a real phone,** keep the screen on and unlocked for the whole run. If the screen locks, the activity stops and
+  the Compose tests fail with "No compose hierarchies found". Run 2026-10-26-01 kept it on with
+  `adb shell svc power stayon usb` and set the phone back afterwards. On a phone with a
+  secure lock screen, `LockScreenTest promptNeverShowsOverTheLockScreen` is not runnable and fails with that message.
+- **`scripts/android/interop.sh`** builds the Rust core if its stamp is stale, the `qa` app and its test APK (skip with
+  `--no-build`), installs both, runs `DROPUMI_TEST_ANDROID=1 cargo test -p dropumi-cli --test e2e --locked -- --ignored
+  --test-threads=1 android_` (or the filter you pass), and uninstalls both on exit. The app side keeps its identity
+  under `noBackupFilesDir/interop-<uuid>/`. The CLI and the app talk through `adb reverse` and `adb forward` on
+  `127.0.0.1`. The two `android_nsd_*` tests need a real device on the host's Wi-Fi; the script sets
+  `DROPUMI_TEST_MDNS=1` only when `ANDROID_SERIAL` is not an emulator, and on an emulator they print a skip line.
+- **Checks CI runs on the build output** (job `ffi (android)`): `scripts/android/check-manifest.sh release qa debug`
+  (permissions, exported components, providers, backup attributes, lock-screen flags), `scripts/android/check-logging.sh`
+  with the release and `qa` R8 configurations (nothing in the app writes to logcat), the APK native-library list, the
+  16 KB check of the release APK, and the fake-core check (classpaths, R8 mappings, debug dex); the exact commands are
+  in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+- **Licences.** `scripts/android/rust-notices.sh` regenerates the Rust crate notices the app bundles
+  (`app/src/main/assets/licenses/rust-crates.txt`, cargo-about 0.9.2; see [`dependencies.md`](dependencies.md)).
+- **Never use your real data.** The tests use temporary folders inside the app; never run them, or `bmgr` backup
+  commands, on a device signed in to an account whose data you care about.
+
+## Device to device (the apps against each other)
+
+The opt-in `devices_*` tests run two real apps against each other over Wi-Fi: `devices_iphone_mac_pair_and_send`,
+`devices_android_mac_pair_and_send` and `devices_iphone_android_pair_and_send`
+(`crates/cli/tests/e2e/interop/devices.rs`). They need a Mac host with Xcode, and the Android SDK and JDK 17 for the
+Android tests.
+
+```sh
+DROPUMI_TEST_APPLE_DEVICE=<UDID> bash scripts/devices/interop.sh          # all three (the iPhone and the Android phone connected)
+bash scripts/devices/interop.sh devices_android_mac_pair_and_send         # one test
+bash scripts/devices/interop.sh --no-build devices_iphone_                # reuse the builds
+```
+
+- **What runs.** Each app runs its real core inside its interop test, in the scenario `agent`: `AppleInteropTests`
+  (`apps/apple/Tests/Interop/AppleInteropTests.swift`) on the iPhone or the Mac, and `AndroidInteropTest`
+  (`apps/android/app/src/androidTest/kotlin/io/github/dropumi/interop/AndroidInteropTest.kt`) in the `qa` build. The
+  Rust driver steers both over a test-only control channel, one JSON line per command. The apps pair (the same code on
+  both, and each trusts the other afterwards), then send two files each way with no code, and the driver compares the
+  SHA-256 of every received file. An agent confirms a code or accepts an offer only from the fingerprint the driver
+  pinned. Waits block on the socket with a deadline; nothing sleeps.
+- **The script** builds what the selected tests need (`scripts/apple/interop.sh --build-only`,
+  `scripts/android/interop.sh --build-only`; skip with `--no-build`), installs the Android APKs, and runs
+  `DROPUMI_TEST_DEVICES=1 cargo test -p dropumi-cli --test e2e --locked -- --ignored --test-threads=1 --nocapture devices_`
+  (or the filter you pass). An exit trap uninstalls the `qa` app and its test APK, so the test identity never stays on
+  the phone.
+- **Variables.** `DROPUMI_TEST_DEVICES=1` enables the tests; `DROPUMI_TEST_APPLE_DEVICE` is the iPhone's UDID;
+  `DROPUMI_TEST_LAN_ADDR` is the Mac's Wi-Fi address, which the iPhone dials (default: `en0`'s); `ANDROID_SERIAL`
+  picks the Android phone (default: the only one connected).
+- **Network.** Both phones unlocked, on the same Wi-Fi as the Mac, with Local Network access allowed for Dropumi. The
+  Android control channel goes through `adb reverse`; the transfers between the apps use Wi-Fi.
+- **Output.** The control traffic and the test output carry IP addresses. Never paste them into a run file or a pull
+  request.
 
 ## Linux tests and a Windows type check from another OS (Docker)
 

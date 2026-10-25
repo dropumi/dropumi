@@ -20,7 +20,7 @@ For milestone 2, the apps keep the ADR-0003 key file, unchanged, in app-private 
 |---|---|---|
 | iOS, iPadOS | `Library/Application Support/Dropumi` inside the app container (never the App Group) | `isExcludedFromBackup` on the directory; data protection class `completeUntilFirstUserAuthentication` |
 | macOS | `Application Support/Dropumi` inside the app's sandbox container | The sandbox; `isExcludedFromBackup` on the directory, which Time Machine honours (reconciled 2026-10-15 with the app's code; the CLI's directory is still backed up) |
-| Android | `noBackupFilesDir/dropumi` (never `filesDir` itself, whose mode is 0771) | `android:allowBackup="false"` and `dataExtractionRules` that exclude every domain from both cloud backup and device transfer |
+| Android | `noBackupFilesDir/dropumi` (never `filesDir` itself, whose mode is 0771) | `android:allowBackup="false"`, plus `dataExtractionRules` (API 31+) and `fullBackupContent` (API 26-30) that exclude every domain from both cloud backup and device transfer |
 
 - The node creates the directory with mode 0700 and runs the ADR-0003 owner and mode checks unchanged, on every platform.
 - The secret never crosses the FFI: no exported type or call carries it (ADR-0009).
@@ -31,7 +31,8 @@ For milestone 2, the apps keep the ADR-0003 key file, unchanged, in app-private 
 - `dropumi-ffi` takes the configuration directory from the app (`NodeConfig::config_dir`, absolute) and opens `FileIdentityStore` and `TrustFile` there; it never calls `paths::config_dir(None)`.
 - The platform settings in the table (backup exclusion, data protection, manifest attributes) are set by the apps in milestones 2b and 2c and recorded in ADR-0012 and ADR-0013 with their tests.
 - Apple apps (2b): `AppPaths.protectConfig` sets `isExcludedFromBackup` on the directory on iOS and macOS (so on the Mac, Time Machine skips it too) and the data protection class on iOS. `TestHostTests configFolderIsExcludedFromBackups` checks the flag and mode 0700: Automated test passed (iOS 27.0 simulator and macOS 27.0.1 arm64, local run). On devices: Not tested.
-- Status: the key-file code and checks are the CLI's: Automated test passed (macOS 27.0.1 arm64, local run). Android: Not tested (milestone 2c).
+- Android app (2c-1, ADR-0013 D3): `AppPaths` puts the configuration folder in `noBackupFilesDir/dropumi` and app data (history) in `noBackupFilesDir/app`; the core creates the folder 0700. `configFolderIsPrivateAndExcludedFromBackups` (folder 0700, files 0600, `FLAG_ALLOW_BACKUP` clear) and `backupRulesExcludeEveryDomain` (both rule files exclude every domain, cloud backup and device transfer) are instrumented tests on the real core: Automated test passed (Android 8.0, API 26, and Android 9, API 28, `google_apis` emulators; Android 16, API 36.1, Play `Tablet` emulator; all arm64-v8a, macOS 27 arm64 host, 2026-10-16), and on one Android 16 arm64-v8a phone (2026-10-26, run [2026-10-26-01](../device-tests/runs/2026-10-26-01.md)). The merged-manifest audit (`scripts/android/check-manifest.sh`) checks that the release, `qa` and debug manifests set `allowBackup="false"` and both rule files. A backup or device transfer actually run (`bmgr` with the local transport on a rootable image, or a real device): Not tested.
+- Status: the key-file code and checks are the CLI's: Automated test passed (macOS 27.0.1 arm64, local run); on Android, see the line above.
 
 ## Consequences
 

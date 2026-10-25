@@ -1,7 +1,7 @@
 # ADR-0013: Android app (phone and tablet) in Kotlin and Jetpack Compose
 
 - **Status:** Proposed
-- **Date:** 2026-10-15
+- **Date:** 2026-10-15 (updated 2026-10-16: D3, D5 and D10 matched to the code; implementation; spike results; updated 2026-10-26: D5 wording, the device-to-device harness and the first real-device results)
 - **Related:** ADR-0003, ADR-0004, ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0012, ADR-0014, [`../protocol/discovery.md`](../protocol/discovery.md), [`../protocol/threat-model.md`](../protocol/threat-model.md)
 
 ## Context
@@ -61,7 +61,7 @@ One Kotlin and Jetpack Compose code base for phones and tablets, under `apps/and
 
 - The configuration folder is `noBackupFilesDir/dropumi`. The app creates only the parent; the core creates the folder 0700 and runs the ADR-0003 owner and mode checks. App data (history) lives in `noBackupFilesDir/app`; settings in SharedPreferences.
 - `android:allowBackup="false"`, `dataExtractionRules` (31+) and `fullBackupContent` (26-30) exclude every domain from cloud backup and device transfer.
-- Nothing in the app writes event contents, URIs, display names, paths, peer names, fingerprints or exception text to logcat. One `SafeLog` takes only a fixed event enum, and R8 removes `android.util.Log` calls from release and `qa` builds. `DropumiException.message` is never logged; it is mapped to the error catalog.
+- Nothing in the app writes to logcat at all, so no event contents, URIs, display names, paths, peer names, fingerprints or exception text can reach it. There is no logging helper: the plan allowed one `SafeLog` that takes only a fixed event enum, none was written, and so none is allowed (adding one means naming it in the check, in a reviewed change). `scripts/android/check-logging.sh` (CI) fails on `android.util.Log`, `EventLog` or `LogPrinter`, a wildcard `android.util` import, `Log.` and `Log::` references, `printStackTrace`, `dumpStack`, `System.out` and `System.err`, `print` and `println`, and `java.util.logging` in the main sources of `:core-bindings`, `:core`, `:appstate` and `:app`. It also checks that the release and `qa` R8 configurations carry `-assumenosideeffects` for `android.util.Log`, so R8 removes the `Log` calls of library code too. `DropumiException.message` is never shown; it is mapped to the error catalog.
 - The device name is prefilled only from the core's `Dropumi-XXXX`. The app never reads or suggests the system device name, the model, Bluetooth names or account names.
 
 ### D4. Received files stay app-private
@@ -75,7 +75,8 @@ One Kotlin and Jetpack Compose code base for phones and tablets, under `apps/and
 ### D5. NSD discovery with the R21 gate
 
 - A `PlatformDiscovery` adapter over `NsdManager` only moves bytes; Rust keeps every rule (instance names, TXT, IPv4 only, self-filter, caps).
-- **Advertising is gated on observed behaviour.** An allowlist keyed on (API level, Connectivity module version) lists the pairs observed to publish a host label that is random per advertisement; it is **closed by default**, and closed when the module version cannot be read. When it is closed, the app passes `ReceiveOptions.advertise = false`, so the phone is browse-only: it sees other devices, and peers reach it after pairing or by address. The UI says so.
+- **Advertising is gated on observed behaviour.** An allowlist keyed on (API level, Connectivity module version) lists the pairs observed to publish a host label that is random per advertisement; it is **closed by default**, and closed when the module version cannot be read. When it is closed, the app passes `ReceiveOptions.advertise = false`, so the phone is browse-only: it sees other devices, and other devices reach it only through an address typed by hand. A paired device stores no address, so pairing does not change this; it only removes the code check. The UI says so.
+- **The allowlist is empty** (`HostLabelGate.OBSERVED`), because spike S-AN2 has not run (see "Spike results"). So the app is browse-only on every Android version and device. The module version is not read, and the manifest has no `<queries>` entry for the module package; both come with the first API 33+ entry on the allowlist. No `MulticastLock` is taken and `CHANGE_WIFI_MULTICAST_STATE` is not requested; S-AN2 decides whether browsing needs them.
 - **Rename rule.** Registration does not wait for NSD's answer. If NSD registers a different name later, the adapter unregisters it at once and, until the unregister completes, drops browse results with that name. This is the only adapter-side filter, and a deliberate exception to "Rust owns every rule".
 - **Bounds.** At most 64 queued resolves (below 34) or 64 active service-info callbacks (34+), FIFO and deduplicated; `FAILURE_ALREADY_ACTIVE` is retried at most three times.
 - **Threading.** All adapter state lives on one `dropumi-nsd` thread; every callback hops to it first; a new listener object is used per browse session and per registration; callbacks from an older session are ignored.
@@ -126,6 +127,7 @@ One Kotlin and Jetpack Compose code base for phones and tablets, under `apps/and
 - Where an image refuses `link()` inside the app's data with `EACCES` (the arm64-v8a API 26, 28 and 36 emulators) or `EPERM`, the two hard-link `UriGuard` tests fail by design with "not runnable on this image (link EACCES)" or "(link EPERM)"; they are never skipped. Any other errno from `link()` (for example `ENOSPC`, `EXDEV`, `EEXIST` or `ENOENT`) is a plain test error. `scripts/android/ui-tests.sh` lists the two tests by name with that label and does not count them against its exit status, but only when the failure is that assertion, with `EACCES` or `EPERM`, from the tests' link step; any other failure fails the run.
 - The `:overlayhelper` APK is exported but guarded by the `DUMP` permission, draws only with a per-run token, and is uninstalled after every run.
 - The core library is stamped with a hash of the Rust sources it was built from; the build refuses a stale one and never runs cargo itself.
+- **No CI emulator job.** Spike S-AN4 has not run, so the planned experimental emulator job does not exist; the instrumented tests and the interop harness run locally only (`scripts/android/ui-tests.sh`, `scripts/android/interop.sh`), on the images `docs/testing.md` lists. CI (`ffi (android)`, not required) runs the JVM tests, builds the APKs, release lint, the manifest, logging, native-library, 16 KB and fake-core checks.
 
 ### D11. Labels
 
@@ -155,11 +157,20 @@ Builds are debug, `qa` and locally signed release APKs, installed with `adb inst
 | ID | Result |
 |---|---|
 | S-AN3 (2026-10-15, macOS 27 arm64 host, scratch instrumented test, not committed) | arm64-v8a emulators API 26, 28 and 36 (Android 8, 9 and 16). The config lock first failed with "lock() not supported" (std has no `File::lock` on Android); the core now uses `flock` there (ADR-0003). After that fix, identity creation, trust writes and two receives of the same name passed, with no `SIGSYS`: **minSdk 26 stands.** `Os.link` inside the app's data returned `EACCES` on all three images, so the hard-link `UriGuard` tests are "not runnable on this image (link EACCES)" there and fail with that message instead of skipping; their no-link variants run everywhere. A committed instrumented test replaces the scratch one. |
-| S-AN1, S-AN2, S-AN4, S-AN5, S-AN6, S-AN7 | Not run yet. |
+| S-AN1 (macOS 27 arm64 host) | **Passed: instrumentation status arrives live.** A spike run during the interop work saw `INSTRUMENTATION_STATUS: DROPUMI_STATUS=…` lines from `am instrument -w -r` reach the host while the test was still running, before its timeout. So the interop harness reads them as they arrive, and the file-tail fallback was not written. The committed harness depends on it: `android_cli_sends_to_app_after_code` waits for the app's `listening` status line before the CLI sends, so it cannot pass with status that only arrives at the end. It passed on 2026-10-16 (commit `2d8631a`) on the arm64-v8a emulators API 36.1 (`Tablet`, Play image) and API 26 (`google_apis`); other levels: Not tested. |
+| S-AN2 | **Not run.** No SRV host label has been observed on any image or device, so the R21 gate's allowlist is empty and the app is **browse-only everywhere**: it browses, but never advertises (`ReceiveOptions.advertise = false`). Not recorded either: whether browsing needs a `MulticastLock` (none is taken, and `CHANGE_WIFI_MULTICAST_STATE` is not requested), which thread NSD's callbacks arrive on and which images have the Executor overloads (the adapter hops every callback to its own thread either way), the Connectivity module version, and NET-5 (Wi-Fi without internet while mobile data is on). The `android_nsd_*` interop tests need a real device on the host's Wi-Fi. On one phone (Android 16, arm64-v8a, 2026-10-26) `android_nsd_cli_finds_app_at_random_host` passed, which with the gate closed only shows that the app does not advertise, and `android_nsd_app_finds_cli_and_sends` failed intermittently (an open finding, cause not established). |
+| S-AN4 | **Not run.** There is no CI emulator job, so commit 16 of the plan (`ci(android): experimental emulator job`) was skipped. Emulator coverage is local only (D10). |
+| S-AN5 | **Not run.** The foreground-service prerequisites on API 34+, background-start refusals and Doze were not recorded. The `dataSync` transfer service started in the foreground with its type on the API 36.1 emulator (`transferServiceStartsWithDataSyncType`), and in the foreground on API 26 and 28 (no service types there); a refused start keeps the transfer (`transferServiceStartRefusedKeepsTransfer`, JVM). Network under Doze (BG-4, BG-5): Not tested. Receiver mode (2c-2) is not implemented. |
+| S-AN6 | **Not run as a sweep.** The API 26 and 28 emulators ran the committed instrumented suite only (`docs/testing.md`). It covers there: JNA and the core loading from the APK, the backup rule files, the notification channel and lock-screen privacy, the SAF export (to an in-process test provider), the overlay flags, Back and Escape, and the bundled variable font. Not covered: a real backup or restore, the system document picker (DocumentsUI), and the launcher icon. |
+| S-AN7 | **Not run.** No 16 KB-page image was used, so the 16 KB runtime is Not tested; the APK passes the static check (`scripts/ffi/check-16k.sh`): Build verified only. |
 
 ## Implementation
 
-Not implemented yet; this record is proposed together with milestone 2c. The implementation section is written when the record is accepted, with the code paths, tests and evidence labels.
+Milestone 2c-1 (the foreground app) is implemented on the branch `feat/native-apps-android`; this record stays Proposed until the maintainers review it with that pull request. Receiver mode (D7, milestone 2c-2) is not implemented.
+
+- Code: `apps/android/` (modules in D1), `scripts/android/` (the core check, the instrumented-test and interop scripts, the manifest and logging audits, the Rust notices), and `crates/cli/tests/e2e/interop/android.rs`.
+- Device to device (test only): `crates/cli/tests/e2e/interop/devices.rs` steers two real apps over a test-only control channel, each running its real core inside its interop test in scenario `agent` (`AndroidInteropTest` in the `qa` build; `AppleInteropTests` on the iPhone or the Mac). They pair, check that both showed the same code and that each trusts the other, then send two files each way with no code and compare SHA-256. Opt-in and macOS host only: `scripts/devices/interop.sh` builds and installs the apps, then runs `devices_iphone_mac_pair_and_send`, `devices_android_mac_pair_and_send` and `devices_iphone_android_pair_and_send` with `DROPUMI_TEST_DEVICES=1`, `DROPUMI_TEST_APPLE_DEVICE`, `DROPUMI_TEST_LAN_ADDR` and `ANDROID_SERIAL`. The phone's control channel goes through `adb reverse`; the transfers use Wi-Fi.
+- Tests and their labels, per image and device: [`docs/testing.md`](../testing.md). The goals and their tests: threat model G39 to G45. Real-device runs: [2026-10-25-01](../device-tests/runs/2026-10-25-01.md) and [2026-10-26-01](../device-tests/runs/2026-10-26-01.md).
 
 ## Consequences
 
@@ -173,7 +184,7 @@ Not implemented yet; this record is proposed together with milestone 2c. The imp
 
 ### Negative
 
-- Where the R21 gate is closed, the phone is browse-only: it is not listed on other devices until an observed module version opens the gate.
+- Where the R21 gate is closed, the phone is browse-only: it is not listed on other devices until an observed module version opens the gate. Until S-AN2 runs, that is every Android device.
 - Overlay protection on API 26-30 is weaker, and accessibility-granted apps stay out of scope.
 - Two export paths (MediaStore and SAF), and a picker step on API 26-28.
 - Receiving needs Dropumi open unless the user turns on receiver mode, which shows a persistent notification.
