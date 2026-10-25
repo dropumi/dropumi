@@ -17,6 +17,14 @@ final class UIStateTests: XCTestCase {
     private func audit(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) throws {
         var issues: [String] = []
         let tabBar = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame : .null
+        // Everything from the top of the screen to the navigation bar's bottom:
+        // the status bar and the translucent navigation bar.
+        // Screens without a navigation bar (the tab roots) have only the
+        // status bar there.
+        let statusBar = XCUIApplication(bundleIdentifier: "com.apple.springboard").statusBars.firstMatch
+        let navBar = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame
+            : statusBar.exists ? statusBar.frame : .null
+        let topBars = navBar.isNull ? CGRect.null : CGRect(x: 0, y: 0, width: navBar.maxX, height: navBar.maxY)
         try app.performAccessibilityAudit { issue in
             // Scrolling content passes under the translucent tab bar; its
             // contrast there is the system bar's, not the app's.
@@ -28,10 +36,17 @@ final class UIStateTests: XCTestCase {
             if issue.auditType == .contrast, let element = issue.element, element.frame.minY < 0 {
                 return true
             }
+            // And content scrolled under the status bar and the translucent
+            // navigation bar (a pushed screen after a swipe): its contrast
+            // there is the bars', not the app's.
+            if issue.auditType == .contrast, let element = issue.element,
+               element.frame.intersection(topBars).height > 1 {
+                return true
+            }
             let element = issue.element.map {
                 "\($0.elementType.rawValue) '\($0.label)' id='\($0.identifier)' frame=\($0.frame)"
             } ?? "? \(issue.detailedDescription)"
-            issues.append("\(issue.compactDescription) [type \(issue.auditType.rawValue)]: \(element)")
+            issues.append("\(issue.compactDescription) [type \(issue.auditType.rawValue)]: \(element) topBars=\(topBars)")
             return true
         }
         XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n"), file: file, line: line)
@@ -205,7 +220,8 @@ final class UIStateTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Receiving files is paused until you leave this screen."].exists)
         // The window's port, whatever this device's addresses are.
         for address in app.staticTexts.matching(identifier: "pair.address").allElementsBoundByIndex {
-            XCTAssertTrue(address.label.hasSuffix(":47321"), address.label)
+            // VoiceOver hears the address in words; the port is the window's.
+            XCTAssertTrue(address.label.hasPrefix("Address ") && address.label.hasSuffix(", port 47321"), address.label)
         }
         XCTAssertTrue(app.buttons["pair.stop"].exists)
         XCTAssertTrue(app.staticTexts["How to pair"].exists)
@@ -319,10 +335,8 @@ final class UIStateTests: XCTestCase {
         let title = app.staticTexts["pair.result.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         XCTAssertEqual(title.label, "You said the codes don't match")
-        XCTAssertTrue(app.staticTexts[
-            "Nothing was saved. If the codes were different, another device may have answered. "
-                + "Pair only when both devices are in front of you."
-        ].exists)
+        // The message is longer than an identifier query may be: match part of it.
+        XCTAssertTrue(shows(app, containing: "If the codes were different, another device may have answered."))
         XCTAssertFalse(shows(app, containing: "didn't confirm"))
         XCTAssertTrue(app.buttons["pair.done"].exists)
         XCTAssertEqual(app.buttons["pair.again"].label, "Try again")

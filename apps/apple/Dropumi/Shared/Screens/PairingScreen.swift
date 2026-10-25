@@ -204,12 +204,19 @@ private struct ReadyCard: View {
                     .font(DSFont.meta)
                     .foregroundStyle(DS.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ForEach(addresses, id: \.self) { address in
-                    Text(verbatim: address)
-                        .font(DSFont.fingerprint)
-                        .foregroundStyle(DS.textPrimary)
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("pair.address")
+                ForEach(addresses, id: \.text) { address in
+                    // The label is on a container: on a Text itself it made
+                    // the iOS audit report the text as clipped, and on a
+                    // selectable Text it crashed the Mac's label lookup.
+                    HStack(spacing: 0) {
+                        Text(verbatim: address.text)
+                            .font(DSFont.fingerprint)
+                            .foregroundStyle(DS.textPrimary)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isStaticText)
+                    .accessibilityLabel(Text("Address \(Text(verbatim: address.host)), port \(Text(verbatim: address.port))"))
+                    .accessibilityIdentifier("pair.address")
                 }
             }
         }
@@ -217,11 +224,12 @@ private struct ReadyCard: View {
 
     /// The Wi-Fi and Ethernet addresses (en*) with the port this device
     /// waits on. The window's port is not the receiver's.
-    private var addresses: [String] {
+    private var addresses: [(text: String, host: String, port: String)] {
         guard let pairing = model.pairing, case .window = pairing.role, pairing.result == nil,
               let port = pairing.port
         else { return [] }
-        return LocalAddresses.ipv4().filter { $0.interface.hasPrefix("en") }.map { "\($0.text):\(port)" }
+        return LocalAddresses.ipv4().filter { $0.interface.hasPrefix("en") }
+            .map { (text: "\($0.text):\(port)", host: $0.text, port: String(port)) }
     }
 }
 
@@ -233,18 +241,16 @@ private struct Countdown: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let left = max(0, Int(expiresAt.timeIntervalSince(context.date)))
-            ViewThatFits(in: .horizontal) {
-                Text("Ready to pair · \(Formatting.countdown(left))")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ready to pair")
-                    Text(verbatim: Formatting.countdown(left))
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            }
+            // One text that wraps at large sizes (a ViewThatFits swap
+            // failed the Dynamic Type audit on an iPhone 15).
+            Text("Ready to pair · \(Formatting.countdown(left))")
+            .fixedSize(horizontal: false, vertical: true)
             .font(DSFont.rowTitle)
             .monospacedDigit()
             .foregroundStyle(DS.textPrimary)
-            .accessibilityElement(children: .ignore)
+            // A single Text is already one static-text element; making it
+            // ignore its children too crashed SwiftUI's label lookup on the
+            // Mac (a stack overflow under XCUITest, 2026-10-25).
             .accessibilityLabel(Text("Ready to pair"))
             .accessibilityValue(Self.minutesLeft(left))
             .accessibilityIdentifier("pair.countdown")
@@ -290,6 +296,7 @@ private struct PairingSteps: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel(Text(verbatim: "\(number.formatted()). \(text)"))
     }
 }
@@ -382,10 +389,7 @@ private struct PairingDeviceList: View {
                         .accessibilityHidden(true)
                 }
             }
-            .buttonStyle(.plain)
-            .font(DSFont.smallButton)
-            .foregroundStyle(DS.accentText)
-            .frame(minHeight: 44)
+            .buttonStyle(TextLinkButtonStyle())
             .accessibilityIdentifier("pair.byAddress")
             Text("Android phones aren't listed here. Type the address the phone shows on its Pair a device screen.")
                 .font(DSFont.meta)
