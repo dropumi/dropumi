@@ -145,7 +145,7 @@ fn shared_downloads() -> BTreeSet<String> {
 
 /// adb port forwards for one test; removed when dropped.
 #[derive(Default)]
-struct Forwards {
+pub(super) struct Forwards {
     forwards: Vec<u16>,
     reverses: Vec<u16>,
 }
@@ -163,7 +163,7 @@ impl Forwards {
     }
 
     /// App → CLI: the device's 127.0.0.1:`port` reaches the host's.
-    fn reverse_to_cli(&mut self, port: u16) {
+    pub(super) fn reverse_to_cli(&mut self, port: u16) {
         let spec = format!("tcp:{port}");
         adb_ok(&["reverse", &spec, &spec]);
         self.reverses.push(port);
@@ -185,8 +185,9 @@ impl Drop for Forwards {
     }
 }
 
-/// One run of one `AndroidInteropTest` scenario.
-struct AppTest {
+/// One run of one `AndroidInteropTest` scenario (also the device-to-device
+/// agent of `super::devices`).
+pub(super) struct AppTest {
     child: Child,
     statuses: Receiver<Value>,
     /// Signalled when the instrumentation's output ends.
@@ -195,7 +196,7 @@ struct AppTest {
 }
 
 impl AppTest {
-    fn start(scenario: &str, arguments: &[(&str, &str)]) -> Self {
+    pub(super) fn start(scenario: &str, arguments: &[(&str, &str)]) -> Self {
         assert!(
             adb_ok(&["shell", "pm", "list", "packages", TEST_PACKAGE])
                 .lines()
@@ -260,7 +261,7 @@ impl AppTest {
         }
     }
 
-    fn tail(&self) -> String {
+    pub(super) fn tail(&self) -> String {
         let log = self.log.lock().unwrap();
         log[log.len().saturating_sub(40)..].join("\n")
     }
@@ -295,7 +296,7 @@ impl AppTest {
 
     /// Waits for the instrumentation to end; the scenario's own assertions
     /// must pass (`am instrument` exits 0 either way, so its report is read).
-    fn finish(mut self) {
+    pub(super) fn finish(mut self) {
         assert!(
             self.ended.recv_timeout(EXIT).is_ok(),
             "the instrumentation did not end\n{}",

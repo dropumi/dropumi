@@ -47,7 +47,7 @@ use super::srv_target;
 use crate::support::*;
 
 #[derive(Clone, Copy, Debug)]
-enum Platform {
+pub(super) enum Platform {
     MacOs,
     IosSimulator,
     /// A real iPhone or iPad over Wi-Fi.
@@ -146,15 +146,16 @@ fn apple_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/apple")
 }
 
-/// One run of the app-hosted interop XCTest.
-struct AppTest {
+/// One run of the app-hosted interop XCTest (also the device-to-device
+/// agent of `super::devices`).
+pub(super) struct AppTest {
     child: Child,
     statuses: Receiver<Value>,
     log: Arc<Mutex<Vec<String>>>,
 }
 
 impl AppTest {
-    fn start(platform: Platform, scenario: &str, env: &[(&str, &str)]) -> Self {
+    pub(super) fn start(platform: Platform, scenario: &str, env: &[(&str, &str)]) -> Self {
         let dir = apple_dir();
         assert!(
             dir.join("Dropumi.xcodeproj").exists(),
@@ -205,7 +206,7 @@ impl AppTest {
         }
     }
 
-    fn tail(&self) -> String {
+    pub(super) fn tail(&self) -> String {
         let log = self.log.lock().unwrap();
         log[log.len().saturating_sub(40)..].join("\n")
     }
@@ -228,7 +229,7 @@ impl AppTest {
     }
 
     /// Waits for xcodebuild to exit; the XCTest's own assertions must pass.
-    fn finish(mut self) {
+    pub(super) fn finish(mut self) {
         let deadline = Instant::now() + EXIT;
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {

@@ -22,12 +22,19 @@
 // and per-IP admission is not covered here. The `nsd*` scenarios are the
 // exception: they run on a real device on the host's Wi-Fi and use NSD.
 //
+// The `agent` scenario is the device-to-device harness's agent instead: no
+// CLI; a driver on the host steers it over a control connection (runner
+// argument `dropumi_control`, through `adb reverse`) while it pairs with and
+// sends to another device's app over Wi-Fi.
+//
 // @CliInterop: neither pass of scripts/android/ui-tests.sh runs these.
 
 package io.github.dropumi.interop
 
 import android.app.Activity
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -48,25 +55,52 @@ import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.AppState
 import io.github.dropumi.appstate.HistoryEntry
 import io.github.dropumi.appstate.OutgoingFile
+import io.github.dropumi.appstate.PairingSession
 import io.github.dropumi.appstate.PromptArming
 import io.github.dropumi.appstate.ReceiveVisibility
 import io.github.dropumi.appstate.promptId
 import io.github.dropumi.core.discovery.AdvertiseState
+import io.github.dropumi.core.discovery.LanCandidate
+import io.github.dropumi.core.discovery.LocalAddressRules
+import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.CodePurpose
 import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.Prompt
+import io.github.dropumi.ffi.ReceivePolicy
 import io.github.dropumi.ffi.SendTarget
 import io.github.dropumi.foreign.ForeignProvider
 import io.github.dropumi.foreign.ForeignSharer
+import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -281,6 +315,432 @@ class AndroidInteropTest {
         }
     }
 
+    /**
+     * The agent of the device-to-device harness: no CLI, another device's
+     * app on the same Wi-Fi. The driver on the host listens; this test
+     * connects to runner argument `dropumi_control` (127.0.0.1:<port>,
+     * through `adb reverse`), says hello, then runs the driver's commands
+     * one at a time (receive, wait_pairing, pair, send, trusted, quit) with
+     * one JSON object per line each way, and sends events as things happen.
+     * The other device reaches this one over Wi-Fi (the core listens on
+     * every interface); only the control channel goes through adb. Answers
+     * like the other scenarios: yes only for the expected fingerprint, once
+     * the prompt is armed. Fails after [AGENT_IDLE_MS] without a command.
+     */
+    @Test
+    fun agent() = play { model -> Agent(model).run(argument(CONTROL)) }
+
+    /** One run of [agent]: the control connection and what the commands asked for. */
+    private inner class Agent(private val model: AppModel) {
+        /** Lines for the driver, written by one thread in order (replies and events). */
+        private val outbox = LinkedBlockingQueue<Any>()
+
+        /** The driver's commands, then [CLOSED] when the connection ends. */
+        private val commands = LinkedBlockingQueue<JSONObject>()
+
+        @Volatile
+        private var readFailure: String? = null
+
+        private lateinit var scope: CoroutineScope
+
+        /** Who offers are accepted from (receive), and whose codes are confirmed (pairing, send). */
+        private var receiveExpect: String? = null
+        private var receivePairedOnly = true
+        private var pairExpect: String? = null
+        private var sendExpect: String? = null
+
+        /** The peer of the last pairing code, for a pairing that ends without a peer. */
+        private var pairingCodePeer = ""
+
+        suspend fun run(control: String) {
+            // A plain loop: the test APK may only call the Kotlin library members proguard-qa.pro keeps.
+            var colon = -1
+            for (i in 0 until control.length) if (control[i] == ':') colon = i
+            if (colon <= 0) throw AssertionError("$CONTROL is not host:port")
+            val address = InetSocketAddress(control.substring(0, colon), Integer.parseInt(control.substring(colon + 1)))
+            val socket = withContext(Dispatchers.IO) {
+                val s = Socket()
+                s.connect(address, CONNECT_MS)
+                s.tcpNoDelay = true
+                s
+            }
+            val reader = Thread({ readCommands(socket) }, "dropumi-agent-read").apply { isDaemon = true }
+            val writer = Thread({ writeLines(socket) }, "dropumi-agent-write").apply { isDaemon = true }
+            reader.start()
+            writer.start()
+            try {
+                coroutineScope {
+                    scope = this
+                    hello()
+                    launch { answerPrompts() }
+                    launch { reportReceived() }
+                    try {
+                        serve()
+                    } finally {
+                        coroutineContext.cancelChildren()
+                    }
+                }
+            } finally {
+                // The writer sends what is queued (the reply to quit last), then closes the socket.
+                outbox.put(END_OF_LINES)
+                withContext(Dispatchers.IO) { writer.join(CONNECT_MS.toLong()) }
+            }
+        }
+
+        private fun readCommands(socket: Socket) {
+            try {
+                val input = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
+                while (true) {
+                    val line = input.readLine() ?: break
+                    if (line.length == 0) continue
+                    commands.put(JSONObject(line))
+                }
+            } catch (_: IOException) {
+                // The connection ended.
+            } catch (e: JSONException) {
+                readFailure = "a control line is not a JSON object: ${e.message}"
+            } finally {
+                commands.put(CLOSED)
+            }
+        }
+
+        private fun writeLines(socket: Socket) {
+            try {
+                val output = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))
+                while (true) {
+                    val line = outbox.take()
+                    if (line === END_OF_LINES) break
+                    output.write(line as String)
+                    output.write("\n")
+                    output.flush()
+                }
+            } catch (_: IOException) {
+                // The driver went away.
+            } finally {
+                // Also ends the reader.
+                try {
+                    socket.close()
+                } catch (_: IOException) {
+                }
+            }
+        }
+
+        /** Queues one line for the driver (never blocks). */
+        private fun emit(json: JSONObject) {
+            outbox.put(json.toString())
+        }
+
+        private fun event(name: String): JSONObject = JSONObject().put("event", name)
+
+        private fun hello() {
+            val identity = model.state.value.identity ?: throw AssertionError("no identity")
+            emit(
+                event("hello")
+                    .put("platform", "android")
+                    .put("fingerprint", identity.fingerprint)
+                    .put("name", identity.name)
+                    .put("addresses", JSONArray(wifiAddresses())),
+            )
+        }
+
+        /** Runs commands until quit or the end of the connection; fails after [AGENT_IDLE_MS] without one. */
+        private suspend fun serve() {
+            while (true) {
+                val command = withContext(Dispatchers.IO) { commands.poll(AGENT_IDLE_MS, TimeUnit.MILLISECONDS) }
+                    ?: throw AssertionError("no command for ${AGENT_IDLE_MS / 1000} s")
+                if (command === CLOSED) {
+                    readFailure?.let { throw AssertionError(it) }
+                    return
+                }
+                if (!handle(command)) return
+            }
+        }
+
+        /** Runs [command] and replies; false after quit. */
+        private suspend fun handle(command: JSONObject): Boolean {
+            val id = command.opt("id")
+            val name = command.optString("cmd")
+            var reply = JSONObject()
+            try {
+                when (name) {
+                    "receive" -> receive(command, reply)
+                    "wait_pairing" -> waitPairing(command, reply)
+                    "pair" -> pair(command)
+                    "send" -> send(command)
+                    "trusted" -> trusted(reply)
+                    "quit" -> Unit
+                    else -> throw IllegalArgumentException("unknown command $name")
+                }
+                reply.put("ok", true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                reply = JSONObject().put("ok", false).put("error", e.message ?: e.javaClass.name)
+            } catch (e: AssertionError) {
+                reply = JSONObject().put("ok", false).put("error", e.message ?: e.javaClass.name)
+            }
+            emit(reply.put("id", id))
+            return name != "quit"
+        }
+
+        /** Receives with that policy and the accept mode Ask; replies once the receiver runs so. */
+        private suspend fun receive(command: JSONObject, reply: JSONObject) {
+            val everyone = when (val policy = command.getString("policy")) {
+                "paired" -> false
+                "everyone" -> true
+                else -> throw IllegalArgumentException("unknown policy $policy")
+            }
+            receiveExpect = command.getString("expect_fp")
+            receivePairedOnly = !everyone
+            val visibility = if (everyone) ReceiveVisibility.EVERYONE else ReceiveVisibility.PAIRED_ONLY
+            if (model.state.value.onboarded) model.setVisibility(visibility) else model.finishOnboarding(visibility)
+            if (model.state.value.autoAcceptPaired) model.setAutoAcceptPaired(false)
+            val info = until(model, "receiving with that policy") { s ->
+                s.receiver?.takeIf { it.accept == AcceptMode.PROMPT && (it.policy is ReceivePolicy.Everyone) == everyone }
+            }
+            reply.put("port", info.port.toInt()).put("addresses", JSONArray(wifiAddresses()))
+        }
+
+        /** Opens the pairing window as the Pair a device screen does; replies once it listens. */
+        private suspend fun waitPairing(command: JSONObject, reply: JSONObject) {
+            pairExpect = command.getString("expect_fp")
+            val before = model.state.value.pairing?.operation
+            model.openPairingWindow()
+            val session = model.state.value.pairing
+            if (session == null || session.operation == before || session.role != PairingSession.Role.Window) {
+                throw IllegalStateException("the pairing window did not open: ${model.state.value.banner?.title}")
+            }
+            val op = session.operation
+            val listening = until(model, "the pairing window to listen") { s ->
+                s.pairing?.takeIf { it.operation == op && (it.port != null || it.result != null) }
+            }
+            val port = listening.port ?: throw IllegalStateException("the pairing window ended: ${listening.result}")
+            scope.launch { reportPairing(op) }
+            reply.put("port", port.toInt()).put("addresses", JSONArray(wifiAddresses()))
+        }
+
+        /** Asks that address to pair, with the expected key pinned; replies once the request runs. */
+        private suspend fun pair(command: JSONObject) {
+            val address = command.getString("address")
+            val expect = command.getString("expect_fp")
+            pairExpect = expect
+            val before = model.state.value.pairing?.operation
+            model.pair(SendTarget.Address(address, expect), "Peer")
+            val session = model.state.value.pairing
+            if (session == null || session.operation == before || session.role !is PairingSession.Role.Initiator) {
+                throw IllegalStateException("pairing did not start: ${model.state.value.banner?.title}")
+            }
+            val op = session.operation
+            scope.launch { reportPairing(op) }
+        }
+
+        private suspend fun reportPairing(op: ULong) {
+            val result = next { s -> s.pairing?.takeIf { it.operation == op }?.result }
+            // if/else, not an exhaustive when: the test APK may only call what proguard-qa.pro keeps.
+            val name: String
+            var error = ""
+            var peer = pairingCodePeer
+            if (result is PairingResult.Paired) {
+                name = "paired"
+                peer = result.peer.fingerprint
+            } else if (result is PairingResult.Failed) {
+                name = "failed"
+                error = result.error.name.lowercase()
+            } else {
+                name = "cancelled"
+            }
+            emit(event("pair_result").put("result", name).put("error", error).put("peer_fp", peer))
+        }
+
+        /**
+         * Writes the files (byte i is (i * 31 + 7) % 251) and sends them to
+         * that address with the expected key pinned, as the Send screen does;
+         * replies once the send runs.
+         */
+        private suspend fun send(command: JSONObject) {
+            val address = command.getString("address")
+            val expect = command.getString("expect_fp")
+            val specs = command.getJSONArray("files")
+            sendExpect = expect
+            val dir = File(sourceDir(), "send-${command.opt("id")}")
+            withContext(Dispatchers.IO) {
+                dir.deleteRecursively()
+                check(dir.mkdirs())
+            }
+            val files = ArrayList<OutgoingFile>()
+            for (i in 0 until specs.length()) {
+                val spec = specs.getJSONObject(i)
+                val name = spec.getString("name")
+                val size = spec.getLong("bytes")
+                if (File(name).name != name || name == "." || name == ".." || size < 0) {
+                    throw IllegalArgumentException("not a plain file name and size: $name")
+                }
+                val file = File(dir, name)
+                val sha = withContext(Dispatchers.IO) { writePattern(file, size) }
+                emit(event("sent_file").put("name", name).put("bytes", size).put("sha256", sha))
+                files.add(OutgoingFile(name, size.toULong(), OutgoingFile.Source.Path(file.path)))
+            }
+            val before = HashSet<String>()
+            for (entry in model.state.value.history) before.add(entry.id)
+            model.addToDraft(files)
+            model.sendDraft(SendTarget.Address(address, expect), "Peer", allowUnverified = true)
+            if (model.state.value.draft.isNotEmpty()) {
+                model.clearDraft()
+                throw IllegalStateException("not sent: ${model.state.value.banner?.title}")
+            }
+            scope.launch {
+                val entry = next { s -> s.history.firstOrNull { it.outgoing && it.id !in before } }
+                val outcome = outcomeName(entry.outcome)
+                val error = if (entry.outcome == HistoryEntry.Outcome.COMPLETED) "" else outcome
+                emit(event("send_result").put("outcome", outcome).put("error", error).put("detail", entry.summary))
+            }
+        }
+
+        private suspend fun trusted(reply: JSONObject) {
+            model.refreshTrusted()
+            val fingerprints = JSONArray()
+            for (device in model.state.value.trusted) fingerprints.put(device.fingerprint)
+            reply.put("fingerprints", fingerprints)
+        }
+
+        /**
+         * Answers every prompt in turn, as the user would: an offer only from
+         * the expected key (and, when receiving from paired devices only, a
+         * paired one); a code only from the key the pairing or send expects.
+         */
+        private suspend fun answerPrompts() {
+            val handled = HashSet<Long>()
+            while (true) {
+                val prompt = next { s -> s.currentPrompt?.takeIf { it.promptId.toLong() !in handled } }
+                handled.add(prompt.promptId.toLong())
+                val yes: Boolean
+                if (prompt is Prompt.Offer) {
+                    val expect = receiveExpect
+                    yes = expect != null && prompt.peer.fingerprint == expect && (!receivePairedOnly || prompt.peer.trusted)
+                    emit(
+                        event("offer")
+                            .put("peer_fp", prompt.peer.fingerprint)
+                            .put("trusted", prompt.peer.trusted)
+                            .put("code", prompt.code ?: "")
+                            .put("files", prompt.fileCount.toLong())
+                            .put("accepted", yes),
+                    )
+                } else {
+                    val code = prompt as Prompt.Code
+                    val pairing = code.purpose == CodePurpose.PAIRING
+                    val expect = if (pairing) pairExpect else sendExpect
+                    if (pairing) pairingCodePeer = code.peer.fingerprint
+                    emit(event("code").put("code", code.code).put("peer_fp", code.peer.fingerprint))
+                    yes = expect != null && code.peer.fingerprint == expect
+                }
+                try {
+                    answer(model, prompt, yes)
+                } catch (e: TimeoutCancellationException) {
+                    // The prompt never armed (or closed first): say so, and decline.
+                    status("agent_answer_timeout", mapOf("yes" to yes.toString()))
+                    model.answer(prompt, false)
+                }
+            }
+        }
+
+        /** For every receive that ends: each saved file, hashed where the app saved it, then the outcome. */
+        private suspend fun reportReceived() {
+            val seen = HashSet<String>()
+            for (entry in model.state.value.history) seen.add(entry.id)
+            val receiveDir = app.interopPaths.receiveDir
+            while (true) {
+                val ended = next { s -> s.history.lastOrNull { !it.outgoing && it.id !in seen } }
+                seen.add(ended.id)
+                for (name in ended.savedAs) {
+                    val file = File(receiveDir, name)
+                    val sha = withContext(Dispatchers.IO) { fileSha256(file) }
+                    emit(event("received").put("name", name).put("bytes", file.length()).put("sha256", sha))
+                }
+                emit(event("receive_finished").put("outcome", outcomeName(ended.outcome)))
+            }
+        }
+
+        /** Waits, without a bound of its own (the driver bounds each step), until [value] gives something. */
+        private suspend fun <T : Any> next(value: (AppState) -> T?): T {
+            var found: T? = null
+            model.state.first { s -> value(s)?.also { found = it } != null }
+            return found ?: throw IllegalStateException("no value")
+        }
+    }
+
+    /** The protocol's outcome words (REJECTED is the receiver's decline). */
+    private fun outcomeName(outcome: HistoryEntry.Outcome): String =
+        if (outcome == HistoryEntry.Outcome.REJECTED) "declined" else outcome.name.lowercase()
+
+    /**
+     * This device's IPv4 addresses on Wi-Fi (and Ethernet) networks, by the
+     * app's own rule (LocalAddressRules: never loopback, link-local or a
+     * cellular network), read from the system now.
+     */
+    @Suppress("DEPRECATION") // allNetworks: the callbacks LocalAddresses uses need time to report.
+    private fun wifiAddresses(): List<String> {
+        val connectivity = app.getSystemService(ConnectivityManager::class.java) ?: return ArrayList()
+        val candidates = ArrayList<LanCandidate>()
+        for (network in connectivity.allNetworks) {
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
+            val link = connectivity.getLinkProperties(network) ?: continue
+            val addresses = ArrayList<InetAddress>()
+            for (linkAddress in link.linkAddresses) addresses.add(linkAddress.address)
+            candidates.add(
+                LanCandidate(
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                    addresses,
+                ),
+            )
+        }
+        return LocalAddressRules.ipv4(candidates)
+    }
+
+    /** Writes [size] bytes of the harness's pattern (byte i is (i * 31 + 7) % 251) to [file]; returns their SHA-256. */
+    private fun writePattern(file: File, size: Long): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(PATTERN_CHUNK)
+        val out = FileOutputStream(file)
+        try {
+            var offset = 0L
+            while (offset < size) {
+                val count = Math.min(size - offset, PATTERN_CHUNK.toLong()).toInt()
+                for (j in 0 until count) buffer[j] = (((offset + j) * 31 + 7) % 251).toByte()
+                out.write(buffer, 0, count)
+                digest.update(buffer, 0, count)
+                offset += count
+            }
+            out.fd.sync()
+        } finally {
+            out.close()
+        }
+        return hex(digest.digest())
+    }
+
+    private fun fileSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(PATTERN_CHUNK)
+        val input = FileInputStream(file)
+        try {
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        } finally {
+            input.close()
+        }
+        return hex(digest.digest())
+    }
+
+    private fun hex(bytes: ByteArray): String {
+        val text = StringBuilder(bytes.size * 2)
+        for (b in bytes) text.append("%02x".format(b))
+        return text.toString()
+    }
+
     /** The code prompt of a send: confirmed only for the CLI's key; then the transfer's history entry. */
     private suspend fun confirmCodeAndFinish(model: AppModel, cliFingerprint: String): HistoryEntry {
         val prompt = until(model, "a code") { it.currentPrompt as? Prompt.Code }
@@ -442,6 +902,18 @@ class AndroidInteropTest {
         const val CLI_ADDR = "dropumi_cli_addr"
         const val CLI_FP = "dropumi_cli_fp"
         const val STEP_MS = 25_000L
+        const val CONTROL = "dropumi_control"
+        const val CONNECT_MS = 10_000
+
+        /** The agent fails when no command came for this long. */
+        const val AGENT_IDLE_MS = 120_000L
+        const val PATTERN_CHUNK = 64 * 1024
+
+        /** Ends the agent's outbox. */
+        val END_OF_LINES = Any()
+
+        /** Ends the agent's commands (compared by identity). */
+        val CLOSED = JSONObject()
 
         /** The two refusal notices AppModel.noticeRefused shows (without and with the peer). */
         val REFUSAL_TITLES = setOf("A device was refused", "A device that isn't paired tried to send")

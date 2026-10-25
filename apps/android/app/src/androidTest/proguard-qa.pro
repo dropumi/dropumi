@@ -66,12 +66,16 @@
     void addToDraft(java.util.List);
     java.lang.Object answer(io.github.dropumi.ffi.Prompt, boolean, kotlin.coroutines.Continuation);
     void beginBrowsing();
+    void clearDraft();
     void endBrowsing();
     java.lang.Object finishOnboarding(io.github.dropumi.appstate.ReceiveVisibility, kotlin.coroutines.Continuation);
+    java.lang.Object openPairingWindow(kotlin.coroutines.Continuation);
     java.lang.Object pair(io.github.dropumi.ffi.SendTarget, java.lang.String, kotlin.coroutines.Continuation);
     void promptElapsed-E0BElUM(long, int, long);
     java.lang.Object refreshTrusted(kotlin.coroutines.Continuation);
     java.lang.Object sendDraft(io.github.dropumi.ffi.SendTarget, java.lang.String, boolean, kotlin.coroutines.Continuation);
+    java.lang.Object setAutoAcceptPaired(boolean, kotlin.coroutines.Continuation);
+    java.lang.Object setVisibility(io.github.dropumi.appstate.ReceiveVisibility, kotlin.coroutines.Continuation);
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.AppModelKt {
     long getPromptId(io.github.dropumi.ffi.Prompt);
@@ -79,6 +83,7 @@
 -keep,allowobfuscation class io.github.dropumi.appstate.AppState {
     io.github.dropumi.core.discovery.AdvertiseState getAdvertising();
     io.github.dropumi.appstate.PromptArming getArming();
+    boolean getAutoAcceptPaired();
     io.github.dropumi.appstate.Banner getBanner();
     io.github.dropumi.ffi.Prompt getCurrentPrompt();
     java.lang.String getDiscoveryProblem();
@@ -86,6 +91,7 @@
     java.util.List getHistory();
     io.github.dropumi.ffi.IdentityInfo getIdentity();
     java.util.List getNearby();
+    boolean getOnboarded();
     io.github.dropumi.appstate.PairingSession getPairing();
     java.util.List getPrompts();
     io.github.dropumi.ffi.ReceiverInfo getReceiver();
@@ -95,11 +101,15 @@
     java.lang.String getTitle();
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.HistoryEntry {
+    java.lang.String getId();
     io.github.dropumi.appstate.HistoryEntry$Outcome getOutcome();
+    boolean getOutgoing();
     java.util.List getSavedAs();
+    java.lang.String getSummary();
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.HistoryEntry$Outcome {
     io.github.dropumi.appstate.HistoryEntry$Outcome COMPLETED;
+    io.github.dropumi.appstate.HistoryEntry$Outcome REJECTED;
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.MemorySettingsStore {
     <init>(int);
@@ -115,7 +125,15 @@
     <init>(java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.PairingSession {
+    long getOperation-s-VKNKU();
+    kotlin.UShort getPort-XRpZGF0();
     io.github.dropumi.ffi.PairingResult getResult();
+    io.github.dropumi.appstate.PairingSession$Role getRole();
+}
+-keep,allowobfuscation class io.github.dropumi.appstate.PairingSession$Role
+-keep,allowobfuscation class io.github.dropumi.appstate.PairingSession$Role$Initiator
+-keep,allowobfuscation class io.github.dropumi.appstate.PairingSession$Role$Window {
+    io.github.dropumi.appstate.PairingSession$Role$Window INSTANCE;
 }
 -keep,allowobfuscation class io.github.dropumi.appstate.PromptArming {
     boolean canAccept-VKZWuLQ(long);
@@ -145,6 +163,13 @@
 -keep,allowobfuscation class io.github.dropumi.core.discovery.AdvertiseState$Registered {
     io.github.dropumi.core.discovery.AdvertiseState$Registered INSTANCE;
 }
+-keep,allowobfuscation class io.github.dropumi.core.discovery.LanCandidate {
+    <init>(boolean, boolean, boolean, java.util.List);
+}
+-keep,allowobfuscation class io.github.dropumi.core.discovery.LocalAddressRules {
+    io.github.dropumi.core.discovery.LocalAddressRules INSTANCE;
+    java.util.List ipv4(java.util.Collection);
+}
 
 # The Kotlin standard library. Facade classes (CollectionsKt and the like)
 # are kept with the part classes that declare the members the tests call.
@@ -169,6 +194,7 @@
 }
 -keep,allowobfuscation class kotlin.UShort {
     java.lang.String toString-impl(short);
+    short unbox-impl();
 }
 -keep,allowobfuscation class kotlin.Unit {
     kotlin.Unit INSTANCE;
@@ -227,6 +253,7 @@
 }
 -keep,allowobfuscation class kotlin.coroutines.jvm.internal.Boxing {
     java.lang.Boolean boxBoolean(boolean);
+    java.lang.Long boxLong(long);
 }
 -keep,allowobfuscation class kotlin.coroutines.jvm.internal.SpillingKt {
     java.lang.Object nullOutSpilledVariable(java.lang.Object);
@@ -276,7 +303,9 @@
 
 # kotlinx.coroutines: what the tests call, not the dispatcher loading.
 -keep,allowobfuscation class kotlinx.coroutines.BuildersKt {
+    kotlinx.coroutines.Job launch$default(kotlinx.coroutines.CoroutineScope, kotlin.coroutines.CoroutineContext, kotlinx.coroutines.CoroutineStart, kotlin.jvm.functions.Function2, int, java.lang.Object);
     java.lang.Object runBlockingK(kotlin.coroutines.CoroutineContext, kotlin.jvm.functions.Function2);
+    java.lang.Object withContext(kotlin.coroutines.CoroutineContext, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
 }
 -keep,allowobfuscation class kotlinx.coroutines.CompletableDeferred {
     boolean complete(java.lang.Object);
@@ -284,7 +313,12 @@
 -keep,allowobfuscation class kotlinx.coroutines.CompletableDeferredKt {
     kotlinx.coroutines.CompletableDeferred CompletableDeferred$default(kotlinx.coroutines.Job, int, java.lang.Object);
 }
--keep,allowobfuscation class kotlinx.coroutines.CoroutineScope
+-keep,allowobfuscation class kotlinx.coroutines.CoroutineScope {
+    kotlin.coroutines.CoroutineContext getCoroutineContext();
+}
+-keep,allowobfuscation class kotlinx.coroutines.CoroutineScopeKt {
+    java.lang.Object coroutineScope(kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
+}
 -keep,allowobfuscation class kotlinx.coroutines.Deferred {
     java.lang.Object await(kotlin.coroutines.Continuation);
 }
@@ -292,10 +326,15 @@
     java.lang.Object delay(long, kotlin.coroutines.Continuation);
 }
 -keep,allowobfuscation class kotlinx.coroutines.Dispatchers {
+    kotlinx.coroutines.CoroutineDispatcher getIO();
     kotlinx.coroutines.MainCoroutineDispatcher getMain();
 }
 -keep,allowobfuscation class kotlinx.coroutines.Job
+-keep,allowobfuscation class kotlinx.coroutines.JobKt {
+    void cancelChildren$default(kotlin.coroutines.CoroutineContext, java.util.concurrent.CancellationException, int, java.lang.Object);
+}
 -keep,allowobfuscation class kotlinx.coroutines.MainCoroutineDispatcher
+-keep,allowobfuscation class kotlinx.coroutines.TimeoutCancellationException
 -keep,allowobfuscation class kotlinx.coroutines.TimeoutKt {
     java.lang.Object withTimeout(long, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
     java.lang.Object withTimeoutOrNull(long, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);

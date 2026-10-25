@@ -20,7 +20,9 @@
 # they hold (under the app's noBackupFilesDir/interop-<uuid>/) never stays on
 # the device.
 #
-# Usage: bash scripts/android/interop.sh [--no-build] [test name filter, default android_]
+# Usage: bash scripts/android/interop.sh [--no-build | --build-only] [test name filter, default android_]
+#   --build-only runs step 1 only (no device needed; scripts/devices/interop.sh
+#   uses it).
 #   ANDROID_SERIAL picks the device when several are connected.
 # Gradle needs JDK 17 (JAVA_HOME).
 set -euo pipefail
@@ -32,10 +34,23 @@ filter="android_"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-build) build=no; shift ;;
-    -*) echo "usage: $0 [--no-build] [test name filter]" >&2; exit 2 ;;
+    --build-only) build=only; shift ;;
+    -*) echo "usage: $0 [--no-build | --build-only] [test name filter]" >&2; exit 2 ;;
     *) filter="$1"; shift ;;
   esac
 done
+
+build_apps() {
+  if ! bash scripts/android/check-core-artifacts.sh --abis arm64-v8a,x86_64 --build-type debug >/dev/null 2>&1; then
+    bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile dev
+  fi
+  "${root}/apps/android/gradlew" -p "${root}/apps/android" --quiet -Pdropumi.testBuildType=qa \
+    :app:assembleQa :app:assembleQaAndroidTest
+}
+if [[ "${build}" == only ]]; then
+  build_apps
+  exit 0
+fi
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}}"
 adb="$(command -v adb || true)"
@@ -68,11 +83,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "${build}" == yes ]]; then
-  if ! bash scripts/android/check-core-artifacts.sh --abis arm64-v8a,x86_64 --build-type debug >/dev/null 2>&1; then
-    bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile dev
-  fi
-  "${root}/apps/android/gradlew" -p "${root}/apps/android" --quiet -Pdropumi.testBuildType=qa \
-    :app:assembleQa :app:assembleQaAndroidTest
+  build_apps
 fi
 for apk in "${app_apk}" "${test_apk}"; do
   [[ -f "${apk}" ]] || { echo "error: ${apk##*/} is missing; run without --no-build" >&2; exit 2; }

@@ -6,6 +6,10 @@
 mod android;
 #[cfg(target_os = "macos")]
 mod apple;
+// Device to device: two apps steered by this host (opt-in:
+// DROPUMI_TEST_DEVICES=1). The Mac app and the iPhone need a macOS host.
+#[cfg(target_os = "macos")]
+mod devices;
 
 /// The host name an advertisement points at (its SRV target), read with
 /// `dns-sd -L`, which prints "… can be reached at HOST:PORT …". macOS

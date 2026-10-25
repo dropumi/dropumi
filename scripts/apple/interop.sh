@@ -10,7 +10,9 @@
 # selects only `apple_macos_*` tests never builds for, or needs, a
 # simulator.
 #
-# Usage: bash scripts/apple/interop.sh [test name filter, default apple_]
+# Usage: bash scripts/apple/interop.sh [--build-only] [test name filter, default apple_]
+#   --build-only builds for the selected tests' destinations and stops
+#   (scripts/devices/interop.sh uses it).
 # Environment: DROPUMI_TEST_APPLE_SIMULATOR (default "iPhone 17"; used only
 # by the `apple_ios_sim_*` tests); DROPUMI_TEST_MDNS=1 also runs the
 # Bonjour tests, which show the Local Network question for Dropumi the
@@ -21,6 +23,11 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${root}"
+build_only=no
+if [[ "${1:-}" == --build-only ]]; then
+  build_only=yes
+  shift
+fi
 filter="${1:-apple_}"
 simulator="${DROPUMI_TEST_APPLE_SIMULATOR:-iPhone 17}"
 
@@ -65,5 +72,6 @@ for target in "${targets[@]}"; do
     -project apps/apple/Dropumi.xcodeproj -scheme "${target%%|*}" -destination "${target#*|}" \
     -derivedDataPath apps/apple/build
 done
+[[ "${build_only}" == no ]] || exit 0
 
 DROPUMI_TEST_APPLE=1 cargo test -p dropumi-cli --test e2e --locked -- --ignored --test-threads=1 "${filter}"
