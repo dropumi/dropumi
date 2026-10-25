@@ -215,7 +215,9 @@ private final class Browse {
     let sink: BrowseSink
     let queue: DispatchQueue
     var ref: DNSServiceRef?
-    var resolving: [String: Resolve] = [:]
+    /// One resolve per instance and interface it was seen on.
+    var resolving: [String: [UInt32: Resolve]] = [:]
+    var instances = BonjourInstances()
 
     init(sink: BrowseSink, queue: DispatchQueue) {
         self.sink = sink
@@ -232,16 +234,41 @@ private final class Browse {
         return true
     }
 
+    /// An Add on one interface: resolve the instance there too. Each
+    /// interface's addresses are merged (BonjourInstances), so a device
+    /// keeps its reachable address even if another interface answers with
+    /// one that refuses connections.
     func found(_ instance: String, type: String, domain: String, interface: UInt32) {
-        guard resolving[instance] == nil else { return }
-        let resolve = Resolve(browse: self, instance: instance, queue: queue)
-        resolving[instance] = resolve
-        resolve.start(type: type, domain: domain, interface: interface)
+        guard instances.seen(instance, on: interface) else { return }
+        let resolve = Resolve(browse: self, instance: instance, interface: interface, queue: queue)
+        resolving[instance, default: [:]][interface] = resolve
+        resolve.start(type: type, domain: domain)
     }
 
-    func lost(_ instance: String) {
-        resolving.removeValue(forKey: instance)?.cancel()
-        sink.lost(instance: instance)
+    /// A Remove on one interface: the device is lost only when no
+    /// interface sees it any more.
+    func lost(_ instance: String, interface: UInt32) {
+        resolving[instance]?.removeValue(forKey: interface)?.cancel()
+        if let remaining = instances.lost(instance, on: interface) {
+            report(instance, addresses: remaining)
+        } else {
+            resolving.removeValue(forKey: instance)
+            sink.lost(instance: instance)
+        }
+    }
+
+    /// One interface's resolve has new addresses: report the merged list.
+    func resolved(_ instance: String, interface: UInt32, addresses: [String]) {
+        report(instance, addresses: instances.update(instance, on: interface, addresses: addresses))
+    }
+
+    private func report(_ instance: String, addresses: [String]) {
+        // Port and TXT come from any of the instance's resolves: they are
+        // the same service on every interface.
+        guard !addresses.isEmpty,
+              let source = resolving[instance]?.values.first(where: { $0.port != 0 })
+        else { return }
+        sink.resolved(instance: instance, txt: source.txt, addresses: addresses, port: source.port)
     }
 
     func failed(_ code: DNSServiceErrorType) {
@@ -251,10 +278,11 @@ private final class Browse {
     }
 
     func cancel() {
-        for resolve in resolving.values {
-            resolve.cancel()
+        for resolves in resolving.values {
+            for resolve in resolves.values { resolve.cancel() }
         }
         resolving.removeAll()
+        instances.removeAll()
         if let ref {
             DNSServiceRefDeallocate(ref)
         }
@@ -274,16 +302,17 @@ private let browseReply: DNSServiceBrowseReply = { _, flags, interface, errorCod
     if flags & DNSServiceFlags(kDNSServiceFlagsAdd) != 0 {
         browse.found(instance, type: String(cString: type), domain: String(cString: domain), interface: interface)
     } else {
-        browse.lost(instance)
+        browse.lost(instance, interface: interface)
     }
 }
 
-/// Resolves one instance: SRV and TXT, then the target host's IPv4
-/// addresses. Never connects to the device (that would use up one of the
-/// receiver's pre-authentication slots).
+/// Resolves one instance on one interface: SRV and TXT, then the target
+/// host's IPv4 addresses on that interface. Never connects to the device
+/// (that would use up one of the receiver's pre-authentication slots).
 private final class Resolve {
     weak var browse: Browse?
     let instance: String
+    let interface: UInt32
     let queue: DispatchQueue
     var resolveRef: DNSServiceRef?
     var addressRef: DNSServiceRef?
@@ -291,13 +320,14 @@ private final class Resolve {
     var txt: [TxtEntry] = []
     var addresses: [String] = []
 
-    init(browse: Browse, instance: String, queue: DispatchQueue) {
+    init(browse: Browse, instance: String, interface: UInt32, queue: DispatchQueue) {
         self.browse = browse
         self.instance = instance
+        self.interface = interface
         self.queue = queue
     }
 
-    func start(type: String, domain: String, interface: UInt32) {
+    func start(type: String, domain: String) {
         var ref: DNSServiceRef?
         let context = Unmanaged.passUnretained(self).toOpaque()
         guard DNSServiceResolve(&ref, 0, interface, instance, type, domain, resolveReply, context)
@@ -331,8 +361,8 @@ private final class Resolve {
         } else {
             addresses.removeAll { $0 == ip }
         }
-        guard !addresses.isEmpty, port != 0 else { return }
-        browse?.sink.resolved(instance: instance, txt: txt, addresses: addresses, port: port)
+        guard port != 0 else { return }
+        browse?.resolved(instance, interface: interface, addresses: addresses)
     }
 
     func cancel() {

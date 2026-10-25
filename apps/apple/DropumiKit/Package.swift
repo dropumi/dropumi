@@ -49,6 +49,7 @@ let package = Package(
             path: "Tests/DropumiBindingsTests"
         ),
         .testTarget(name: "DropumiShareTests", dependencies: ["DropumiShare"]),
+        .testTarget(name: "DropumiCoreTests", dependencies: ["DropumiCore"]),
         .testTarget(name: "DropumiAppStateTests", dependencies: ["DropumiAppState", "DropumiTestSupport"]),
     ]
 )

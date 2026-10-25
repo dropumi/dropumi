@@ -169,7 +169,12 @@ before Dropumi sees them; how it treats key case is UNVERIFIED.
   the user answers the system's Local Network question, DNS-SD does not answer at all. A registration that fails
   later removes the advertisement. Browsing uses `DNSServiceBrowse`, `DNSServiceResolve` (SRV and raw TXT bytes)
   and `DNSServiceGetAddrInfo` (IPv4). It never connects to a device to learn about it. A policy denial is reported
-  to the app as "local network access is turned off".
+  to the app as "local network access is turned off". mDNSResponder reports a service once per interface it is
+  seen on, and a host resolves to that interface's address; the adapter resolves the service on every interface
+  it is seen on, reports the merged addresses (first-seen interface first, no duplicates), and reports the device
+  lost only when the last interface loses it. Resolving only on the first interface left a device with one
+  address that could refuse connections on a Mac with virtual-machine bridges (run 2026-10-25-01, Finding 3;
+  `DropumiCoreTests` `BonjourInstancesTests`).
 - *Reference:* the adapter uses one lazily created `mdns-sd` daemon per process. A browse collects resolved and
   removed services until its timeout, keeps one entry per full instance name, and reports each discovered peer once,
   sorted by instance name, with its full instance name, sanitized name, `fp` hint, IPv4 addresses (sorted), port and
