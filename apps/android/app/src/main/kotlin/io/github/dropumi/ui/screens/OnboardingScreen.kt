@@ -222,7 +222,7 @@ private fun LocalNetworkStep() {
     Point(DSIcons.wifi, "Use the same Wi-Fi network on both devices. Nothing goes through the internet.")
     Point(
         DSIcons.nearby,
-        "On some Android versions other devices can't see this one. They can still send to it after pairing, or by its address.",
+        "On some Android versions other devices can't see this one. They can still send to it by typing its address.",
     )
 }
 

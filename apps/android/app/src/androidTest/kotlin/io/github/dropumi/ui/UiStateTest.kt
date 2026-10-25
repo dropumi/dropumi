@@ -182,7 +182,7 @@ class UiStateTest {
             val kind = if (fake.app.resources.configuration.smallestScreenWidthDp >= TABLET_DP) "tablet" else "phone"
             compose.onNodeWithText(
                 "Other devices can't see this $kind on this Android version. " +
-                    "They can still send to it after pairing, or by address.",
+                    "They can still send to it by typing its address.",
             ).assertExists()
             compose.onNodeWithText("Show my address").performClick()
             compose.waitUntil(TIMEOUT_MS) { exists("device.fingerprint") }

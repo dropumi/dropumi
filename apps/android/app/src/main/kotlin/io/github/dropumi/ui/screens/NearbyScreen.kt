@@ -153,7 +153,7 @@ private fun Problems(state: AppState) {
         state.advertising is AdvertiseState.GateClosed -> ProblemCard(
             "Not listed nearby",
             "Other devices can't see this $kind on this Android version. " +
-                "They can still send to it after pairing, or by address.",
+                "They can still send to it by typing its address.",
             "Show my address",
         ) { router.openThisDevice() }
         state.advertising is AdvertiseState.Failed -> ProblemCard(

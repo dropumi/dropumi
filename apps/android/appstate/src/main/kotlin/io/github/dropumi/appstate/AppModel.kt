@@ -712,7 +712,7 @@ class AppModel(
             } else if (!s.receiverStopping) {
                 // Advertised only where the R21 gate is open (ADR-0013 D5);
                 // elsewhere the core never calls advertise, and peers reach
-                // this device by address or after pairing.
+                // this device only by typing its address (pairing stores no address).
                 val options = ReceiveOptions(policy, accept, null, advertising.gateOpen)
                 val info = work { core.startReceiving(options) }
                 update { copy(receiver = info) }
