@@ -6,12 +6,14 @@
 package io.github.dropumi.testsupport
 
 import io.github.dropumi.appstate.AppModel
+import io.github.dropumi.appstate.Banner
 import io.github.dropumi.appstate.ErrorCatalog
 import io.github.dropumi.appstate.Formatting
 import io.github.dropumi.appstate.HistoryEntry
 import io.github.dropumi.appstate.HistoryStore
 import io.github.dropumi.appstate.MemorySettingsStore
 import io.github.dropumi.appstate.OutgoingFile
+import io.github.dropumi.appstate.PairingFlow
 import io.github.dropumi.appstate.PendingShare
 import io.github.dropumi.appstate.Route
 import io.github.dropumi.appstate.PeerLabel
@@ -538,7 +540,8 @@ class AppModelTest {
      * window is open, or an unreadable list of paired devices. Found on the
      * Tablet AVD (Android 16) with the real core and the CLI as the sender.
      * The notice says only that a device was refused, and never offers
-     * Everyone (that would point a paired device's user at the wrong fix).
+     * Everyone (that would point a paired device's user at the wrong fix);
+     * it offers Pair a device.
      */
     @Test
     fun refusedConnectionWithoutAPeerIsNeutral() = runTest {
@@ -547,7 +550,12 @@ class AppModelTest {
         s.model.apply(listOf(NodeEvent.SessionClosed(null, "not_authorized")))
         val banner = requireNotNull(s.model.state.value.banner)
         assertEquals("A device was refused", banner.title)
-        assertNull("no Everyone action", banner.action)
+        assertEquals(
+            "A device on this network tried to connect and was turned away. " +
+                "If it was trying to pair, open Pair a device on both devices.",
+            banner.message,
+        )
+        assertEquals("no Everyone action", Banner.Action.OPEN_PAIRING, banner.action)
         assertFalse(banner.message.contains("everyone", ignoreCase = true))
         assertFalse(banner.message.contains("isn't paired"))
         s.model.dismissBanner()
@@ -1078,27 +1086,33 @@ class AppModelTest {
     /**
      * Review of C1 (#1): pair() replaced the window's session, which unlocked
      * the receiving settings while the receiver was still paused; Off then
-     * did nothing, and the core resumed the receiver with Paired only. Now a
-     * pairing request is refused while the window is open (whose session and
-     * Cancel stay on screen), and Off stops the resumed receiver.
+     * did nothing, and the core resumed the receiver with Paired only. Since
+     * the one-screen pairing design, a request made while this device's
+     * window is open closes that window first (it is the one asking now) and
+     * asks only once the window has ended; the settings wait for the
+     * resumed receiver, and Off stops it.
      */
     @Test
-    fun pairDuringAPairingWindowIsRefusedAndOffStopsTheResumedReceiver() = runTest {
+    fun pairDuringAPairingWindowClosesItFirstAndOffStopsTheResumedReceiver() = runTest {
         val (s, window) = receivingWithAPairingWindow()
-        s.model.pair(SendTarget.Nearby("dropumi-00000001"), "Maya's phone")
-        advanceUntilIdle()
-        assertTrue("no pairing request", s.core.calls.none { it is FakeCoreClient.Call.Pair })
-        assertEquals(window, s.model.state.value.pairing?.operation)
-        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
-        assertTrue(s.model.state.value.pairingWindowActive)
-        s.model.dismissBanner()
+        val asking = async { s.model.pair(SendTarget.Nearby("dropumi-00000001"), "Maya's phone") }
+        runCurrent()
+        assertEquals(PairingFlow(PairingFlow.Phase.Switching("Maya's phone")), s.model.state.value.pairingFlow)
+        assertTrue("the window is closed first", FakeCoreClient.Call.Cancel(window) in s.core.calls)
+        assertTrue("no request while the window is open", s.core.calls.none { it is FakeCoreClient.Call.Pair })
+        assertNull("no banner", s.model.state.value.banner)
         s.model.setVisibility(ReceiveVisibility.OFF)
         runCurrent()
         assertEquals(ReceiveVisibility.OFF, s.model.state.value.visibility)
         // The window ends; the core resumes the receiver with its old settings.
         s.model.apply(listOf(NodeEvent.PairingFinished(window, PairingResult.Cancelled)))
         s.model.apply(listOf(NodeEvent.ReceiverStarted(resumedReceiver)))
+        asking.await()
         runCurrent()
+        val calls = s.core.calls
+        assertTrue(calls.indexOf(FakeCoreClient.Call.Cancel(window)) < calls.indexOfFirst { it is FakeCoreClient.Call.Pair })
+        assertNotEquals(window, s.model.state.value.pairing?.operation)
+        assertEquals(PairingFlow(PairingFlow.Phase.Asking("Maya's phone")), s.model.state.value.pairingFlow)
         assertTrue("Off stops the resumed receiver", FakeCoreClient.Call.StopReceiving in s.core.calls)
         assertNull(s.model.state.value.receiver)
         assertEquals(1, s.core.starts().size)
@@ -1206,26 +1220,36 @@ class AppModelTest {
     }
 
     /**
-     * Review of C1 (#1): a second tap on "Wait for a device" while the first
-     * call runs is refused, and does not end the hold the first one holds.
+     * Review of C1 (#1): a second window asked for while the first call runs
+     * opens no second one (it waits for the first, with no banner), and
+     * does not end the hold the first one holds.
      */
     @Test
-    fun secondWindowWhileTheFirstOpensIsRefusedAndKeepsTheHold() = runTest {
+    fun secondWindowWhileTheFirstOpensSharesItAndKeepsTheHold() = runTest {
         val s = makeModel(io = Dispatchers.IO)
         s.model.finishOnboarding()
         val gate = s.core.holdNext("openPairingWindow")
         val first = async { s.model.openPairingWindow() }
         gate.reached()
-        s.model.openPairingWindow()
-        assertEquals("Finish pairing first", s.model.state.value.banner?.title)
+        val second = async { s.model.openPairingWindow() }
+        runCurrent()
+        assertFalse("the second waits for the first", second.isCompleted)
+        assertNull(s.model.state.value.banner)
         assertTrue(s.model.state.value.pairingWindowActive)
-        // The core may be pausing the receiver right now: a change waits.
-        s.model.setVisibility(ReceiveVisibility.OFF)
+        // The core may be pausing the receiver right now: a change waits
+        // (behind the window's open, then for the window's end).
+        val off = async { s.model.setVisibility(ReceiveVisibility.OFF) }
+        runCurrent()
         assertFalse(FakeCoreClient.Call.StopReceiving in s.core.calls)
         gate.open()
         first.await()
+        second.await()
+        off.await()
         assertEquals(1, s.core.calls.count { it == FakeCoreClient.Call.OpenPairingWindow })
         assertTrue(s.model.state.value.pairingWindowActive)
+        assertEquals(ReceiveVisibility.OFF, s.model.state.value.visibility)
+        assertFalse("Off waits for the window's end", FakeCoreClient.Call.StopReceiving in s.core.calls)
+        assertNull(s.model.state.value.banner)
     }
 
     /** A window the core refuses ends the hold, and a change made meanwhile applies. */
@@ -1242,18 +1266,28 @@ class AppModelTest {
         assertTrue(FakeCoreClient.Call.StopReceiving in s.core.calls)
     }
 
-    /** A pairing request that runs refuses a window (one pairing on screen, with its Cancel). */
+    /**
+     * A pairing request that runs opens no window, neither from a call nor
+     * from the pairing screen appearing (one pairing on screen, with its
+     * Cancel), and says nothing about it: the screen shows the request.
+     */
     @Test
-    fun windowIsRefusedWhileAPairingRequestRuns() = runTest {
+    fun windowIsNotOpenedWhileAPairingRequestRuns() = runTest {
         val s = makeModel()
         s.model.start()
+        s.model.finishOnboarding()
         advanceUntilIdle()
         s.model.pair(SendTarget.Nearby("dropumi-00000001"), "Maya's phone")
         val request = requireNotNull(s.model.state.value.pairing).operation
         s.model.openPairingWindow()
+        s.model.enterPairingScreen()
+        advanceUntilIdle()
         assertTrue(s.core.calls.none { it == FakeCoreClient.Call.OpenPairingWindow })
         assertEquals(request, s.model.state.value.pairing?.operation)
+        assertEquals(PairingFlow(PairingFlow.Phase.Asking("Maya's phone")), s.model.state.value.pairingFlow)
         assertFalse(s.model.state.value.pairingWindowActive)
+        assertNull(s.model.state.value.banner)
+        s.model.leavePairingScreen()
         // Once it has ended, a window can open.
         s.model.apply(listOf(NodeEvent.PairingFinished(request, PairingResult.Cancelled)))
         s.model.openPairingWindow()

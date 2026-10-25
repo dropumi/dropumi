@@ -18,6 +18,10 @@
 //   transfer service on Send and Accept, on OfferSent and TransferAccepted
 //   while in front, and when the activity leaves. A refused start keeps the
 //   transfer; its card says it may pause.
+// - Pairing (Pairing.kt): only `PairingFinished(Paired)` means paired; the
+//   model never answers a code or adds trust by itself. Showing the pairing
+//   screen makes this device ready to pair; an attempt that reached a code
+//   never makes it ready again without a tap.
 
 package io.github.dropumi.appstate
 
@@ -32,8 +36,10 @@ import io.github.dropumi.core.files.ExportRules
 import io.github.dropumi.core.files.ReceivedExporter
 import io.github.dropumi.core.files.ReceivedFile
 import io.github.dropumi.ffi.AcceptMode
+import io.github.dropumi.ffi.CodePurpose
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.DropumiException
+import io.github.dropumi.ffi.ErrorCode
 import io.github.dropumi.ffi.FileStatus
 import io.github.dropumi.ffi.IdentityInfo
 import io.github.dropumi.ffi.NearbyPeer
@@ -56,6 +62,8 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -71,6 +79,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 
 /** A notice at the top of the screen. Two banners are equal only if they are the same notice. */
 data class Banner(
@@ -81,7 +90,7 @@ data class Banner(
     val id: Long = nextId.incrementAndGet(),
 ) {
     enum class Style { INFO, WARNING, DANGER }
-    enum class Action { RETRY_RECEIVING, OPEN_EVERYONE, OPEN_SETTINGS }
+    enum class Action { RETRY_RECEIVING, OPEN_EVERYONE, OPEN_SETTINGS, OPEN_PAIRING }
 
     private companion object {
         val nextId = AtomicLong()
@@ -120,6 +129,15 @@ data class PairingSession(
     val port: UShort? = null,
     val expiresAtMs: Long? = null,
     val result: PairingResult? = null,
+    /**
+     * The device on the other end, once connected: only a claim until
+     * `PairingFinished(Paired)`, and never shown as paired before.
+     */
+    val peer: PeerInfo? = null,
+    /** A code was shown for this attempt (`SessionCode` or a code prompt). */
+    val reachedCode: Boolean = false,
+    /** When that code expires (the core's wall clock, in milliseconds). */
+    val codeExpiresAtMs: Long? = null,
 ) {
     sealed interface Role {
         /** This device asked another one. */
@@ -152,6 +170,8 @@ data class AppState(
     val active: List<TransferRecord> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
     val pairing: PairingSession? = null,
+    /** What the pairing screen shows. */
+    val pairingFlow: PairingFlow = PairingFlow(),
     val draft: List<OutgoingFile> = emptyList(),
     val isInBackground: Boolean = false,
     val banner: Banner? = null,
@@ -161,9 +181,9 @@ data class AppState(
     /** This device's advertisement; GateClosed means browse-only (ADR-0013 D5). */
     val advertising: AdvertiseState = AdvertiseState.GateClosed,
     /**
-     * A pairing window is opening or open, or the core is resuming the
-     * receiver the window paused. Receiving changes made meanwhile are kept
-     * and applied once it is over.
+     * This device's pairing window is opening or open, or the core is
+     * resuming the receiver the window paused. Receiving changes made
+     * meanwhile are kept and applied once it is over.
      */
     val pairingWindowActive: Boolean = false,
     /** A rename of this device is under way (it stops and restarts the receiver). */
@@ -266,11 +286,8 @@ class AppModel(
      * receiver alone, and then makes it match the settings of the moment.
      */
 
-    /** openPairingWindow() calls under way. */
+    /** Window opens under way (the core call, queued behind the receiver changes). */
     private var windowStarts = 0
-
-    /** pair() calls under way. */
-    private var pairStarts = 0
 
     /** The open window's operation; cleared only by that operation's PairingFinished. */
     private var windowOperation: ULong? = null
@@ -281,6 +298,67 @@ class AppModel(
     /** The window ended and the core is resuming the receiver it paused. */
     private var resumeExpected = false
     private var resumeEpoch = 0
+
+    /*
+     * The pairing screen (a port of the Apple app's design). Showing it
+     * makes this device ready to pair (it opens a window); tapping a device
+     * closes that window and asks the device. Each verdict comes from
+     * PairingClassifier.
+     */
+
+    /** Pairing screens on show. */
+    private var pairingScreenClients = 0
+
+    /**
+     * Pairing screens that went away only because the activity is being
+     * recreated (a rotation): they come back at once, so this device stays
+     * ready to pair with the same window. Bounded by [RECREATE_WAIT_MS].
+     */
+    private var screensReturning = 0
+    private var returnEpoch = 0
+
+    /** The window was closed for the background: it opens again in front, if the screen is still shown. */
+    private var reopenOnActive = false
+
+    /**
+     * An outcome the pairing screen shows when it is back: it came while no
+     * pairing screen was shown, or the screen was only hidden (another tab).
+     */
+    private var outcomeKeptWhileAway = false
+
+    /** A tap is closing this device's window or starting the request. */
+    private var pairStarting = false
+
+    /** Cancel was tapped while [pairStarting]. */
+    private var requestAborted = false
+
+    /** A window opening: waiting for the one before, or the core call. */
+    private var windowOpenJob: Job? = null
+
+    /** Counts window opens, so a close knows a newer one began. */
+    private var windowAttempt = 0
+
+    /** Why the opening window is to be closed once it is registered. */
+    private var pendingWindowCancel: PairingCancelReason? = null
+
+    /** The opening window was closed and then asked for again: it opens once the first has ended. */
+    private var reopenAfterOpening = false
+
+    /** How the last window ended; unknown again once the next one starts opening. */
+    private var lastWindowResult: PairingResult? = null
+
+    /** Why this device cancelled each of its pairing operations. */
+    private val cancelReasons = HashMap<ULong, PairingCancelReason>()
+
+    /** This device's answer to each code, written before it is sent: the result can arrive before the call returns. */
+    private val codeAnswers = HashMap<ULong, Boolean>()
+
+    /** Waits for a pairing condition (see [waitUntil]). */
+    private class Waiter(val ready: () -> Boolean) {
+        val done = CompletableDeferred<Unit>()
+    }
+
+    private val waiters = mutableListOf<Waiter>()
 
     private var renamesUnderWay = 0
 
@@ -337,6 +415,13 @@ class AppModel(
     fun enterBackground() {
         if (_state.value.isInBackground) return
         update { copy(isInBackground = true) }
+        // A pairing window nobody is pairing through closes (it opens again
+        // when the app is back in front on the pairing screen); a code
+        // comparison under way is kept.
+        if (windowActive && !windowEngaged && windowCloseReason == null) {
+            reopenOnActive = screenShown
+            beginClosingWindow(PairingCancelReason.BACKGROUND)
+        }
         chainReceiver { stopAcceptingInBackground() }
     }
 
@@ -353,9 +438,13 @@ class AppModel(
         quietly { core.stopAccepting() }
     }
 
-    /** The app is in front again. */
+    /** The app is in front again. Still on the pairing screen, this device gets ready to pair again, unless a result came meanwhile. */
     suspend fun becomeActive() {
         update { copy(isInBackground = false) }
+        if (reopenOnActive) {
+            reopenOnActive = false
+            requestWindow()
+        }
         if (_state.value.onboarded) applyVisibility()
         takeSharedItems()
         // In front, a service start is allowed: running transfers get the
@@ -396,6 +485,7 @@ class AppModel(
     }
 
     private suspend fun renameNow(trimmed: String) {
+        if (!pairingLeavesIdentityAlone("The name was not changed")) return
         val wasReceiving = _state.value.receiver != null
         if (wasReceiving) stopReceivingAndWait()
         val before = _state.value.identity?.name
@@ -416,6 +506,7 @@ class AppModel(
     fun showOnboardingPage(page: Int) = update { copy(onboardingPage = page) }
 
     suspend fun resetIdentity() {
+        if (!pairingLeavesIdentityAlone("The identity was not reset")) return
         val wasReceiving = _state.value.receiver != null
         if (wasReceiving) stopReceivingAndWait()
         val before = _state.value.identity?.fingerprint
@@ -432,6 +523,22 @@ class AppModel(
             if (now != null && now != before) showNewIdentity() else show(e, "The identity was not reset")
         }
         if (wasReceiving) applyVisibility()
+    }
+
+    /**
+     * The core refuses identity changes while pairing (`check_quiet`).
+     * Waits for a window this device is closing (the pairing screen was just
+     * left) and for the receiver it paused; says so, and returns false,
+     * while pairing is under way.
+     */
+    private suspend fun pairingLeavesIdentityAlone(title: String): Boolean {
+        if (windowCloseReason != null) waitUntil(WINDOW_CLOSE_WAIT_MS) { windowGone }
+        if (pairStarting || requestRunning || windowActive) {
+            update { copy(banner = Banner(Banner.Style.WARNING, title, "Pairing is under way. Finish or stop it first.")) }
+            return false
+        }
+        if (pairingHold) waitUntil(RESUME_WAIT_MS) { !pairingHold }
+        return true
     }
 
     private fun showNewIdentity() = update {
@@ -523,9 +630,11 @@ class AppModel(
     private fun syncPairingHold(reconcile: Boolean = true) {
         val held = pairingHold
         val was = _state.value.pairingWindowActive
-        if (held == was) return
-        update { copy(pairingWindowActive = held) }
-        if (was && reconcile) chainReceiver { matchReceiver() }
+        if (held != was) {
+            update { copy(pairingWindowActive = held) }
+            if (was && reconcile) chainReceiver { matchReceiver() }
+        }
+        checkWaiters()
     }
 
     /**
@@ -850,6 +959,11 @@ class AppModel(
             startTransferServiceIfNeeded()
         }
         update { copy(answering = answering + id) }
+        // A code answer is noted first: the pairing can end before the call
+        // returns, and only this device's answer tells "you said no" from
+        // "the other device said no".
+        val pairingOperation = (prompt as? Prompt.Code)?.takeIf { it.purpose == CodePurpose.PAIRING }?.operation
+        if (pairingOperation != null) codeAnswers[pairingOperation] = yes
         try {
             when (prompt) {
                 is Prompt.Offer -> work { core.answerOffer(id, yes) }
@@ -858,10 +972,12 @@ class AppModel(
             // Waiting for PromptClosed; a prompt closed meanwhile is not marked.
             update { if (prompts.any { it.promptId == id }) copy(answered = answered + id) else this }
         } catch (_: DropumiException.PromptNotFound) {
+            if (pairingOperation != null) codeAnswers.remove(pairingOperation)
             setPrompts { filterNot { it.promptId == id } }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (pairingOperation != null) codeAnswers.remove(pairingOperation)
             show(e, "The answer was not sent")
         } finally {
             update { copy(answering = answering - id) }
@@ -911,94 +1027,570 @@ class AppModel(
 
     // Pairing
 
+    /** What the pairing screen shows now. */
+    private val flow: PairingFlow get() = _state.value.pairingFlow
+
+    private fun setFlow(value: PairingFlow) = update { copy(pairingFlow = value) }
+
+    private fun setPhase(phase: PairingFlow.Phase) = update { copy(pairingFlow = pairingFlow.copy(phase = phase)) }
+
     /**
-     * Asks [target] to pair. Refused while another pairing (a window or a
-     * request) is starting or running: there is one pairing on screen, and
-     * its Cancel must stay reachable.
+     * The pairing screen appeared. The first one makes this device ready to
+     * pair (it opens a window), unless this device is already pairing, or an
+     * outcome that came meanwhile is still to be seen. A screen that comes
+     * back after its activity was recreated ([pairingScreenRecreating])
+     * finds everything as it was. Browsing is the screen's own
+     * (BrowseWhileVisible), so it follows the activity's lifecycle.
+     */
+    fun enterPairingScreen() {
+        pairingScreenClients += 1
+        if (screensReturning > 0) {
+            screensReturning -= 1
+            return
+        }
+        if (pairingScreenClients != 1) return
+        val away = outcomeKeptWhileAway
+        outcomeKeptWhileAway = false
+        // A request started just before the screen appeared, or a device
+        // pairing with this one: the screen shows it.
+        if (pairStarting || requestRunning || windowEngaged) return
+        if (showingResult && away) return
+        setFlow(PairingFlow(note = if (away) flow.note else null))
+        requestWindow()
+    }
+
+    /**
+     * The pairing screen went away. The last one closes this device's
+     * window, unless a device is pairing through it. A request keeps
+     * running; an outcome that comes meanwhile is shown when the screen is
+     * back. [hidden]: the screen is only hidden (another tab is shown), so
+     * an outcome on it is kept for its return.
+     */
+    fun leavePairingScreen(hidden: Boolean = false) {
+        if (pairingScreenClients == 0) return
+        pairingScreenClients -= 1
+        if (screenShown) return
+        lastScreenGone(hidden)
+    }
+
+    /**
+     * The pairing screen went away only because its activity is being
+     * recreated (a rotation, a fold, a theme change): it comes back at once,
+     * and this device stays ready to pair with the same window. If it does
+     * not come back within [RECREATE_WAIT_MS], it counts as left.
+     */
+    fun pairingScreenRecreating() {
+        if (pairingScreenClients == 0) return
+        pairingScreenClients -= 1
+        screensReturning += 1
+        val epoch = ++returnEpoch
+        scope.launch {
+            delay(RECREATE_WAIT_MS)
+            if (returnEpoch != epoch || screensReturning == 0) return@launch
+            screensReturning = 0
+            if (pairingScreenClients == 0) lastScreenGone(hidden = false)
+        }
+    }
+
+    private fun lastScreenGone(hidden: Boolean) {
+        reopenOnActive = false
+        if (windowActive && !windowEngaged) beginClosingWindow(PairingCancelReason.LEAVING)
+        when (flow.phase) {
+            is PairingFlow.Phase.Finished, is PairingFlow.Phase.Paused ->
+                // A prompt is drawn over the screen and never removes it;
+                // checked as on the Apple app all the same.
+                if (hidden || _state.value.currentPrompt != null) outcomeKeptWhileAway = true else setFlow(PairingFlow())
+            PairingFlow.Phase.Opening, is PairingFlow.Phase.Waiting -> setPhase(PairingFlow.Phase.Idle)
+            PairingFlow.Phase.Idle, is PairingFlow.Phase.Switching, is PairingFlow.Phase.Asking, PairingFlow.Phase.Comparing -> Unit
+        }
+    }
+
+    /** Start again, Try again, Pair another device: this device gets ready to pair again. */
+    fun startWaiting() {
+        if (_state.value.pairing?.result != null) update { copy(pairing = null) }
+        outcomeKeptWhileAway = false
+        setFlow(PairingFlow())
+        requestWindow()
+    }
+
+    /** Stop: this device is no longer ready to pair. The screen then goes away. */
+    fun stopPairing() {
+        reopenOnActive = false
+        setFlow(PairingFlow())
+        if (windowActive) beginClosingWindow(PairingCancelReason.USER)
+    }
+
+    /**
+     * Asks another device to pair (a tap). A tap while this device is
+     * already pairing is ignored. This device's own window closes first: it
+     * is the one asking now.
+     */
+    fun startPairing(target: SendTarget, name: String) {
+        if (!beginRequest(name)) return
+        scope.launch { runRequest(target, name) }
+    }
+
+    /**
+     * [startPairing], returning once the core has answered (the interop
+     * tests call it). Without the pairing screen, a request that cannot
+     * start shows a banner.
      */
     suspend fun pair(target: SendTarget, name: String) {
-        if (refusedWhilePairing()) return
-        pairStarts += 1
+        if (!beginRequest(name)) return
+        runRequest(target, name)
+    }
+
+    /** The part of a tap that runs at once, so a second tap finds it. */
+    private fun beginRequest(name: String): Boolean {
+        if (pairStarting || requestRunning || windowEngaged) return false
+        pairStarting = true
+        requestAborted = false
+        outcomeKeptWhileAway = false
+        setFlow(PairingFlow(if (windowActive) PairingFlow.Phase.Switching(name) else PairingFlow.Phase.Asking(name)))
+        return true
+    }
+
+    private suspend fun runRequest(target: SendTarget, name: String) {
         try {
-            startOperation({ core.pair(target) }) { op ->
-                update { copy(pairing = PairingSession(op.id, PairingSession.Role.Initiator(name))) }
+            // The core takes a request while the window is open; it is
+            // closed first so that nothing else uses it meanwhile. A device
+            // that paired with this one meanwhile is shown instead.
+            if (windowActive && closeOwnWindow(PairingCancelReason.DIALING) is PairingResult.Paired) return
+            if (requestAborted) {
+                pairStarting = false
+                setFlow(PairingFlow(note = PairingOutcome.Cancelled))
+                requestWindow()
+                return
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            show(e, "Pairing could not start")
+            setPhase(PairingFlow.Phase.Asking(name))
+            var request: ULong? = null
+            try {
+                startOperation({ core.pair(target) }) { op ->
+                    request = op.id
+                    update { copy(pairing = PairingSession(op.id, PairingSession.Role.Initiator(name))) }
+                    pairStarting = false
+                    // Prompts first: a kept end is then classified with the code.
+                    codePromptsShown(op.id)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pairStarting = false
+                if (screenShown) {
+                    val note = if (requestAborted) PairingOutcome.Cancelled else PairingClassifier.classifyRequestError(e, name)
+                    setFlow(PairingFlow(note = note))
+                    requestWindow()
+                } else {
+                    setFlow(PairingFlow())
+                    show(e, "Pairing could not start")
+                }
+                return
+            }
+            val id = request
+            if (requestAborted && id != null) cancelOperation(id, PairingCancelReason.USER)
         } finally {
-            pairStarts -= 1
+            pairStarting = false
         }
     }
 
     /**
-     * Lets one device pair with this one for five minutes. Refused like
-     * [pair]. The core pauses a running receiver before the call returns.
+     * Cancel, while asking a device: this device gets ready to pair again,
+     * with "Pairing cancelled.". On this device's window: Stop.
+     */
+    fun cancelPairing() {
+        if (pairStarting) {
+            requestAborted = true
+            return
+        }
+        val session = _state.value.pairing
+        if (session == null || session.result != null || session.operation !in operations) {
+            update { copy(pairing = null) }
+            // Nothing is asking any more: this device gets ready again.
+            val phase = flow.phase
+            if (phase is PairingFlow.Phase.Switching || phase is PairingFlow.Phase.Asking) {
+                setFlow(PairingFlow(note = PairingOutcome.Cancelled))
+                requestWindow()
+            }
+            return
+        }
+        cancelOperation(session.operation, PairingCancelReason.USER)
+    }
+
+    /** Done: the outcome was seen. */
+    fun dismissPairing() {
+        if (_state.value.pairing?.result != null) update { copy(pairing = null) }
+        outcomeKeptWhileAway = false
+        setFlow(PairingFlow())
+    }
+
+    /**
+     * Lets one device pair with this one for five minutes, without the
+     * pairing screen (which opens its own window), and returns once the
+     * core has answered (the interop tests call it). The core pauses a
+     * running receiver before the call returns and resumes it when the
+     * window ends; receiving settings wait until then (the pairing hold).
      */
     suspend fun openPairingWindow() {
-        if (refusedWhilePairing()) return
-        windowStarts += 1
-        windowPausedReceiver = false
-        syncPairingHold()
-        try {
-            startOperation({ core.openPairingWindow(PAIRING_WINDOW_MINUTES) }) { op ->
-                // Set before the events that came early (even its end) are applied.
-                windowOperation = op.id
-                val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
-                update { copy(pairing = PairingSession(op.id, PairingSession.Role.Window, expiresAtMs = expires)) }
+        if (pairStarting || requestRunning) return
+        val window = windowOperation
+        if (windowOpenJob == null && (window == null || cancelReasons.containsKey(window))) {
+            setFlow(PairingFlow(PairingFlow.Phase.Opening))
+            startWindowOpen(forScreen = false)
+        }
+        windowOpenJob?.join()
+    }
+
+    /**
+     * The pairing screen wants this device ready to pair. Only these ask:
+     * the screen appearing, Start again, a request of this device that ended
+     * before a code, and the app back in front on the screen.
+     */
+    private fun requestWindow() {
+        val s = _state.value
+        if (!screenShown || !s.onboarded || pairStarting || requestRunning) return
+        if (s.isInBackground) {
+            reopenOnActive = true
+            return
+        }
+        val window = windowOperation
+        if (window != null && !cancelReasons.containsKey(window)) {
+            // Already open (without the screen).
+            val session = s.pairing
+            val expires = session?.expiresAtMs
+            when {
+                windowEngaged -> setPhase(PairingFlow.Phase.Comparing)
+                session != null && session.operation == window && session.port != null && expires != null ->
+                    setPhase(PairingFlow.Phase.Waiting(expires))
+                else -> setPhase(PairingFlow.Phase.Opening)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // Refused before the core paused anything.
+            return
+        }
+        setPhase(PairingFlow.Phase.Opening)
+        if (windowOpenJob != null) {
+            // One is opening; if it is being closed, the next opens after it.
+            if (pendingWindowCancel != null) reopenAfterOpening = true
+            return
+        }
+        startWindowOpen(forScreen = true)
+    }
+
+    private fun startWindowOpen(forScreen: Boolean) {
+        windowAttempt += 1
+        pendingWindowCancel = null
+        reopenAfterOpening = false
+        // A close of this window must not report how an earlier one ended.
+        lastWindowResult = null
+        // Registered before it runs: on the main thread a launch can run at once.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
+            try {
+                // Off the caller's stack: it may be applying an event.
+                yield()
+                openWindowWhenFree(forScreen)
+            } finally {
+                if (windowOpenJob === self) windowOpenJob = null
+                checkWaiters()
+            }
+            if (reopenAfterOpening) {
+                reopenAfterOpening = false
+                requestWindow()
+            }
+        }
+        windowOpenJob = job
+        checkWaiters()
+        job.start()
+    }
+
+    private suspend fun openWindowWhenFree(forScreen: Boolean) {
+        // The window before may still be ending, or resuming the receiver it paused.
+        waitUntil(RESUME_WAIT_MS) { windowOperation == null && !resumeExpected }
+        // Closed (or no longer wanted) before it opened.
+        if (pendingWindowCancel != null || (forScreen && !wantsWindow)) return
+        if (windowOperation != null) {
+            // The window before never reported its end.
+            setPhase(PairingFlow.Phase.Paused(PairingOutcome.CouldNotWait(ErrorCatalog.text(ErrorCode.BUSY).message)))
+            return
+        }
+        windowStarts += 1
+        syncPairingHold()
+        // Behind the receiver changes under way, which the core refuses once the window is open.
+        chainReceiver { openWindowNow(forScreen) }.join()
+    }
+
+    private suspend fun openWindowNow(forScreen: Boolean) {
+        try {
+            // A receiver that is still stopping would stop during the window and pass for its pause.
+            if (_state.value.receiverStopping) waitUntil(STOP_WAIT_MS) { !_state.value.receiverStopping }
+            // Only a stop from here on is this window's pause.
             if (windowOperation == null) windowPausedReceiver = false
-            show(e, "Pairing could not start")
+            var opened: ULong? = null
+            try {
+                startOperation({ core.openPairingWindow(PAIRING_WINDOW_MINUTES) }) { op ->
+                    // Set before the events that came early (even its end) are applied.
+                    opened = op.id
+                    windowOperation = op.id
+                    lastWindowResult = null
+                    val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
+                    update { copy(pairing = PairingSession(op.id, PairingSession.Role.Window, expiresAtMs = expires)) }
+                    // Prompts first: a kept end is then classified with the code.
+                    codePromptsShown(op.id)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Refused before the core paused anything.
+                if (windowOperation == null) windowPausedReceiver = false
+                // Unless it was closed meanwhile, the screen says why.
+                if (pendingWindowCancel == null) {
+                    setPhase(PairingFlow.Phase.Paused(PairingClassifier.classifyWindowError(e)))
+                    if (!screenShown) show(e, "Pairing could not start")
+                }
+                return
+            }
+            val id = opened ?: return
+            // Closed while it opened, or no longer wanted: closed now.
+            val reason = pendingWindowCancel ?: if (forScreen && !wantsWindow) PairingCancelReason.LEAVING else null
+            pendingWindowCancel = null
+            if (reason != null) cancelOperation(id, reason)
         } finally {
             windowStarts -= 1
             syncPairingHold()
         }
     }
 
-    private fun refusedWhilePairing(): Boolean {
-        val session = _state.value.pairing
-        val busy = pairStarts > 0 || pairingHold || (session != null && session.result == null)
-        if (!busy) return false
-        update { copy(banner = Banner(Banner.Style.INFO, "Finish pairing first", "Another pairing is under way. Finish or cancel it first.")) }
-        return true
+    /** Starts closing this device's window, opening or open. At once, so a window asked for next finds this one closing. */
+    private fun beginClosingWindow(reason: PairingCancelReason) {
+        reopenAfterOpening = false
+        windowOperation?.let { cancelOperation(it, reason) }
+        // Closed as soon as the core has opened it.
+        if (windowOpenJob != null && pendingWindowCancel == null) pendingWindowCancel = reason
     }
 
-    /** The window's operation ended: the core resumes the receiver it paused, if any. */
-    private fun windowEnded() {
+    /**
+     * Closes this device's window, opening or open, and waits until it has
+     * ended (bounded). Returns how it ended, or null if it did not say in
+     * time or a newer window began meanwhile.
+     */
+    private suspend fun closeOwnWindow(reason: PairingCancelReason): PairingResult? {
+        beginClosingWindow(reason)
+        val attempt = windowAttempt
+        waitUntil(WINDOW_CLOSE_WAIT_MS) { windowGone || windowAttempt != attempt }
+        return if (windowGone) lastWindowResult else null
+    }
+
+    /** Cancels one of this device's pairing operations, once, noting why. */
+    private fun cancelOperation(operation: ULong, reason: PairingCancelReason) {
+        if (cancelReasons.containsKey(operation)) return
+        val handle = operations[operation] ?: return
+        cancelReasons[operation] = reason
+        scope.launch { quietly { handle.cancel() } }
+    }
+
+    /** The window's operation ended: the core resumes the receiver it paused, if any, and the hold lasts until it has. */
+    private fun windowEnded(result: PairingResult?) {
         windowOperation = null
+        lastWindowResult = result
         if (windowPausedReceiver) {
             windowPausedReceiver = false
-            resumeExpected = true
-            // Bounded: if the core's answer never comes (or was not for this
-            // window), the settings still apply.
-            val epoch = ++resumeEpoch
-            scope.launch {
-                delay(RESUME_WAIT_MS)
-                if (resumeExpected && resumeEpoch == epoch) {
-                    resumeExpected = false
-                    syncPairingHold()
+            // The resume can be applied first, when the end was reported
+            // before the window's call returned.
+            if (_state.value.receiver == null) {
+                resumeExpected = true
+                // Bounded: if the core's resume never comes (or was not for
+                // this window), the settings still apply.
+                val epoch = ++resumeEpoch
+                scope.launch {
+                    delay(RESUME_WAIT_MS)
+                    if (resumeExpected && resumeEpoch == epoch) {
+                        resumeExpected = false
+                        syncPairingHold()
+                    }
                 }
             }
         }
         syncPairingHold()
     }
 
-    fun cancelPairing() {
-        val session = _state.value.pairing
-        val handle = session?.let { operations[it.operation] }
-        if (handle == null) {
-            update { copy(pairing = null) }
-            return
+    /** A pairing screen is shown, or is coming back after its activity was recreated. */
+    private val screenShown: Boolean get() = pairingScreenClients > 0 || screensReturning > 0
+
+    /**
+     * The pairing screen is shown, in front, nothing else is pairing, and it
+     * shows no result: a result waits for a tap (Start again, Try again), so
+     * no window opens behind it.
+     */
+    private val wantsWindow: Boolean
+        get() {
+            val s = _state.value
+            return screenShown && !s.isInBackground && s.onboarded && !pairStarting && !requestRunning && !showingResult
         }
-        scope.launch { quietly { handle.cancel() } }
+
+    /** The pairing screen shows a result card. */
+    private val showingResult: Boolean
+        get() = flow.phase is PairingFlow.Phase.Finished || flow.phase is PairingFlow.Phase.Paused
+
+    /** This device's request is running. */
+    private val requestRunning: Boolean
+        get() {
+            val session = _state.value.pairing ?: return false
+            return session.result == null && session.role is PairingSession.Role.Initiator
+        }
+
+    /** No window of this device is opening or open. */
+    private val windowGone: Boolean get() = windowOperation == null && windowOpenJob == null
+
+    private val windowActive: Boolean get() = !windowGone
+
+    /** A device is pairing through this device's window: it connected, or a code was shown. */
+    private val windowEngaged: Boolean
+        get() {
+            val window = windowOperation ?: return false
+            val session = _state.value.pairing ?: return false
+            return session.operation == window && (session.peer != null || session.reachedCode)
+        }
+
+    /** Why this device is closing its window, if it is. */
+    private val windowCloseReason: PairingCancelReason?
+        get() = windowOperation?.let { cancelReasons[it] } ?: if (windowOpenJob != null) pendingWindowCancel else null
+
+    // Pairing events
+
+    /** Code prompts the core opened for this operation before its start returned. */
+    private fun codePromptsShown(operation: ULong) {
+        for (prompt in _state.value.prompts) {
+            if (prompt is Prompt.Code && prompt.operation == operation) {
+                pairingEngaged(operation, prompt.peer, code = true, codeExpiresAtMs = prompt.expiresAtMs.toLong())
+            }
+        }
     }
 
-    fun dismissPairing() = update { copy(pairing = null) }
+    /** A device is pairing through the current attempt: it connected, or a code was shown. Its name stays a claim. */
+    private fun pairingEngaged(operation: ULong, peer: PeerInfo, code: Boolean, codeExpiresAtMs: Long? = null) {
+        val session = _state.value.pairing ?: return
+        if (session.operation != operation || session.result != null) return
+        update {
+            copy(
+                pairing = session.copy(
+                    peer = peer,
+                    reachedCode = session.reachedCode || code,
+                    codeExpiresAtMs = codeExpiresAtMs ?: session.codeExpiresAtMs,
+                ),
+            )
+        }
+        // An attempt this device is ending shows its own next step.
+        if (cancelReasons.containsKey(operation) || showingResult) return
+        setPhase(PairingFlow.Phase.Comparing)
+    }
+
+    /** This device's window listens. */
+    private fun windowListening(operation: ULong, port: UShort) {
+        val session = _state.value.pairing ?: return
+        if (session.operation != operation || session.role != PairingSession.Role.Window) return
+        val expires = clock() + PAIRING_WINDOW_MINUTES.toLong() * 60_000
+        update { copy(pairing = session.copy(port = port, expiresAtMs = expires)) }
+        if (flow.phase == PairingFlow.Phase.Opening && !cancelReasons.containsKey(operation)) {
+            setPhase(PairingFlow.Phase.Waiting(expires))
+        }
+    }
+
+    private fun pairingFinished(operation: ULong, result: PairingResult) {
+        operations.remove(operation)
+        val before = _state.value.pairing
+        val running = before != null && before.operation == operation && before.result == null
+        if (before?.operation == operation) update { copy(pairing = before.copy(result = result)) }
+        if (operation == windowOperation) windowEnded(result)
+        val session = _state.value.pairing
+        if (running && session != null) {
+            val facts = facts(session, result)
+            applyVerdict(PairingClassifier.classify(facts), facts)
+        }
+        codeAnswers.remove(operation)
+        cancelReasons.remove(operation)
+        scope.launch { refreshTrusted() }
+    }
+
+    private fun facts(session: PairingSession, result: PairingResult): PairingFacts {
+        val now = clock()
+        val answer = codeAnswers[session.operation]
+        val role = session.role
+        val name = (role as? PairingSession.Role.Initiator)?.name
+        val windowElapsed = role == PairingSession.Role.Window &&
+            (session.expiresAtMs?.let { now >= it - WINDOW_END_SLACK_MS } ?: false)
+        val codeExpired = answer == null && (session.codeExpiresAtMs?.let { now >= it - CODE_END_SLACK_MS } ?: false)
+        return PairingFacts(
+            role = role,
+            result = result,
+            reachedCode = session.reachedCode,
+            localAnswer = answer,
+            localCodeExpired = codeExpired,
+            windowElapsed = windowElapsed,
+            listening = session.port != null,
+            cancelReason = cancelReasons[session.operation],
+            name = name,
+        )
+    }
+
+    private fun applyVerdict(verdict: PairingVerdict, facts: PairingFacts) {
+        val shown = screenShown
+        when (verdict) {
+            // This device ended it: a tap goes on to ask, and the screen
+            // after Stop, or with no screen, shows nothing.
+            PairingVerdict.Silent -> if (facts.cancelReason == PairingCancelReason.USER || !shown) {
+                val phase = flow.phase
+                if (phase == PairingFlow.Phase.Opening || phase is PairingFlow.Phase.Waiting || phase == PairingFlow.Phase.Comparing) {
+                    setPhase(PairingFlow.Phase.Idle)
+                }
+            }
+            is PairingVerdict.WaitAgain -> {
+                setFlow(PairingFlow(note = verdict.note))
+                if (shown) requestWindow() else outcomeKeptWhileAway = true
+            }
+            is PairingVerdict.Paused -> {
+                setFlow(PairingFlow(PairingFlow.Phase.Paused(verdict.outcome)))
+                // A card waits for a tap, also when the app comes back to the
+                // front (the end can come after the background closed it).
+                reopenOnActive = false
+                if (!shown) outcomeKeptWhileAway = true
+            }
+            is PairingVerdict.Finished -> {
+                setFlow(PairingFlow(PairingFlow.Phase.Finished(verdict.outcome)))
+                reopenOnActive = false
+                if (!shown) outcomeKeptWhileAway = true
+            }
+        }
+    }
+
+    // Waiting
+
+    /**
+     * Waits until [ready] holds or [timeoutMs] has passed, and returns
+     * whether it holds. Nothing polls: the condition is checked after each
+     * event and wherever the pairing hold or a window open changes
+     * ([checkWaiters]).
+     */
+    private suspend fun waitUntil(timeoutMs: Long, ready: () -> Boolean): Boolean {
+        if (ready()) return true
+        val waiter = Waiter(ready)
+        waiters += waiter
+        val held = try {
+            withTimeoutOrNull(timeoutMs) { waiter.done.await() } != null
+        } finally {
+            waiters.remove(waiter)
+        }
+        // Off the stack of whatever met the condition (it may be applying an event).
+        yield()
+        return held
+    }
+
+    /** Resumes every wait whose condition now holds, each exactly once. */
+    private fun checkWaiters() {
+        for (waiter in waiters.toList()) {
+            if (waiter.ready()) {
+                waiters.remove(waiter)
+                waiter.done.complete(Unit)
+            }
+        }
+    }
 
     // Settings, banners, routes, history
 
@@ -1164,10 +1756,18 @@ class AppModel(
             }
             is NodeEvent.PeerLost -> update { copy(nearby = nearby.filterNot { it.instance == event.instance }) }
             is NodeEvent.Connected -> event.operation?.let { op ->
-                updateRecord({ it.operation == op }) { copy(peer = event.peer) }
+                if (hasRecord(op)) {
+                    updateRecord({ it.operation == op }) { copy(peer = event.peer) }
+                } else {
+                    pairingEngaged(op, event.peer, code = false)
+                }
             }
             is NodeEvent.SessionCode -> event.operation?.let { op ->
-                updateRecord({ it.operation == op }) { copy(peer = event.peer, sessionCode = event.code) }
+                if (hasRecord(op)) {
+                    updateRecord({ it.operation == op }) { copy(peer = event.peer, sessionCode = event.code) }
+                } else {
+                    pairingEngaged(op, event.peer, code = true)
+                }
             }
             is NodeEvent.OfferSent -> {
                 updateRecord({ it.operation == event.operation }) {
@@ -1203,26 +1803,17 @@ class AppModel(
                 copy(fileResults = fileResults + FileResult(event.index, event.status, null, null))
             }
             is NodeEvent.TransferFinished -> transferFinished(event)
-            is NodeEvent.PairingWindowOpened -> update {
-                copy(pairing = pairing?.takeIf { it.operation == event.operation }?.copy(port = event.port) ?: pairing)
-            }
-            is NodeEvent.PairingFinished -> {
-                operations.remove(event.operation)
-                update {
-                    copy(
-                        pairing = pairing?.takeIf { it.operation == event.operation }?.copy(result = event.result)
-                            ?: pairing,
-                    )
-                }
-                if (event.operation == windowOperation) windowEnded()
-                scope.launch { refreshTrusted() }
-            }
+            is NodeEvent.PairingWindowOpened -> windowListening(event.operation, event.port)
+            is NodeEvent.PairingFinished -> pairingFinished(event.operation, event.result)
             is NodeEvent.SessionClosed -> if (event.code == NOT_AUTHORIZED) noticeRefused(event.peer)
             is NodeEvent.Warning -> showWarning(event.message)
             is NodeEvent.EventsDropped -> Unit
             NodeEvent.ResyncRequired -> resync()
         }
+        checkWaiters()
     }
+
+    private fun hasRecord(operation: ULong): Boolean = _state.value.active.any { it.operation == operation }
 
     /**
      * A receiver started. The model's own starts already set it (this event
@@ -1310,9 +1901,13 @@ class AppModel(
     private fun promptOpened(prompt: Prompt) {
         if (_state.value.prompts.any { it.promptId == prompt.promptId }) return
         setPrompts { this + prompt }
-        if (prompt is Prompt.Offer) {
-            updateRecord({ it.direction == Direction.INCOMING && it.transferId == prompt.transferId }) {
+        when (prompt) {
+            is Prompt.Offer -> updateRecord({ it.direction == Direction.INCOMING && it.transferId == prompt.transferId }) {
                 copy(fileNames = prompt.files.map { it.name })
+            }
+            // A code for a start that has not returned is found when it does (codePromptsShown).
+            is Prompt.Code -> prompt.operation?.let { op ->
+                pairingEngaged(op, prompt.peer, code = true, codeExpiresAtMs = prompt.expiresAtMs.toLong())
             }
         }
     }
@@ -1489,10 +2084,14 @@ class AppModel(
      * not known: a device that isn't paired, a pairing request while no
      * pairing window is open (from paired devices too), a paired device
      * while a window is open, or an unreadable list of paired devices. So the
-     * notice says only that a device was refused, and never offers Everyone.
+     * notice says only that a device was refused and offers Pair a device;
+     * it never offers Everyone.
      */
     private fun noticeRefused(peer: PeerInfo?) {
         if (peer != null && peer.trusted) return
+        // While the pairing screen is shown or this device's window is
+        // opening or open, the pairing screen says what happened to it.
+        if (peer == null && (screenShown || windowActive)) return
         if (_state.value.banner != null) return
         val now = clock()
         val last = lastUnpairedNoticeMs
@@ -1503,7 +2102,8 @@ class AppModel(
                 Banner.Style.INFO,
                 "A device was refused",
                 "A device on this network tried to connect and was turned away. " +
-                    "To pair with it, choose Wait for a device under Pair a device first.",
+                    "If it was trying to pair, open Pair a device on both devices.",
+                Banner.Action.OPEN_PAIRING,
             )
         } else {
             Banner(
@@ -1544,7 +2144,7 @@ class AppModel(
             when {
                 result != null -> apply(NodeEvent.PairingFinished(op, result))
                 // Only finished operations are forgotten.
-                info == null && op == windowOperation -> windowEnded()
+                info == null && op == windowOperation -> windowEnded(null)
             }
         }
         if (resumeExpected && snapshot.receiver != null) {
@@ -1647,6 +2247,18 @@ class AppModel(
 
         /** How long the model waits for the core to resume the receiver a pairing window paused. */
         const val RESUME_WAIT_MS = 30_000L
+
+        /** How long the model waits for this device's window to report its end after a cancel. */
+        const val WINDOW_CLOSE_WAIT_MS = 12_000L
+
+        /** How long a pairing screen gone for an activity's recreation has to come back. */
+        const val RECREATE_WAIT_MS = 5_000L
+
+        /** A window ending this close to its expiry ended because its time was up. */
+        const val WINDOW_END_SLACK_MS = 2_000L
+
+        /** A code ending this close to its expiry ran out. */
+        const val CODE_END_SLACK_MS = 1_000L
         const val PAIRING_WINDOW_MINUTES = 5u
         const val UNPAIRED_NOTICE_INTERVAL_MS = 60_000L
         const val NOT_AUTHORIZED = "not_authorized"

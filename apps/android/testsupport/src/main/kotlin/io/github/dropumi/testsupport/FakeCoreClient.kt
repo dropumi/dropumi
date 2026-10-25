@@ -6,6 +6,10 @@
 // test that shows a transfer finishing does so only because the test pushed
 // that event, and such tests are labelled "UI state test (fake core)".
 //
+// By default a call only records itself and returns. After
+// scriptPairingLikeTheCore(), pairing windows and pairing requests behave
+// like the real core (crates/ffi/src/node.rs), as in the Apple app's fake.
+//
 // This module reaches the test APKs only (testImplementation and
 // androidTestImplementation); no app APK contains it (ADR-0013 D9).
 
@@ -21,6 +25,8 @@ import io.github.dropumi.ffi.NearbyPeer
 import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.NodeSnapshot
 import io.github.dropumi.ffi.OfferedFile
+import io.github.dropumi.ffi.PairingResult
+import io.github.dropumi.ffi.PeerInfo
 import io.github.dropumi.ffi.Prompt
 import io.github.dropumi.ffi.ReceiveOptions
 import io.github.dropumi.ffi.ReceivePolicy
@@ -37,13 +43,15 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 
-class FakeOperation(override val id: ULong) : CoreOperation {
+/** [onCancel] runs on every [cancel], on the caller's thread. */
+class FakeOperation(override val id: ULong, private val onCancel: ((ULong) -> Unit)? = null) : CoreOperation {
     @Volatile
     var cancelled = false
         private set
 
     override fun cancel() {
         cancelled = true
+        onCancel?.invoke(id)
     }
 }
 
@@ -93,7 +101,11 @@ class FakeCoreClient : CoreClient {
         data class Untrust(val fingerprint: String) : Call
         data object StartDiscovery : Call
         data object StopDiscovery : Call
+        data class Cancel(val operation: ULong) : Call
+        data object ResetIdentity : Call
     }
+
+    private enum class Kind { SEND, PAIR, WINDOW }
 
     private val channel = Channel<List<NodeEvent>>(Channel.UNLIMITED)
     override val events: Flow<List<NodeEvent>> = channel.receiveAsFlow()
@@ -121,6 +133,13 @@ class FakeCoreClient : CoreClient {
     private val gates = mutableMapOf<String, CallGate>()
     private val duringCall = mutableMapOf<String, (ULong) -> List<NodeEvent>>()
     private var currentFingerprint = FINGERPRINT
+    private var scripted = false
+    private var openWindow: ULong? = null
+    private var pausedReceiver: ReceiverInfo? = null
+    private var pairedDuringWindow = false
+    private val ended = mutableSetOf<ULong>()
+    private val kinds = mutableMapOf<ULong, Kind>()
+    private var callHook: ((Call) -> Unit)? = null
 
     /** Errors to throw from the next call of each method, by method name. */
     val failures: MutableMap<String, DropumiException> = mutableMapOf()
@@ -139,7 +158,13 @@ class FakeCoreClient : CoreClient {
     @Volatile
     var stopAcceptingEndsReceiver = false
 
-    /** Delivers events as the core would. Found and lost devices also update [nearbyPeers]. */
+    /**
+     * Delivers events as the core would. Found and lost devices also update
+     * [nearbyPeers]. After [scriptPairingLikeTheCore] it keeps the state the
+     * core keeps with them too: ReceiverStarted and ReceiverStopped update
+     * the receiver, and PairingFinished ends its operation. Ending the open
+     * window this way resumes nothing; [endWindow] resumes like the core.
+     */
     fun emit(vararg batch: NodeEvent) {
         synchronized(lock) {
             for (event in batch) {
@@ -149,11 +174,108 @@ class FakeCoreClient : CoreClient {
                         nearbyTable.add(event.peer)
                     }
                     is NodeEvent.PeerLost -> nearbyTable.removeAll { it.instance == event.instance }
+                    is NodeEvent.ReceiverStarted -> if (scripted) receiving = event.info
+                    is NodeEvent.ReceiverStopped -> if (scripted) receiving = null
+                    is NodeEvent.PairingFinished -> if (scripted) {
+                        ended.add(event.operation)
+                        if (event.operation == openWindow) {
+                            openWindow = null
+                            pausedReceiver = null
+                        }
+                    }
                     else -> Unit
                 }
             }
         }
         channel.trySend(batch.toList())
+    }
+
+    /**
+     * Called after each recorded call, outside the lock, so that a UI state
+     * scenario can react as a core would (for example, close a prompt once
+     * it is answered). Null by default; the fake core still never answers a
+     * prompt or creates trust by itself.
+     */
+    var onCall: ((Call) -> Unit)?
+        get() = synchronized(lock) { callHook }
+        set(value) = synchronized(lock) { callHook = value }
+
+    // Pairing like the core
+
+    /**
+     * Makes pairing behave like the core (`pairing_window`, `pair` and
+     * `finish_pairing` in crates/ffi/src/node.rs):
+     *
+     * - openPairingWindow marks the window open, pauses a running receiver
+     *   (ReceiverStopped(STOPPED)), then reports the window listening on
+     *   that receiver's port (PairingWindowOpened), all before it returns.
+     * - While the window is open, the core's refusals apply: starting or
+     *   changing the receiver, a second window, renaming and resetting the
+     *   identity. pair is accepted, as in the core ([pairCalledWhileWindowOpen]).
+     * - Cancelling the window ends it ([endWindow] with Cancelled);
+     *   cancelling a request delivers PairingFinished(Cancelled). An
+     *   operation that already ended ignores a cancel.
+     */
+    fun scriptPairingLikeTheCore() = synchronized(lock) { scripted = true }
+
+    /** The open window's operation, or null. */
+    val windowOperation: ULong? get() = synchronized(lock) { openWindow }
+
+    /** Whether pair was called while this device's window was open. */
+    val pairCalledWhileWindowOpen: Boolean get() = synchronized(lock) { pairedDuringWindow }
+
+    /**
+     * Ends a window like the core: PairingFinished first, then the receiver
+     * it paused resumes on its old settings (ReceiverStarted). With [resume]
+     * false nothing follows PairingFinished, so a test can deliver a failed
+     * resume, a late one, or none. Does nothing if the operation already ended.
+     */
+    fun endWindow(operation: ULong, result: PairingResult, resume: Boolean = true) {
+        val (ends, paused) = synchronized(lock) {
+            ended.add(operation) to (if (openWindow == operation) pausedReceiver else null)
+        }
+        if (!ends) return
+        emit(NodeEvent.PairingFinished(operation, result))
+        if (resume && paused != null) emit(NodeEvent.ReceiverStarted(paused))
+    }
+
+    /**
+     * A device connects to the open window and gets as far as the code, as
+     * the core reports it: Connected, SessionCode, then the code prompt, all
+     * for the window's operation. Returns the prompt, or null (and delivers
+     * nothing) when no window is open.
+     */
+    fun attemptOnWindow(
+        peer: PeerInfo = Fixtures.peer(),
+        code: String = "654321",
+        promptId: ULong = 2u,
+        expiresAtMs: ULong = Fixtures.inTwoMinutes(),
+    ): Prompt? {
+        val window = windowOperation ?: return null
+        val prompt = Fixtures.code(id = promptId, operation = window, code = code, peer = peer, expiresAtMs = expiresAtMs)
+        emit(NodeEvent.Connected(window, peer))
+        emit(NodeEvent.SessionCode(window, peer, code))
+        emit(NodeEvent.PromptOpened(prompt))
+        return prompt
+    }
+
+    /** Every cancel() on one of this fake's operations. */
+    private fun cancelled(operation: ULong) {
+        note(Call.Cancel(operation))
+        val (isScripted, kind, isWindow) = synchronized(lock) {
+            Triple(scripted, kinds[operation], openWindow == operation)
+        }
+        if (!isScripted) return
+        if (isWindow) {
+            endWindow(operation, PairingResult.Cancelled)
+        } else if (kind == Kind.PAIR && synchronized(lock) { ended.add(operation) }) {
+            emit(NodeEvent.PairingFinished(operation, PairingResult.Cancelled))
+        }
+    }
+
+    /** Throws [error] while this device's window is open, as the core refuses then. */
+    private fun refuseWhileWindowOpen(error: DropumiException) {
+        if (synchronized(lock) { openWindow != null }) throw error
     }
 
     val calls: List<Call> get() = synchronized(lock) { log.toList() }
@@ -179,7 +301,13 @@ class FakeCoreClient : CoreClient {
         return operation
     }
 
-    private fun note(call: Call) = synchronized(lock) { log.add(call) }
+    private fun note(call: Call) {
+        val hook = synchronized(lock) {
+            log.add(call)
+            callHook
+        }
+        hook?.invoke(call)
+    }
 
     private fun fail(method: String) {
         val error = synchronized(lock) { failures.remove(method) }
@@ -197,9 +325,10 @@ class FakeCoreClient : CoreClient {
         }
     }
 
-    private fun newOperation(): FakeOperation = synchronized(lock) {
-        FakeOperation(nextOperation).also {
+    private fun newOperation(kind: Kind): FakeOperation = synchronized(lock) {
+        FakeOperation(nextOperation, ::cancelled).also {
             operationsById[nextOperation] = it
+            kinds[nextOperation] = kind
             nextOperation++
         }
     }
@@ -215,6 +344,7 @@ class FakeCoreClient : CoreClient {
     override fun setDeviceName(name: String): IdentityInfo {
         fail("setDeviceName")
         gate("setDeviceName")
+        refuseWhileWindowOpen(DropumiException.Busy(NOT_QUIET))
         synchronized(lock) { deviceName = name }
         failAfterApplying("setDeviceName")
         return identity()
@@ -222,6 +352,8 @@ class FakeCoreClient : CoreClient {
 
     override fun resetIdentity(): IdentityInfo {
         fail("resetIdentity")
+        note(Call.ResetIdentity)
+        refuseWhileWindowOpen(DropumiException.Busy(NOT_QUIET))
         synchronized(lock) {
             currentFingerprint = if (currentFingerprint == FINGERPRINT) RESET_FINGERPRINT else FINGERPRINT
         }
@@ -270,6 +402,7 @@ class FakeCoreClient : CoreClient {
         fail("startReceiving")
         note(Call.StartReceiving(options))
         gate("startReceiving")
+        refuseWhileWindowOpen(DropumiException.Busy("a pairing window is open"))
         val info = ReceiverInfo(
             port = 47321u,
             instance = if (options.advertise) "dropumi-0000abcd" else null,
@@ -303,6 +436,11 @@ class FakeCoreClient : CoreClient {
 
     override fun setReceivePolicy(policy: ReceivePolicy, accept: AcceptMode): ReceiverInfo {
         note(Call.SetReceivePolicy(policy, accept))
+        refuseWhileWindowOpen(DropumiException.InvalidState("not receiving"))
+        synchronized(lock) {
+            // The core keeps the change, so a window resumes the receiver with it.
+            if (scripted) receiving = receiving?.copy(policy = policy, accept = accept, everyoneUntil = null)
+        }
         return ReceiverInfo(47321u, null, policy, accept, null)
     }
 
@@ -336,21 +474,39 @@ class FakeCoreClient : CoreClient {
     override fun send(target: SendTarget, items: List<SendItem>, allowUnverified: Boolean): CoreOperation {
         fail("send")
         note(Call.Send(target, items, allowUnverified))
-        return started("send", newOperation())
+        return started("send", newOperation(Kind.SEND))
     }
 
     override fun pair(target: SendTarget): CoreOperation {
         fail("pair")
+        synchronized(lock) { if (openWindow != null) pairedDuringWindow = true }
         note(Call.Pair(target))
         gate("pair")
-        return started("pair", newOperation())
+        return started("pair", newOperation(Kind.PAIR))
     }
 
     override fun openPairingWindow(minutes: UInt): CoreOperation {
         fail("openPairingWindow")
         note(Call.OpenPairingWindow)
         gate("openPairingWindow")
-        return started("openPairingWindow", newOperation())
+        // As in the core: the window is marked open before the receiver it
+        // pauses reports its stop, so a restart in between is refused.
+        refuseWhileWindowOpen(DropumiException.Busy("a pairing window is already open"))
+        val op = newOperation(Kind.WINDOW)
+        val (isScripted, paused) = synchronized(lock) {
+            if (scripted) {
+                openWindow = op.id
+                pausedReceiver = receiving
+                receiving = null
+            }
+            scripted to pausedReceiver
+        }
+        if (isScripted) {
+            if (paused != null) emit(NodeEvent.ReceiverStopped(ReceiverStopReason.STOPPED))
+            // The paused receiver's port, or the core's default one.
+            emit(NodeEvent.PairingWindowOpened(op.id, paused?.port ?: DEFAULT_PORT))
+        }
+        return started("openPairingWindow", op)
     }
 
     override fun snapshot(): NodeSnapshot = synchronized(lock) {
@@ -366,5 +522,10 @@ class FakeCoreClient : CoreClient {
 
         /** The fingerprint after resetIdentity(). */
         const val RESET_FINGERPRINT = "QRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCD"
+
+        /** The port the fake's receiver and windows listen on. */
+        val DEFAULT_PORT: UShort = 47321u
+
+        private const val NOT_QUIET = "stop receiving and wait for running operations first"
     }
 }

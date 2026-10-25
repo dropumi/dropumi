@@ -393,6 +393,7 @@ private fun BannerHost(state: AppState) {
                     everyoneConfirmation { scope.launch { model.setVisibility(ReceiveVisibility.EVERYONE) } },
                 )
                 Banner.Action.OPEN_SETTINGS -> router.select(Tab.SETTINGS)
+                Banner.Action.OPEN_PAIRING -> router.openPairing()
             }
         }
     }
@@ -400,6 +401,7 @@ private fun BannerHost(state: AppState) {
         Banner.Action.RETRY_RECEIVING -> "Try again"
         Banner.Action.OPEN_EVERYONE -> "Let everyone send for 10 minutes"
         Banner.Action.OPEN_SETTINGS -> "Open Settings"
+        Banner.Action.OPEN_PAIRING -> "Pair a device"
         null -> null
     }
     Box(
