@@ -12,9 +12,12 @@ import io.github.dropumi.appstate.SettingsStore
 import io.github.dropumi.core.discovery.AdvertiseState
 import io.github.dropumi.core.discovery.Advertising
 import io.github.dropumi.ffi.Direction
+import io.github.dropumi.ffi.ErrorCode
 import io.github.dropumi.ffi.NodeEvent
 import io.github.dropumi.ffi.OfferedFile
+import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.Progress
+import io.github.dropumi.ffi.PromptCloseReason
 import io.github.dropumi.ffi.TransferStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,11 +57,38 @@ enum class Scenario {
 
     /** Two documents handed over by the share target ([sharedItems]), waiting for a device. */
     SHARED_ITEMS,
+
+    /**
+     * Pairing like the core: Maya's phone and a device whose name hints at
+     * Studio Mac nearby, and this device on 192.168.1.20. Pair requests are
+     * never answered; the test delivers what the other device does.
+     */
+    PAIRING,
+
+    /** As PAIRING, with no device nearby. */
+    PAIRING_EMPTY,
+
+    /** As PAIRING; the device asked is not ready to pair (its pairing ends NOT_AUTHORIZED before a code). */
+    PAIRING_NOT_READY,
+
+    /**
+     * As PAIRING; the device asked shows a code (prompt 7). Once this device
+     * answers it, the core closes the prompt and the pairing ends
+     * PAIRING_REJECTED, as it does when anyone says no.
+     */
+    PAIRING_CODES,
     ;
 
     /** Content URIs waiting in the share hand-off when the model starts. */
     val sharedItems: List<String>
         get() = if (this == SHARED_ITEMS) listOf(SHARED_PHOTO, SHARED_NOTES) else emptyList()
+
+    /** This device's local IPv4 addresses (the model's localAddresses). */
+    val localAddresses: List<String>
+        get() = if (isPairing) listOf("192.168.1.20") else emptyList()
+
+    private val isPairing: Boolean
+        get() = this == PAIRING || this == PAIRING_EMPTY || this == PAIRING_NOT_READY || this == PAIRING_CODES
 
     /** The advertiser the model starts with. */
     fun advertising(): Advertising = if (this == ADVERTISING_OFF) Advertising.CLOSED else RegisteredAdvertising()
@@ -66,8 +96,34 @@ enum class Scenario {
     /** Sets up [core] and [settings]; the events wait in the fake core for the model's start. */
     fun configure(core: FakeCoreClient, settings: SettingsStore) {
         settings.onboarded = this != ONBOARDING
+        if (isPairing) core.scriptPairingLikeTheCore()
+        if (isPairing && this != PAIRING_EMPTY) {
+            core.emit(
+                NodeEvent.PeerFound(Fixtures.nearby("Maya's phone", "dropumi-00000001")),
+                NodeEvent.PeerFound(Fixtures.nearby("Studio Mac", "dropumi-00000002", hintAlias = "Studio Mac")),
+            )
+        }
         when (this) {
-            ONBOARDING, NEARBY_EMPTY, ADVERTISING_OFF, SHARED_ITEMS -> Unit
+            ONBOARDING, NEARBY_EMPTY, ADVERTISING_OFF, SHARED_ITEMS, PAIRING, PAIRING_EMPTY -> Unit
+            PAIRING_NOT_READY -> core.emitBeforeReturning("pair") { op ->
+                listOf(NodeEvent.PairingFinished(op, PairingResult.Failed(ErrorCode.NOT_AUTHORIZED)))
+            }
+            PAIRING_CODES -> {
+                var request: ULong? = null
+                core.emitBeforeReturning("pair") { op ->
+                    request = op
+                    listOf(NodeEvent.PromptOpened(Fixtures.code(id = CODE_PROMPT, operation = op)))
+                }
+                core.onCall = { call ->
+                    val op = request
+                    if (call is FakeCoreClient.Call.AnswerCode && call.promptId == CODE_PROMPT && op != null) {
+                        core.emit(
+                            NodeEvent.PromptClosed(CODE_PROMPT, PromptCloseReason.ANSWERED),
+                            NodeEvent.PairingFinished(op, PairingResult.Failed(ErrorCode.PAIRING_REJECTED)),
+                        )
+                    }
+                }
+            }
             NEARBY -> core.emit(
                 NodeEvent.PeerFound(Fixtures.nearby("Maya's phone", "dropumi-00000001")),
                 NodeEvent.PeerFound(Fixtures.nearby("Studio Mac", "dropumi-00000002", hintAlias = "Studio Mac")),
@@ -129,6 +185,9 @@ enum class Scenario {
     }
 
     companion object {
+        /** The code prompt PAIRING_CODES opens. */
+        val CODE_PROMPT: ULong = 7u
+
         /** The files an offer prompt carries; the core lists the rest through offerFiles. */
         const val INLINE_FILES = 200
 

@@ -114,6 +114,7 @@ class TestApplication : Application(), AppGraphHost {
         val pendingShare = PendingShare()
         scenario?.sharedItems?.let(pendingShare::put)
         val advertising = scenario?.advertising() ?: Advertising.CLOSED
+        val addresses = scenario?.localAddresses.orEmpty()
         val loader = AppLoader(scope, Dispatchers.IO) {
             AppModel(
                 core,
@@ -122,6 +123,7 @@ class TestApplication : Application(), AppGraphHost {
                 scope,
                 Dispatchers.IO,
                 advertising = advertising,
+                localAddresses = { addresses },
                 documents = docs,
                 pendingShare = pendingShare,
                 services = starter,

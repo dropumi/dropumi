@@ -3,9 +3,11 @@
 // UI state tests (fake core): the main screens in each scenario, the
 // phone and tablet layouts, large text, and the Accessibility Test
 // Framework's checks (touch targets, contrast, labels) on Nearby, the
-// unverified offer, the code screen and Transfers. MainActivity runs on the
-// fake core with temporary folders; these results say nothing about the
-// real core, the network or OS permissions.
+// unverified offer, the code screen, Transfers and Pair a device.
+// MainActivity runs on the fake core with temporary folders; these results
+// say nothing about the real core, the network or OS permissions. In the
+// pairing tests the fake core pairs like the core, and every outcome comes
+// from an event the test (or the scenario) delivers.
 package io.github.dropumi.ui
 
 import android.os.Build
@@ -21,6 +23,7 @@ import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -35,8 +38,15 @@ import io.github.dropumi.FontScaleOverride
 import io.github.dropumi.MainActivity
 import io.github.dropumi.UseScenario
 import io.github.dropumi.appstate.AppModel
+import io.github.dropumi.appstate.PairingFlow
 import io.github.dropumi.appstate.ReceiveVisibility
+import io.github.dropumi.ffi.ErrorCode
+import io.github.dropumi.ffi.NodeEvent
+import io.github.dropumi.ffi.PairingResult
+import io.github.dropumi.ffi.PromptCloseReason
+import io.github.dropumi.ffi.SendTarget
 import io.github.dropumi.testsupport.FakeCoreClient.Call
+import io.github.dropumi.testsupport.Fixtures
 import io.github.dropumi.testsupport.Scenario
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,7 +68,8 @@ class UiStateTest {
 
     private fun exists(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
 
-    private fun textExists(text: String) = compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+    private fun textExists(text: String, substring: Boolean = false) =
+        compose.onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
 
     /** Launches MainActivity and waits until [tag] shows. */
     private fun launchShowing(tag: String): ActivityScenario<MainActivity> {
@@ -288,6 +299,250 @@ class UiStateTest {
                 compose.onNodeWithTag("prompt.peer").performScrollTo()
                 compose.onNodeWithTag("prompt.peer").assertExists()
             }
+        }
+    }
+
+    // Pair a device (UI state tests, fake core)
+
+    /** Opens Pair a device from Nearby's link and waits until this device is ready to pair. */
+    private fun openPairing() {
+        compose.onNodeWithTag("nearby.pair").performScrollTo().performClick()
+        compose.waitUntil(TIMEOUT_MS) { exists("pair.countdown") }
+        compose.waitForIdle()
+    }
+
+    /** This device's open window, once it listens. */
+    private fun window(): ULong {
+        compose.waitUntil(TIMEOUT_MS) { model.state.value.pairing?.port != null }
+        return requireNotNull(model.state.value.pairing).operation
+    }
+
+    private fun countdownValue(): String? = compose.onNodeWithTag("pair.countdown")
+        .fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
+
+    /**
+     * UI state test (fake core): opening the screen makes this device ready
+     * to pair: the countdown (read as whole minutes), the name others see,
+     * the address to type, the steps, and the nearby devices with Pair.
+     */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun pairingShowsReadyStateAndNearbyDevices() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            assertEquals(1, fake.core.calls.count { it == Call.OpenPairingWindow })
+            compose.onNodeWithText("Other devices see this one as “${fake.core.identity().name}”.").assertExists()
+            assertTrue("minutes, not seconds: ${countdownValue()}", countdownValue().orEmpty().matches(Regex("\\d minutes? left")))
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.address") }
+            compose.onNodeWithText("192.168.1.20:47321").assertExists()
+            compose.onNodeWithTag("pair.steps").assertExists()
+            compose.onNodeWithTag("pair.list").performScrollTo()
+            compose.onAllNodesWithTag("pair.peer").assertCountEquals(2)
+            compose.onNodeWithContentDescription("Pair with Maya's phone").assertExists()
+            compose.onNodeWithTag("pair.byAddress").performScrollTo()
+            compose.onNodeWithText(
+                "Other devices may not list this phone. On them, choose Pair by address and type an address shown here.",
+            ).assertExists()
+            // A row is never "Paired": only "Not paired" or "Looks like".
+            val inRow = hasAnyAncestor(hasTestTag("pair.row"))
+            compose.onAllNodes(inRow and hasText("Paired", substring = false), useUnmergedTree = true).assertCountEquals(0)
+            assertFalse(textExists("window", substring = true))
+        }
+    }
+
+    /** UI state test (fake core): the ready screen passes the Accessibility Test Framework's checks. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun pairingPassesAccessibilityChecks() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.address") }
+            checkAccessibility()
+        }
+    }
+
+    /** UI state test (fake core): at font scale 1.3 the screen is one column and still passes the checks. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun pairingPassesAccessibilityChecksAtLargeText() {
+        FontScaleOverride.set(1.3f).use {
+            launchShowing("nearby.pair").use {
+                openPairing()
+                val ready = compose.onNodeWithTag("pair.ready").fetchSemanticsNode().boundsInRoot
+                val steps = compose.onNodeWithTag("pair.steps").fetchSemanticsNode().boundsInRoot
+                assertTrue("one column: the steps under the ready card", steps.top >= ready.bottom)
+                checkAccessibility()
+            }
+        }
+    }
+
+    /** UI state test (fake core): with nobody nearby the list says what to do on the other device. */
+    @Test
+    @UseScenario(Scenario.PAIRING_EMPTY)
+    fun pairingWithNoDevicesExplainsWhatToDo() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            compose.onNodeWithTag("pair.empty").performScrollTo()
+            compose.onNodeWithText("Open Pair a device on the other device. Both need to be on the same Wi-Fi network.").assertExists()
+        }
+    }
+
+    /** UI state test (fake core): Pair closes this device's window, then asks that device, with Cancel. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun tappingPairAsksThatDevice() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            val window = window()
+            compose.onNodeWithContentDescription("Pair with Maya's phone").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.status") && fake.core.calls.any { it is Call.Pair } }
+            compose.onNodeWithText("Asking “Maya's phone”…").assertExists()
+            compose.onNodeWithTag("pair.cancel").assertExists()
+            val calls = fake.core.calls
+            assertTrue(calls.indexOf(Call.Cancel(window)) in 0 until calls.indexOf(Call.Pair(SendTarget.Nearby("dropumi-00000001"))))
+            assertFalse(fake.core.pairCalledWhileWindowOpen)
+        }
+    }
+
+    /** UI state test (fake core): Stop ends being ready and goes back. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun stopLeavesThePairingScreen() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            val window = window()
+            compose.onNodeWithTag("pair.stop").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { !exists("pair.ready") && exists("nearby.pair") }
+            compose.waitUntil(TIMEOUT_MS) { Call.Cancel(window) in fake.core.calls }
+            assertEquals(PairingFlow(), model.state.value.pairingFlow)
+            assertTrue(model.state.value.banner == null)
+        }
+    }
+
+    /** UI state test (fake core): the result names the device by its alias, and Done goes back to where pairing was opened. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun pairedResultNamesTheDeviceAndDoneGoesBack() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            val window = window()
+            fake.core.endWindow(window, PairingResult.Paired(Fixtures.peer(name = "Pixel", trusted = true, alias = "Maya's phone")))
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.result.title") }
+            compose.onNodeWithText("Paired with “Maya's phone”").assertExists()
+            compose.onNodeWithTag("pair.done").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { !exists("pair.result") && exists("nearby.pair") }
+            assertEquals(1, fake.core.calls.count { it == Call.OpenPairingWindow })
+        }
+    }
+
+    /** UI state test (fake core): a device that is not ready to pair gets a note that says what to do; this device is ready again. */
+    @Test
+    @UseScenario(Scenario.PAIRING_NOT_READY)
+    fun notReadySaysWhatToDo() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            window()
+            compose.onNodeWithContentDescription("Pair with Maya's phone").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.note") && exists("pair.countdown") }
+            assertTrue(textExists("“Maya's phone” isn't waiting to pair.", substring = true))
+            assertFalse(textExists("Only paired devices", substring = true))
+            assertEquals(2, fake.core.calls.count { it == Call.OpenPairingWindow })
+        }
+    }
+
+    /** UI state test (fake core): "Codes don't match" on this device reads as this user's answer. */
+    @Test
+    @UseScenario(Scenario.PAIRING_CODES)
+    fun codesDontMatchIsAttributedToYou() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            window()
+            compose.onNodeWithContentDescription("Pair with Maya's phone").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("prompt.code") }
+            compose.onNodeWithTag("code.mismatch").performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.result.title") }
+            compose.onNodeWithText("You said the codes don't match").assertExists()
+            assertTrue(Call.AnswerCode(Scenario.CODE_PROMPT, false) in fake.core.calls)
+        }
+    }
+
+    /** UI state test (fake core): the other device not confirming reads as its answer, never a claimed name. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun otherDeviceDecliningIsAttributedToIt() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            val window = window()
+            val prompt = requireNotNull(fake.core.attemptOnWindow(peer = Fixtures.peer(name = "Mallory's laptop")))
+            compose.waitUntil(TIMEOUT_MS) { exists("prompt.code") }
+            fake.core.emit(NodeEvent.PromptClosed((prompt as io.github.dropumi.ffi.Prompt.Code).id, PromptCloseReason.WITHDRAWN))
+            fake.core.endWindow(window, PairingResult.Failed(ErrorCode.PAIRING_REJECTED))
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.result.title") && !exists("prompt.code") }
+            compose.onNodeWithText("The other device didn't confirm the code").assertExists()
+            assertFalse(textExists("Mallory", substring = true))
+        }
+    }
+
+    /** UI state test (fake core): a connection that was not a pairing request ends the readiness, with Start again. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun usedUpReadinessSaysPairingDidNotStart() {
+        launchShowing("nearby.pair").use {
+            openPairing()
+            val window = window()
+            fake.core.emit(NodeEvent.SessionClosed(null, "not_authorized"))
+            fake.core.endWindow(window, PairingResult.Failed(ErrorCode.NOT_AUTHORIZED))
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.result.title") }
+            compose.onNodeWithText("Pairing didn't start").assertExists()
+            compose.onNodeWithText("Start again").assertExists()
+            assertFalse("the screen says it, not a banner", exists("banner"))
+            compose.onNodeWithTag("pair.again").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.countdown") }
+            assertEquals(2, fake.core.calls.count { it == Call.OpenPairingWindow })
+        }
+    }
+
+    /** UI state test (fake core): the refusal banner offers Pair a device, and opens it. */
+    @Test
+    fun refusalBannerOpensPairing() {
+        launchShowing("nearby.pair").use {
+            fake.core.emit(NodeEvent.SessionClosed(null, "not_authorized"))
+            compose.waitUntil(TIMEOUT_MS) { exists("banner.action") }
+            compose.onNodeWithText("A device was refused").assertExists()
+            compose.onNodeWithTag("banner.action").performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.ready") }
+            assertFalse(exists("banner"))
+        }
+    }
+
+    /** UI state test (fake core): with no paired devices, Paired devices offers Pair a device and Add by fingerprint. */
+    @Test
+    fun emptyPairedDevicesOffersPairing() {
+        launchShowing("tab.settings").use {
+            compose.onNodeWithTag("tab.settings").performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("settings.paired") }
+            compose.onNodeWithTag("settings.paired").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("paired.empty") }
+            compose.onNodeWithTag("paired.emptyAdd").assertExists()
+            compose.onNodeWithTag("paired.pair").assertExists()
+            compose.onNodeWithTag("paired.emptyPair").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.ready") }
+        }
+    }
+
+    /** UI state test (fake core): a rotation (the activity recreated) keeps the same window: nothing is closed or opened. */
+    @Test
+    @UseScenario(Scenario.PAIRING)
+    fun recreatingTheActivityKeepsTheSameWindow() {
+        launchShowing("nearby.pair").use { scenario ->
+            openPairing()
+            val window = window()
+            scenario.recreate()
+            compose.waitUntil(TIMEOUT_MS) { exists("pair.countdown") }
+            compose.waitForIdle()
+            assertEquals(1, fake.core.calls.count { it == Call.OpenPairingWindow })
+            assertFalse(Call.Cancel(window) in fake.core.calls)
+            assertEquals(window, fake.core.windowOperation)
         }
     }
 
