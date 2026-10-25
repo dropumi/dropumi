@@ -13,7 +13,7 @@
 #    --build-only), installed with `adb install -r`. An exit trap
 #    uninstalls both, so the test identity they hold never stays on the
 #    phone.
-# 3. Runs DROPUMI_TEST_DEVICES=1 cargo test … -- --ignored --test-threads=1
+# 3. Runs DROPUMI_TEST_DEVICES=1 cargo test … -- --ignored --test-threads=1 --nocapture
 #    devices_ (or the given filter).
 # --no-build skips the builds (the Android APKs are still installed).
 #
@@ -110,4 +110,5 @@ if need android; then
   echo "android ${ANDROID_SERIAL}: API ${sdk_int}, ${abi}"
 fi
 
-DROPUMI_TEST_DEVICES=1 cargo test -p dropumi-cli --test e2e --locked -- --ignored --test-threads=1 "${filter}"
+# --nocapture: every step (codes, offers, hashes) is the evidence, pass or fail.
+DROPUMI_TEST_DEVICES=1 cargo test -p dropumi-cli --test e2e --locked -- --ignored --test-threads=1 --nocapture "${filter}"
