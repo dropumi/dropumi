@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: MPL-2.0
+//
+// iPhone and iPad. Dropumi receives only while it is open (D5): in the
+// background the receiver stops accepting (the listener closes and the
+// advertisement is withdrawn) and running transfers may finish.
+
+import DropumiAppState
+import DropumiDesign
+import SwiftUI
+
+@main
+struct DropumiApp: App {
+    @State private var loader = AppLoader()
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        DSFont.register()
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            RootView(loader: loader)
+                .task { await loader.load() }
+        }
+        .commands { DropumiCommands(router: loader.router) }
+        // `initial`: a scene that connects already in the background is seen too.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            // Kept by the loader too: the core may still be opening.
+            switch phase {
+            case .background:
+                loader.isInBackground = true
+            case .active:
+                loader.isInBackground = false
+            default:
+                break
+            }
+            guard let model = loader.model else { return }
+            switch phase {
+            case .background:
+                model.enterBackground()
+            case .active:
+                Task { await model.becomeActive() }
+            default:
+                break
+            }
+        }
+    }
+}

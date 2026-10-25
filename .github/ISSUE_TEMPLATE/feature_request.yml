@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Feature request
+description: Suggest an improvement or a new capability.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issue?** Do not file it here. Report it privately: https://github.com/dropumi/dropumi/security/advisories/new (see [SECURITY.md](https://github.com/dropumi/dropumi/blob/main/SECURITY.md)).
+
+        **Privacy:** this issue is public.
+        - Never attach personal files.
+        - Never share `identity.key`, `trusted_devices.json` or `device.json`.
+        - Never include full file-system paths, user names, host names, real device names, fingerprints, or IP or MAC addresses.
+
+        Dropumi is local-only by design: no accounts, no cloud, no telemetry. Requests that need an internet service are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should Dropumi behave? Describe the user-visible behaviour first.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you have considered.
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms
+      description: Which platforms does this concern?
+      options:
+        - label: Windows
+        - label: macOS
+        - label: Linux
+        - label: Android
+        - label: iOS / iPadOS
+        - label: Web companion (local only)
+        - label: CLI / all platforms
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security impact
+      description: |
+        Would this change what is broadcast on the network (for example mDNS records), what is stored on disk, which permissions are requested, or who can send files to whom?
+        Write "None" if you see no impact.
+    validations:
+      required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to help implement this?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed personal file names, paths and keys.
+          required: true

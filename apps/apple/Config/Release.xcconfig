@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+
+#include "Base.xcconfig"
+
+// UI-test scenarios and the fake core they run on never ship.
+EXCLUDED_SOURCE_FILE_NAMES = UITestScenarios.swift FakeCoreClient.swift

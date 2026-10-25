@@ -1,0 +1,194 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+- Dropumi has no releases yet. Releases before 1.0 will be numbered `0.y.z`. The workspace crates are at `0.1.0` and are not published (`publish = false`).
+- The wire-protocol version (currently draft v1, see [`docs/protocol/v1.md`](docs/protocol/v1.md)) is versioned separately from the application version.
+
+## [Unreleased]
+
+### Added
+
+Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. Milestone 2b adds the Apple app for iPhone, iPad and Mac. The Android app is in progress. Pre-alpha, unaudited.
+
+#### Apple app (iPhone, iPad, Mac; milestone 2b)
+
+- **The app.** One SwiftUI app for iPhone and iPad (iOS/iPadOS 27) and the Mac (macOS 27), arm64, over `dropumi-ffi` ([ADR-0012](docs/adr/0012-apple-apps.md)). Screens:
+  - onboarding;
+  - Nearby, with the radar and a drop zone on iPad and Mac;
+  - Send;
+  - Receive, a full-screen prompt with the code for unverified senders;
+  - code comparison;
+  - Transfers and history;
+  - Settings: who can send (Paired only, Everyone for 10 minutes, Off), auto-accept for paired devices (off by default), appearance;
+  - Pair a device: one screen on both devices;
+  - paired devices: rename, remove, add by fingerprint;
+  - this device;
+  - connect by address.
+- **Prompt safety.** No prompt is answered without a tap. There is no default button, Escape declines, and Accept is enabled after 600 ms. A nearby device is never labelled "Paired" before its key is checked.
+- **Pairing.** Open Pair a device on both devices, tap the other device on one of them, and confirm the same code on both ([ADR-0012](docs/adr/0012-apple-apps.md)).
+  - The screen makes the device ready to pair for 5 minutes, with a countdown, the name others see, the addresses for devices that don't list it, and Stop.
+  - Leaving the screen ends it, and receiving resumes. Opening a pairing window no longer shows "Receiving could not start".
+  - One attempt per opening: after the 5 minutes, or a connection that did not pair, it needs Start again and never reopens by itself.
+  - Each outcome has its own text. For example, "You said the codes don't match" is told apart from "“…” didn't confirm the code", and a device that isn't ready gets "isn't waiting to pair" instead of "Only paired devices".
+  - Entry points: Nearby, Settings, Paired devices (toolbar and empty state), Send for an unpaired device, the refused-device notice and, on the Mac, Pair a Device… (⇧⌘P). Connect by address has a pair mode.
+- **Refused devices.** When the receiver turns a device away, the app says so, at most once a minute: "A device that isn't paired tried to send" (with a shortcut to Everyone) when the device is known, otherwise "A device was refused", with a "Pair a device" button. That one is not shown while the pairing screen is open or this device is ready to pair.
+- **Share Extension.** It hands shared files to the app through an App Group inbox: staged, listed in a manifest, renamed into place. It never loads the core.
+- **Bonjour.** Discovery advertises a random host name (proxy registration), never the system's, and does not hold up the receiver while the Local Network question is open. A device is resolved on every network interface it is seen on, so a Mac with virtual-machine bridges no longer ends up with only an address that refuses connections.
+- **Mac.**
+  - A menu-bar receiver keeps working when the window is closed; "Quit Dropumi completely" stops it.
+  - Notifications have no Accept action.
+  - Open at login is optional.
+  - The "…" menus open with VoiceOver's Open Menu command.
+  - A receive folder you choose is kept as a bookmark.
+- **iPhone and iPad.** Receive while Dropumi is open; running transfers ask iOS for time to finish in the background.
+- **Design.** design.md tokens, Plus Jakarta Sans (OFL), and a darker accent for small text to keep 4.5:1 contrast.
+- **Tests.**
+  - App-state tests on a fake core.
+  - Hosted tests: test isolation, backup exclusion.
+  - UI state tests with the accessibility audit, on an iPhone, on the Mac and on the iOS simulator.
+  - Opt-in interop tests that run the app's real core against the CLI on the iOS simulator, on macOS, and on a real iPhone or iPad over Wi-Fi (`scripts/apple/interop.sh`), including the CLI pairing with an app that waits on its pairing screen.
+- **CI.** `apple (app)` (not required; needs Xcode 27).
+- **Build.** The Xcode project is generated with xcodegen. The app build refuses a Rust core older than its sources.
+
+#### Changed (milestone 2b)
+
+- ADR-0008 (UI framework) is superseded by ADR-0012: the Mac app is SwiftUI, shared with iPhone and iPad; Windows and Linux stay undecided.
+- ADR-0014's macOS row now matches the app: the configuration folder is excluded from backups (Time Machine too).
+- Threat model: goals G34 to G38; R21 and R23 updated for the Apple apps. `discovery.md`: the Apple adapter and the iOS 27.0 simulator observation.
+- `scripts/ffi/build-apple.sh` stamps the XCFramework with a hash of only the crates `dropumi-ffi` links (`scripts/ffi/core-sources-hash.sh`).
+
+#### Core changes (each test-first)
+
+- The receiver can cancel one incoming transfer by id; an offer that reuses the id of a running transfer is rejected `BUSY` before anyone is asked (protocol draft §13.2 MAY rule; no wire change).
+- Accept errors back off (10 ms, doubling, at most 1 s) and stop the receiver after 8 in a row instead of spinning.
+- `ReceiverControl`: change a running receiver's policy for new sessions, and stop accepting connections while running transfers finish.
+- `TrustStore::rename`: rename a paired device in one locked step that never re-creates a removed device.
+- `LocalFileSource::with_denied`: refuse Dropumi's own configuration files, also through symlinks and hard links.
+- The random mDNS instance label moved out of the `mdns`-only module.
+
+#### App bridge (`dropumi-ffi`, `dropumi-ffi-bindgen`)
+
+- `DropumiNode` over UniFFI 0.32.2: identity, trust, discovery through the app's Bonjour or NSD, receiving, sending (local paths or documents the app reads), pairing and a pairing window; synchronous calls, operation handles, a bounded event mailbox that never blocks the core, prompts answered by id. The crate keeps `unsafe_code = "forbid"`.
+- Scripts: bindings generation and drift check, the XCFramework, the Android library with 16 KB pages, and the alignment check.
+- Binding packages: `apps/apple/DropumiKit` (Swift) and `apps/android/core-bindings` (Kotlin), with tests against the real core.
+- Tests: facade unit and loopback tests, a thread-safety stress test, the facade against the real CLI, Swift and Kotlin binding tests, opt-in measurements.
+- CI: `ffi (apple)` and `ffi (android)` (not required); Swift and Kotlin SPDX checks; Dependabot for Gradle.
+
+#### Decisions
+
+- ADR-0009 (FFI and bindings) accepted with the spike results.
+- ADR-0011 (browser companion) proposed, with a research prototype in `poc/web/`.
+- ADR-0014 (interim key storage on the app platforms) accepted.
+- Threat model: trust boundaries TB6 to TB8, adversaries ADV7 and ADV8, goals G25 to G33, residual risks R20 to R24.
+
+### Added (milestone 1)
+
+Milestone 1 (Phase 0 + Phase 1) adds the secure LAN transfer core, a draft of protocol v1 and the `dropumi` CLI. This is pre-alpha, unaudited software. It has no desktop or mobile apps, no FFI bindings and no releases.
+
+#### Assessment and decisions
+
+- **Feasibility assessment** (`docs/feasibility.md`): capability, interoperability and share-integration matrices with cited sources, and a risk register.
+- **Architecture decision records** in `docs/adr/`:
+  - ADR-0001 architecture and workspace layout;
+  - ADR-0002 secure channel (Noise XX over TCP);
+  - ADR-0003 device identity and key storage;
+  - ADR-0004 pairing, trust and transfer policy;
+  - ADR-0005 wire protocol v1 (draft protocol);
+  - ADR-0006 integrity and receiver filesystem safety;
+  - ADR-0007 LAN discovery via mDNS;
+  - ADR-0008 UI framework strategy (provisional; no UI is implemented);
+  - ADR-0009 FFI and bindings strategy (proposed; no FFI is implemented);
+  - ADR-0010 dependency, license and CI supply-chain policy.
+
+#### Workspace
+
+- A Cargo workspace with five crates: `dropumi-domain`, `dropumi-protocol`, `dropumi-application`, `dropumi-infra` and `dropumi-cli`, which provides the `dropumi` binary.
+  - Edition 2024, MSRV 1.89 (`rust-version` in `Cargo.toml`).
+  - `unsafe` code is forbidden in every crate.
+  - `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!` and `mem::forget` are denied outside tests; the protocol crate also denies unchecked indexing and arithmetic and truncating casts.
+- An architecture guard, `scripts/ci/check-architecture.sh`. It checks per-crate deny-lists so that dependencies point inward, and fails if `ring` appears in the workspace dependency graph.
+
+#### Domain model (`dropumi-domain`)
+
+- Public keys and fingerprints: 52 base32 characters in full, a 24-character display form and an 8-character discovery hint.
+- Device names, peers, discovery targets, ranked connection candidates and peer expectations.
+- Transfer policy: `TrustedOnly` by default, or a time-limited `Everyone` mode; unverified peers are never auto-accepted. Trusted devices.
+- File-name sanitization (`SafeFileName`) and stripping of control, bidirectional and invisible characters (`text::strip_unsafe`).
+- Transfer requests, progress, the transfer state machine and a single error taxonomy (`TransferError`).
+
+#### Protocol v1 draft (`dropumi-protocol`, sans-IO)
+
+- A `DRPM` version preamble, bound into the Noise prologue.
+- `Noise_XX_25519_ChaChaPoly_SHA256`, implemented with `snow` 0.10 using its pure-Rust backends (no `ring`).
+- Transport records (2-byte length prefix) with implicit per-direction nonce counters, never sent on the wire and owned explicitly by `Sealer`/`Opener`; CONTROL and DATA frames, with at most 65,518 B of DATA per record.
+- Strict CBOR control messages (`minicbor`) with bounded decoding, and fixed, path-free `Error.detail` phrases.
+- A 6-digit short authentication string (SAS) committed inside the handshake, used for pairing and for unverified peers.
+- Pairing reads the other side while the code prompt is open: its "no", cancel or disconnect ends the prompt at once (found by the first Windows CI run, where the other side's "no" was lost and pairing ended as "connection lost").
+- BLAKE3 integrity checking per file.
+- Sender and receiver session state machines, limited to 10,000 files and 4 MiB of file metadata per transfer.
+
+#### Application layer (`dropumi-application`)
+
+- Nine ports (`Connector`, `Listener`, `Discovery`, `FileSource`, `FileSink`, `IdentityStore`, `TrustStore`, `Interaction`, `Clock`) and the helper traits `AdHandle` and `IncomingFile`.
+- Secure channel establishment: preamble, Noise XX handshake, Hello exchange and committed SAS. The initiator checks the responder's key against the expected peer and the trust policy before it sends handshake message 3.
+- Cancel-safe encrypted record reading with an idle timeout, and record writing with a write-stall timeout (120 s by default).
+- Use cases:
+  - resolving targets and dialing ranked candidates;
+  - sending files (`SendFiles`);
+  - receiving files (`ReceiveFiles`) with admission limits (16 unauthenticated connections in total and 4 per IP address, 4 sessions, 1 session per device) and cancellation of active transfers;
+  - pairing (`pair_with`, `pair_listen`);
+  - listing, adding and removing trusted devices;
+  - showing, resetting and renaming the device identity;
+  - discovery and advertisement.
+
+#### Infrastructure adapters (`dropumi-infra`)
+
+- The config lock uses `flock` directly on Android, where std's `File::lock` is not implemented; without it the core could not create an identity on any Android version (found on the arm64 emulators).
+- TCP transport. `receive` and `pair --listen` listen on port 47321 by default and fall back to a free port when it is busy and no `--port` was given.
+- A receive directory: received data goes to a `create_new` temporary `.dropumi-*.part` file and is BLAKE3-hashed while it is written; only a file whose hash matches is fsynced and finalized without overwriting anything (`name (1).ext` on collisions, symlinks never followed). Windows retries transient access-denied and sharing-violation errors; Unix has a placeholder fallback for filesystems without no-replace renames. Received files are created with mode 0600 on Unix.
+- Removal of stale `.dropumi-*.part` files older than 15 minutes when a receiver starts.
+- Identity, device-name and trust stores with atomic writes and a cross-process lock. On Unix, the files are created 0600 and a new configuration directory 0700, and owner and mode checks fail with exit code 9. On Windows, a warning is shown when the configuration directory is outside `%LOCALAPPDATA%`.
+- mDNS advertisement and browsing (`_dropumi._tcp`, IPv4, TXT hints `v`, `n` and `fp`) with `mdns-sd`, behind the `mdns` cargo feature, which is on by default.
+
+#### `dropumi` CLI (`dropumi-cli`)
+
+- Commands: `identity show|set-name|reset`, `trust list|add|remove`, `pair --listen|--to`, `receive`, `send` and `discover`.
+- Targets: an address, `host:port`, a fingerprint prefix or a device name; `--expect-fingerprint` pins a fingerprint and `--allow-unverified` permits an untrusted receiver after the 6-digit code is confirmed.
+- Human output, NDJSON events with `--json`, and scripted control with `--control-stdin` (`accept`, `reject`, `confirm`, `deny`, `cancel`, `quit`; a decision answers only a prompt that is waiting, and offer decisions can name a `transfer_id`).
+- Logging to stderr with `-v`/`-q` or `DROPUMI_LOG`.
+- Typed exit codes (0 to 10, and 130 for Ctrl-C), documented in `docs/cli.md`.
+
+#### Tests
+
+- Unit and property (`proptest`) tests for the domain and protocol crates, including known-answer tests for the RFC 7748 X25519 vector, the fingerprint, the SAS commitment and the SAS.
+- Application tests over in-memory streams with paused time.
+- Infrastructure tests for finalization, permissions, stores, TCP and TXT parsing.
+- Two-process end-to-end, failure and adversarial security suites on loopback (`crates/cli/tests/e2e`), and an opt-in mDNS end-to-end test (`DROPUMI_TEST_MDNS=1`).
+
+#### CI and supply chain
+
+- GitHub Actions workflow `ci.yml` with these jobs:
+  - `fmt` (including the SPDX header check), `clippy` (all features and no default features), `docs`;
+  - `test` on `ubuntu-latest`, `macos-latest` and `windows-latest`;
+  - `msrv` and `architecture`;
+  - `build (aarch64-linux-android)` and `build (aarch64-apple-ios)`, which build the core library crates only;
+  - `cargo-deny (advisories)` and `cargo-deny (bans licenses sources)`;
+  - `zizmor` and `actionlint`;
+  - `mdns-e2e (experimental)`, which is allowed to fail.
+- `codeql.yml` (CodeQL for Actions and Rust) and `audit.yml` (a daily advisory scan).
+- `deny.toml` (license allow-list, bans on `openssl`, `openssl-sys`, `native-tls` and `ring`, crates.io only) and Dependabot configuration for Cargo and GitHub Actions.
+
+#### Documentation and community files
+
+- Protocol v1 draft, threat model and discovery documents (`docs/protocol/`).
+- `ARCHITECTURE.md`.
+- CLI, development, testing and dependency guides (`docs/`).
+- The loopback benchmark script (`scripts/bench/loopback.sh`) and the benchmark method and results (`docs/benchmarks/`).
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 3.0), `SECURITY.md`, `AGENTS.md` and `CLAUDE.md`.
+- Issue forms and a pull request template.
+
+[Unreleased]: https://github.com/dropumi/dropumi/commits/main
