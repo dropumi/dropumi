@@ -4,6 +4,7 @@ package io.github.dropumi.ui.screens
 import io.github.dropumi.appstate.AppState
 import io.github.dropumi.appstate.Appearance
 import io.github.dropumi.appstate.HistoryEntry
+import io.github.dropumi.appstate.PairingSession
 import io.github.dropumi.appstate.ReceiveVisibility
 import io.github.dropumi.appstate.TransferPhase
 import io.github.dropumi.appstate.TransferRecord
@@ -11,6 +12,7 @@ import io.github.dropumi.core.discovery.AdvertiseState
 import io.github.dropumi.ffi.AcceptMode
 import io.github.dropumi.ffi.Direction
 import io.github.dropumi.ffi.NearbyPeer
+import io.github.dropumi.ffi.PairingResult
 import io.github.dropumi.ffi.PeerInfo
 import io.github.dropumi.ffi.Progress
 import io.github.dropumi.ffi.ReceivePolicy
@@ -102,6 +104,31 @@ class ScreenTextTest {
         assertFalse(ScreenText.visibilityCaption(state(), now).contains("see this device's name"))
         assertTrue(ScreenText.visibilityCaption(state(advertising = AdvertiseState.Registered), now).contains("see this device's name"))
         assertTrue(ScreenText.visibilityCaption(state(), now).endsWith("Only while Dropumi is open."))
+    }
+
+    /** While this device's pairing window is open it replaces the receiver: the pill says so (no "window"). */
+    @Test
+    fun visibilityTextSaysReadyToPairWhileTheWindowIsOpen() {
+        val now = 1_000_000L
+        val window = PairingSession(7u, PairingSession.Role.Window, port = 47321u)
+        assertEquals("Ready to pair", ScreenText.visibilityLabel(state().copy(pairing = window), now))
+        assertTrue(ScreenText.readyToPair(state().copy(pairing = window)))
+        // Not once it has ended, and never for a request.
+        val ended = window.copy(result = PairingResult.Cancelled)
+        assertEquals("Starting…", ScreenText.visibilityLabel(state().copy(pairing = ended), now))
+        val request = PairingSession(8u, PairingSession.Role.Initiator("Maya's phone"))
+        assertFalse(ScreenText.readyToPair(state().copy(pairing = request)))
+    }
+
+    /** TalkBack hears the time left in whole minutes, so the value changes once a minute. */
+    @Test
+    fun countdownIsSpokenInWholeMinutes() {
+        assertEquals("5 minutes left", minutesLeft(300))
+        assertEquals("4 minutes left", minutesLeft(299))
+        assertEquals("1 minute left", minutesLeft(119))
+        assertEquals("1 minute left", minutesLeft(60))
+        assertEquals("Less than a minute left", minutesLeft(59))
+        assertEquals("Less than a minute left", minutesLeft(0))
     }
 
     @Test

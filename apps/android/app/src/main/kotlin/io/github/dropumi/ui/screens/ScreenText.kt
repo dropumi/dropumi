@@ -8,6 +8,7 @@ package io.github.dropumi.ui.screens
 import io.github.dropumi.appstate.AppState
 import io.github.dropumi.appstate.Formatting
 import io.github.dropumi.appstate.HistoryEntry
+import io.github.dropumi.appstate.PairingSession
 import io.github.dropumi.appstate.ReceiveVisibility
 import io.github.dropumi.appstate.TransferPhase
 import io.github.dropumi.appstate.TransferRecord
@@ -51,8 +52,15 @@ object ScreenText {
         return maxOf(0L, (until.toLong() - nowMs) / 1000)
     }
 
+    /** This device's pairing window is open: it replaces the receiver while it is. */
+    fun readyToPair(state: AppState): Boolean {
+        val pairing = state.pairing ?: return false
+        return pairing.role == PairingSession.Role.Window && pairing.result == null
+    }
+
     /** Who may send right now, as the status pill says it. */
     fun visibilityLabel(state: AppState, nowMs: Long): String {
+        if (readyToPair(state)) return "Ready to pair"
         if (state.receiver == null) return if (state.visibility == ReceiveVisibility.OFF) "Not receiving" else "Starting…"
         return when (state.visibility) {
             ReceiveVisibility.OFF -> "Not receiving"

@@ -60,6 +60,57 @@ class RouterTest {
         assertEquals(listOf<Screen>(Screen.Send(null)), restored.stack(Tab.NEARBY))
     }
 
+    /** Pairing opens above the current tab's screens, so Done (Back) returns to where it was opened. */
+    @Test
+    fun pairingOpensAboveTheCurrentScreen() {
+        val router = Router()
+        router.openSend("dropumi-0000abcd")
+        router.openPairing()
+        assertEquals(Tab.NEARBY, router.tab)
+        assertEquals(listOf(Screen.Send("dropumi-0000abcd"), Screen.Pairing), router.stack(Tab.NEARBY))
+        assertTrue(router.pop())
+        assertEquals(Screen.Send("dropumi-0000abcd"), router.current)
+        router.select(Tab.SETTINGS)
+        router.push(Screen.PairedDevices)
+        router.openPairing()
+        assertEquals(listOf(Screen.PairedDevices, Screen.Pairing), router.stack(Tab.SETTINGS))
+    }
+
+    /** Only one pairing screen is ever alive: opening it in one tab closes the other tab's. */
+    @Test
+    fun pairingInOneTabClosesTheOtherTabsOne() {
+        val router = Router(Tab.SETTINGS)
+        router.openPairing()
+        router.openPairByAddress()
+        router.select(Tab.NEARBY)
+        router.openPairing()
+        assertEquals(listOf<Screen>(Screen.Pairing), router.stack(Tab.NEARBY))
+        assertTrue(router.stack(Tab.SETTINGS).isEmpty())
+    }
+
+    /** From Transfers, pairing opens in Settings; asked for again, the stack goes back to it (Pair by address returns to it). */
+    @Test
+    fun pairingFromTransfersOpensInSettingsAndPairByAddressReturnsToIt() {
+        val router = Router(Tab.TRANSFERS)
+        router.openPairing()
+        assertEquals(Tab.SETTINGS, router.tab)
+        assertEquals(listOf<Screen>(Screen.Pairing), router.stack(Tab.SETTINGS))
+        router.openPairByAddress()
+        assertEquals(Screen.PairByAddress, router.current)
+        router.openPairing()
+        assertEquals(listOf<Screen>(Screen.Pairing), router.stack(Tab.SETTINGS))
+    }
+
+    /** Pair by address is a screen of its own, kept across a configuration change. */
+    @Test
+    fun pairByAddressIsSavedAndRestored() {
+        val router = Router()
+        router.openPairing()
+        router.openPairByAddress()
+        val restored = roundTrip(router)
+        assertEquals(listOf(Screen.Pairing, Screen.PairByAddress), restored.stack(Tab.NEARBY))
+    }
+
     /** Only known screens come back from saved state; anything else is dropped. */
     @Test
     fun unknownSavedScreensAreDropped() {

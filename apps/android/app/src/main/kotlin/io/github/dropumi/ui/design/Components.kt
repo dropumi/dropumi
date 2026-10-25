@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -202,7 +203,7 @@ fun IconAction(@DrawableRes icon: Int, label: String, onClick: () -> Unit, modif
 
 /** The status pill ("Paired devices only"): a dot and a short text. */
 @Composable
-fun StatusPill(text: String, active: Boolean, modifier: Modifier = Modifier) {
+fun StatusPill(text: String, active: Boolean, modifier: Modifier = Modifier, dot: Color? = null) {
     val c = DS.colors
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -212,7 +213,7 @@ fun StatusPill(text: String, active: Boolean, modifier: Modifier = Modifier) {
             .padding(horizontal = 14.dp, vertical = 8.dp)
             .semantics(mergeDescendants = true) {},
     ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(if (active) c.success else c.textSecondary))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(dot ?: if (active) c.success else c.textSecondary))
         Spacer(Modifier.size(8.dp))
         Text(text, style = DSType.meta, color = c.textPrimary)
     }
@@ -672,7 +673,7 @@ fun BannerView(
             Text(title, style = DSType.rowTitle, color = c.textPrimary)
             Text(message, style = DSType.meta, color = c.textSecondary)
             if (actionLabel != null && onAction != null) {
-                LinkButton(actionLabel, onAction, modifier = Modifier.padding(start = 0.dp))
+                LinkButton(actionLabel, onAction, modifier = Modifier.padding(start = 0.dp).testTag("banner.action"))
             }
         }
         IconAction(DSIcons.close, "Dismiss", onDismiss)

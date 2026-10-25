@@ -32,6 +32,7 @@ import io.github.dropumi.appstate.AppModel
 import io.github.dropumi.appstate.AppState
 import io.github.dropumi.ui.Confirmations
 import io.github.dropumi.ui.Router
+import io.github.dropumi.ui.design.DS
 import io.github.dropumi.ui.design.DSIcons
 import io.github.dropumi.ui.design.IconAction
 import io.github.dropumi.ui.design.StatusPill
@@ -115,9 +116,12 @@ fun rememberNowMs(ticking: Boolean): Long {
 @Composable
 fun VisibilityPill(state: AppState, modifier: Modifier = Modifier) {
     val now = rememberNowMs(ticking = state.receiver?.everyoneUntil != null)
+    val ready = ScreenText.readyToPair(state)
     StatusPill(
         ScreenText.visibilityLabel(state, now),
-        active = state.receiver != null,
+        active = state.receiver != null || ready,
+        // Ready to pair: the accent dot, as on the pairing screen.
+        dot = if (ready) DS.colors.accent else null,
         modifier = modifier.testTag("visibility.pill"),
     )
 }

@@ -97,6 +97,7 @@ import io.github.dropumi.ui.screens.LocalModel
 import io.github.dropumi.ui.screens.LocalRouter
 import io.github.dropumi.ui.screens.NearbyScreen
 import io.github.dropumi.ui.screens.OnboardingScreen
+import io.github.dropumi.ui.screens.PairByAddressScreen
 import io.github.dropumi.ui.screens.PairedDevicesScreen
 import io.github.dropumi.ui.screens.PairingScreen
 import io.github.dropumi.ui.screens.PushedScreen
@@ -370,6 +371,7 @@ private fun TabContent(state: AppState, router: Router, wide: Boolean, picking: 
             Screen.ThisDevice -> ThisDeviceScreen(state)
             Screen.PairedDevices -> PairedDevicesScreen(state)
             Screen.Pairing -> PairingScreen(state)
+            Screen.PairByAddress -> PairByAddressScreen()
             Screen.Licences -> LicencesScreen { router.push(Screen.Licence(it)) }
             is Screen.Licence -> LicenceText(screen.asset)
         }

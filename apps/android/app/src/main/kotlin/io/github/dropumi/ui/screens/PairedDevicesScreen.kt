@@ -11,6 +11,11 @@ package io.github.dropumi.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenu
@@ -49,8 +54,10 @@ import io.github.dropumi.ui.design.SectionHeading
 import io.github.dropumi.ui.design.largeText
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PairedDevicesScreen(state: AppState) {
+    val router = LocalRouter.current
     var adding by rememberSaveable { mutableStateOf(false) }
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
     ScreenColumn {
@@ -58,10 +65,26 @@ fun PairedDevicesScreen(state: AppState) {
         if (adding) {
             AddByFingerprint(onDone = { adding = false })
         } else {
-            LinkButton("Add by fingerprint", { adding = true }, icon = DSIcons.add, modifier = Modifier.testTag("paired.add"))
+            // The screen's actions; they wrap at large text.
+            FlowRow {
+                LinkButton("Pair a device", { router.openPairing() }, icon = DSIcons.pair, modifier = Modifier.testTag("paired.pair"))
+                LinkButton("Add by fingerprint", { adding = true }, icon = DSIcons.add, modifier = Modifier.testTag("paired.add"))
+            }
         }
-        if (state.trusted.isEmpty()) {
-            EmptyState(DSIcons.shield, "No paired devices", "Pair a device by comparing a code, or add one by its fingerprint.")
+        if (state.trusted.isEmpty() && !adding) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("paired.empty"),
+            ) {
+                EmptyState(
+                    DSIcons.shield,
+                    "No paired devices",
+                    "Pair a device to send to each other without a code. You can also add one by its fingerprint.",
+                )
+                PrimaryButton("Pair a device", { router.openPairing() }, modifier = Modifier.widthIn(max = 260.dp).testTag("paired.emptyPair"))
+                LinkButton("Add by fingerprint", { adding = true }, modifier = Modifier.testTag("paired.emptyAdd"))
+            }
         }
         Column {
             for (device in state.trusted) {

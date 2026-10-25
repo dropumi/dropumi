@@ -89,8 +89,9 @@ fun SettingsScreen(state: AppState) {
             SettingsRow(
                 DSIcons.pair,
                 "Pair a device",
-                "Compare a code once; then send without checks",
-                onClick = { router.push(Screen.Pairing) },
+                "Compare a code once. Then send without a code.",
+                // Through the router: only one pairing screen is ever alive.
+                onClick = { router.openPairing() },
                 modifier = Modifier.testTag("settings.pair"),
             )
             SettingsRow(
@@ -182,7 +183,7 @@ private fun WhoCanSend(state: AppState, onChoose: (ReceiveVisibility) -> Unit) {
         )
         Caption(
             if (state.pairingWindowActive) {
-                "A pairing window is open. A change here applies when it closes."
+                "Receiving is paused while this device is ready to pair. A change here applies after that."
             } else {
                 ScreenText.visibilityCaption(state, now)
             },

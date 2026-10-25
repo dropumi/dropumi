@@ -22,6 +22,9 @@ sealed interface Screen {
     data object ThisDevice : Screen
     data object PairedDevices : Screen
     data object Pairing : Screen
+
+    /** Connect by address in its pair mode: opened from the pairing screen. */
+    data object PairByAddress : Screen
     data object Licences : Screen
 
     /** One licence notice, by its asset name (one of [LICENCE_ASSETS]). */
@@ -71,10 +74,32 @@ class Router(initialTab: Tab = Tab.NEARBY, initialStacks: Map<Tab, List<Screen>>
         tab = Tab.NEARBY
     }
 
+    /**
+     * Opens the pairing screen in the current tab (Settings from Transfers),
+     * above what is open there, so Done returns to it; if the tab already
+     * has it, back to it. The other tab's one is closed: only one pairing
+     * screen is ever alive, so this device has one window.
+     */
     fun openPairing() {
-        stacks = stacks + (Tab.SETTINGS to listOf(Screen.Pairing))
-        tab = Tab.SETTINGS
+        when (tab) {
+            Tab.NEARBY -> {
+                stacks = stacks + (Tab.SETTINGS to cut(stack(Tab.SETTINGS), at = Screen.Pairing))
+                stacks = stacks + (Tab.NEARBY to (upTo(stack(Tab.NEARBY), Screen.Pairing) ?: (stack(Tab.NEARBY) + Screen.Pairing)))
+            }
+            Tab.SETTINGS -> {
+                stacks = stacks + (Tab.NEARBY to cut(stack(Tab.NEARBY), at = Screen.Pairing))
+                stacks = stacks + (Tab.SETTINGS to (upTo(stack(Tab.SETTINGS), Screen.Pairing) ?: (stack(Tab.SETTINGS) + Screen.Pairing)))
+            }
+            Tab.TRANSFERS -> {
+                stacks = stacks + (Tab.NEARBY to cut(stack(Tab.NEARBY), at = Screen.Pairing))
+                stacks = stacks + (Tab.SETTINGS to listOf(Screen.Pairing))
+                tab = Tab.SETTINGS
+            }
+        }
     }
+
+    /** Pair by address, above the pairing screen of the current tab. */
+    fun openPairByAddress() = push(Screen.PairByAddress)
 
     fun openThisDevice() {
         stacks = stacks + (Tab.SETTINGS to listOf(Screen.ThisDevice))
@@ -88,6 +113,18 @@ class Router(initialTab: Tab = Tab.NEARBY, initialStacks: Map<Tab, List<Screen>>
     }
 
     companion object {
+        /** The stack without [at] and what follows it. */
+        private fun cut(stack: List<Screen>, at: Screen): List<Screen> {
+            val index = stack.indexOf(at)
+            return if (index < 0) stack else stack.take(index)
+        }
+
+        /** The stack up to and including [screen], or null if it has none. */
+        private fun upTo(stack: List<Screen>, screen: Screen): List<Screen>? {
+            val index = stack.indexOf(screen)
+            return if (index < 0) null else stack.take(index + 1)
+        }
+
         private fun token(screen: Screen): String = when (screen) {
             // The chosen device is a peer string: not saved.
             is Screen.Send -> "send"
@@ -95,6 +132,7 @@ class Router(initialTab: Tab = Tab.NEARBY, initialStacks: Map<Tab, List<Screen>>
             Screen.ThisDevice -> "thisDevice"
             Screen.PairedDevices -> "paired"
             Screen.Pairing -> "pairing"
+            Screen.PairByAddress -> "pairAddress"
             Screen.Licences -> "licences"
             is Screen.Licence -> "licence:" + LICENCE_ASSETS.indexOf(screen.asset)
         }
@@ -105,6 +143,7 @@ class Router(initialTab: Tab = Tab.NEARBY, initialStacks: Map<Tab, List<Screen>>
             "thisDevice" -> Screen.ThisDevice
             "paired" -> Screen.PairedDevices
             "pairing" -> Screen.Pairing
+            "pairAddress" -> Screen.PairByAddress
             "licences" -> Screen.Licences
             else -> token.removePrefix("licence:").toIntOrNull()?.let(LICENCE_ASSETS::getOrNull)?.let(Screen::Licence)
         }

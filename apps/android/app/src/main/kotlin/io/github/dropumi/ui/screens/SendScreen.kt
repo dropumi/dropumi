@@ -196,6 +196,13 @@ private fun Targets(state: AppState, selected: String?, peer: NearbyPeer?, onSel
                     "This device isn't paired. You'll both see a code to compare before anything is sent."
                 },
             )
+            if (peer.hintAlias == null) {
+                // Pairing opens above this screen, so the chosen files stay.
+                Column {
+                    Caption("Pair it once to skip the code next time.")
+                    LinkButton("Pair a device", { router.openPairing() }, icon = DSIcons.pair, modifier = Modifier.testTag("send.pair"))
+                }
+            }
         }
         Spacer(Modifier.fillMaxWidth())
     }

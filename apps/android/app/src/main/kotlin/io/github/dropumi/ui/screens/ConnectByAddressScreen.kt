@@ -5,7 +5,8 @@
 // listed nearby. The address needs a port from 1 to 65535 (fixes Apple gap
 // 6). An optional fingerprint pin (at least 24 characters) is checked
 // before anything is sent; without one, both screens show a code to
-// compare first (`allowUnverified`).
+// compare first (`allowUnverified`). Its pair mode (PairByAddressScreen) is
+// opened from the pairing screen, for devices that are not listed.
 package io.github.dropumi.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
@@ -114,12 +115,57 @@ fun ConnectByAddressScreen(state: AppState, picking: DocumentPicking) {
                 {
                     val t = sendTarget() ?: return@OutlineButton
                     val name = target ?: return@OutlineButton
-                    scope.launch { model.pair(t, name) }
+                    model.startPairing(t, name)
                     router.openPairing()
                 },
                 enabled = ready,
+            )
+        }
+    }
+}
+
+/**
+ * Connect by address in its pair mode, opened from the pairing screen: the
+ * address only. Pair asks that address and goes back to the pairing
+ * screen, which shows the request.
+ */
+@Composable
+fun PairByAddressScreen() {
+    val model = LocalModel.current
+    val router = LocalRouter.current
+    val c = DS.colors
+    var address by rememberSaveable { mutableStateOf("") }
+    val target = TargetInput.address(address)
+    val addressProblem = TargetInput.addressProblem(address)
+
+    ScreenColumn {
+        ScreenHeader("Pair by address", "Type the address the other device shows on its Pair a device screen.")
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Address")
+            DSTextField(
+                address,
+                { address = it },
+                label = "Address",
+                placeholder = "192.168.1.20:47321",
+                monospace = true,
+                keyboardType = KeyboardType.Uri,
+                isError = addressProblem != null,
+                modifier = Modifier.testTag("address.field"),
+            )
+            if (addressProblem != null) Caption(addressProblem, color = c.danger)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton(
+                "Pair",
+                {
+                    val t = target ?: return@PrimaryButton
+                    model.startPairing(SendTarget.Address(t, null), t)
+                    router.openPairing()
+                },
+                enabled = target != null,
                 modifier = Modifier.testTag("address.pair"),
             )
+            Caption("You'll compare a code next.")
         }
     }
 }

@@ -201,7 +201,6 @@ private fun ChooseFilesCard(onChooseFiles: () -> Unit) {
 private fun DeviceList(state: AppState, title: String, onSend: (String) -> Unit) {
     val model = LocalModel.current
     val router = LocalRouter.current
-    val scope = LocalAppScope.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SectionHeading(title)
         if (state.nearby.isEmpty()) {
@@ -218,11 +217,12 @@ private fun DeviceList(state: AppState, title: String, onSend: (String) -> Unit)
                 peer,
                 onSend = { onSend(peer.instance) },
                 onPair = {
-                    scope.launch { model.pair(SendTarget.Nearby(peer.instance), peer.name) }
+                    model.startPairing(SendTarget.Nearby(peer.instance), peer.name)
                     router.openPairing()
                 },
             )
         }
+        LinkButton("Pair a device", { router.openPairing() }, icon = DSIcons.pair, modifier = Modifier.testTag("nearby.pair"))
     }
 }
 
