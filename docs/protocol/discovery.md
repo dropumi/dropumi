@@ -175,6 +175,40 @@ before Dropumi sees them; how it treats key case is UNVERIFIED.
   lost only when the last interface loses it. Resolving only on the first interface left a device with one
   address that could refuse connections on a Mac with virtual-machine bridges (run 2026-10-25-01, Finding 3;
   `DropumiCoreTests` `BonjourInstancesTests`).
+- *Reference (Android app, [ADR-0013](../adr/0013-android-app.md) D5):* the NSD adapter
+  (`apps/android/core/src/main/kotlin/io/github/dropumi/core/discovery/`) only moves bytes between `NsdManager` and the
+  facade; every rule above stays in Rust.
+  - **Advertising is gated (R21).** NSD has no public way to choose the SRV host, so a registration may publish the
+    system's host name, which §3 forbids. The adapter registers only where an allowlist of (API level, Connectivity
+    module version) pairs, observed to publish a host label that is random per advertisement, allows it. Keys are exact
+    observed versions or ranges whose ends were both observed, never "this version or later"; an unreadable module
+    version keeps the gate closed. **The allowlist is empty** (no observation has been made, [§12](#12-platform-caveats)),
+    so the app passes `ReceiveOptions.advertise = false` and the core never calls `advertise`: on every Android device
+    the app browses but is not listed by others, and peers reach it only through an address typed by hand (a paired
+    device stores no address, so pairing does not change this; it only removes the code check). Nearby says so. If
+    `advertise` is called anyway, it refuses.
+  - **Where the gate is open (none today):** `advertise` returns the requested name at once without waiting for
+    NSD's answer (as on Apple), and refuses when the device has no IPv4 address on a Wi-Fi or Ethernet network. The
+    TXT record is copied as UTF-8 strings (the values come from Rust strings, so nothing is lost). If NSD registers a
+    different name later (a conflict rename), the adapter unregisters it at once and, until that completes, drops
+    browse results with that name: the one adapter-side filter, a deliberate exception to "Rust owns every rule",
+    because the core has already recorded the requested name. Such late failures, and a failed registration, cannot
+    reach the core, so the adapter reports them to the app's model, which shows them on Nearby. `withdraw`
+    unregisters.
+  - **Browsing** runs between `startBrowse` and `stopBrowse`, which the app calls only while a device list is on
+    screen. Resolving is bounded: below API 34 one resolve at a time from a first-in, first-out queue of at
+    most 64 names (deduplicated, overflow dropped), with `FAILURE_ALREADY_ACTIVE` retried at most three times; from
+    API 34 at most 64 service-info callbacks, removed when a service is lost, when browsing stops and when a new
+    session starts. NSD returns TXT as a map (order and duplicate keys are lost; a key without a value becomes an
+    empty value, as §4.2 reads it). Addresses are passed on as NSD reports them; Rust keeps IPv4 and drops loopback.
+    The adapter never connects to a device to learn about it.
+  - **Threading.** All adapter state lives on one `dropumi-nsd` thread; every NSD callback hops to it first, whatever
+    thread NSD used. Each browse session and each registration gets a new listener object (NSD refuses a reused one),
+    and callbacks from an older session are ignored. The browse sink is never called on the main thread.
+  - **No `MulticastLock`** is taken and `CHANGE_WIFI_MULTICAST_STATE` is not requested: whether browsing needs them has
+    not been observed. `LocalAddresses` reads only Wi-Fi and Ethernet networks, never one that also has cellular
+    transport, without loopback or link-local addresses.
+  - Every failure reaches Rust as a fixed phrase, never an exception's text or stack trace.
 - *Reference:* the adapter uses one lazily created `mdns-sd` daemon per process. A browse collects resolved and
   removed services until its timeout, keeps one entry per full instance name, and reports each discovered peer once,
   sorted by instance name, with its full instance name, sanitized name, `fp` hint, IPv4 addresses (sorted), port and
@@ -286,7 +320,9 @@ Status values use the project's labels. "UNVERIFIED" marks a statement that nobo
 | Windows | Windows Defender Firewall may prompt for, or block, the first listening socket. Sharing UDP 5353 with the system DNS client service is untested. Windows also has native DNS-SD APIs (`DnsServiceRegister`, `DnsServiceBrowse`) that a future native adapter could use. | Requires investigation |
 | iOS / iPadOS | Raw multicast on iOS needs a restricted entitlement (according to the design research), so the app uses Bonjour (`DNSService*`) behind `dropumi-ffi`'s `PlatformDiscovery` instead of `mdns-sd`, with the proxy registration described in §7 so the SRV target is the random host. Discovery between the app on a device and other devices, and the SRV host name a device publishes, are checked in the device matrix (DISC-1 to DISC-4). | Not tested (devices) |
 | iOS 27.0 simulator | Inside the app's process, DNS-SD requests are accepted but never answered (registration, browse and resolve alike; no Local Network question appears), while the same calls from a plain test process in the same simulator work. Bonjour in the app can therefore only be tested on a device. The app must not depend on an answer: receiving starts without waiting for the registration. | Observed (local run, 2026-10-15); cause UNVERIFIED |
-| Android | The app (milestone 2, in progress) uses Network Service Discovery (`NsdManager`) behind `PlatformDiscovery`. NSD returns TXT as a map (order and duplicates lost); resolving is serial below API 34; the published host name is checked before the app advertises. | Not tested (no app yet) |
+| Android | The app uses Network Service Discovery (`NsdManager`) behind `PlatformDiscovery` (§7). NSD returns TXT as a map (order and duplicates lost); resolving is serial below API 34. | Not tested (LAN, devices) |
+| Android, SRV host label per (API level, Connectivity module version) | Not observed on any image or device: the observation (ADR-0013 spike S-AN2: an emulator packet capture per image, `dns-sd -L` against a real device) has not run. **Findings: none.** The R21 gate's allowlist is therefore empty and the app does not advertise anywhere (§7). Whether browsing needs a `MulticastLock`, and discovery with Wi-Fi that has no internet while mobile data is on (device matrix NET-5), are not recorded either. | Not tested |
+| Android 8.0 (API 26) and 9 (API 28) `google_apis` emulators, Android 16 (API 36.1) Play `Tablet` emulator, all arm64-v8a (macOS 27 arm64 host) | NSD inside one emulator: the app's NSD port registers a service, browses and resolves it in the same guest. This says nothing about a LAN or about what other devices see. | Automated test passed (`nsdSelfRegistrationResolvesInGuest`, emulator, same guest, no LAN, 2026-10-16) |
 | All app platforms | The facade's rules (TXT parsing, IPv4 only, self-filtering, 256-device cap, sending to a listed device) | Automated test passed (`dropumi-ffi` with an in-memory discovery adapter, loopback, local run on macOS 27) |
 
 Any future native discovery adapter (Bonjour, NSD, Windows DNS-SD) MUST publish the same service type and TXT keys
@@ -307,6 +343,9 @@ non-ignored tests passed; CI has not run yet.
 | Name binding before msg3 (fake discovery) | `domain connection::tests::expectation_rules`, `application/channel name_target_binds_fp_hint`, `application/channel fp_prefix_unique_trust_pins_full_key` | Automated test passed (local run on macOS 27) |
 | Facade discovery rules (app adapters) | `ffi discovery::tests::browse_sink_parses_txt_with_infra_rules`, `ffi discovery::tests::invalid_utf8_txt_value_treated_as_empty`, `ffi discovery::tests::ipv6_and_loopback_filtered`, `ffi discovery::tests::peer_table_capped`, `ffi discovery::tests::own_advertisement_not_listed_and_lost_removes_peer`, `ffi discovery::tests::hint_alias_only_for_a_single_trust_match`, `ffi discovery::tests::advertise_uses_random_instance`; `ffi/discovery` (advertising and withdrawal, nearby sends, copied hints) | Automated test passed (in-memory adapter, loopback, local run on macOS 27) |
 | Real mDNS between two processes | `e2e discovery::mdns_discover_and_send_by_fingerprint`: ignored by default; runs with `DROPUMI_TEST_MDNS=1 cargo test -p dropumi-cli --test e2e --all-features --locked -- --ignored mdns_` and uses `--mdns-loopback` | Automated test passed (opt-in, loopback, local run on macOS 27); Not tested (pending CI, experimental job) on Ubuntu 24.04 x64 (`ubuntu-latest`); no CI job runs it on macOS or Windows runners |
+| Android NSD adapter (fake NSD on the host JVM) | `NsdAdapterTest`: `nsdRenamedRegistrationIsWithdrawnAndDropped`, `registeredUnderTheRequestedNameIsRegistered`, `nsdResolveQueueIsBoundedAt64`, `nsdServiceInfoCallbacksBoundedAt64`, `nsdAlreadyActiveRetriesAtMostThreeTimes`, `nsdStaleSessionCallbacksAreIgnored`, `nsdNewListenerPerSession`, `nsdTxtNullValueBecomesEmpty`, `nsdAdvertiseWithoutIpv4Fails`, `nsdLateRegistrationFailureIsReported`, `nsdSinkNeverCalledOnMainThread`, `aFailingSinkDoesNotStopTheAdapter`; `HostLabelGateTest`: `nsdGateClosedByDefault`, `nsdGateOpensOnlyForObservedPairs`, `nsdGateClosedWhenModuleVersionUnreadable`, `nsdGateClosedOutsideObservedRange`; `CallbackLeakTest callbacksNeverLeakStackTraces`; `LocalAddressesTest`: `localAddressesExcludeLoopbackAndLinkLocal`, `localAddressesUseWifiAndEthernetNeverCellular`; `AppModelTest`: `gateClosedReceivesWithAdvertiseFalse`, `nsdLateRegistrationFailureReachesAppModel` | Automated test passed (host JVM, macOS 27 arm64, 2026-10-16) |
+| Android NSD inside one emulator, and the browse-only notice | `NsdInGuestTest nsdSelfRegistrationResolvesInGuest`; `UiStateTest advertisingOffExplainsBrowseOnly` (UI state test, fake core) | Automated test passed (arm64-v8a emulators API 26, 28 and 36.1, same guest, no LAN, 2026-10-16) |
+| Android app's NSD adapter against the CLI | `e2e interop::android::android_nsd_cli_finds_app_at_random_host` (where the gate is open: the CLI finds the app and the SRV host is random; where it is closed, as everywhere today: the app does not advertise), `e2e interop::android::android_nsd_app_finds_cli_and_sends`. Opt-in: `DROPUMI_TEST_ANDROID=1 DROPUMI_TEST_MDNS=1`, a real device on the host's Wi-Fi (`scripts/android/interop.sh` sets `DROPUMI_TEST_MDNS=1` only for a device that is not an emulator) | `android_nsd_cli_finds_app_at_random_host`: Automated test passed (Android 16 arm64-v8a phone and a macOS 27.0.1 arm64 Mac on one Wi-Fi network, 2026-10-26; the gate is closed, so it checks that the app does not advertise). `android_nsd_app_finds_cli_and_sends`: failed on that phone on 2026-10-26 (the app listed no device before the timeout); it also failed on 2026-10-18 and 2026-10-25. Intermittent; cause not established (open finding). On emulators both print a skip line |
 | Apple app's Bonjour adapter against the CLI | `e2e interop::apple::apple_macos_bonjour_cli_finds_app_at_random_host` (the CLI finds the app; `dns-sd -L` shows a `dropumi-…` SRV host; an unpaired sender is refused), `e2e interop::apple::apple_macos_bonjour_app_finds_cli_and_sends` (the app finds the CLI and sends through the resolved address). Opt-in: `DROPUMI_TEST_APPLE=1 DROPUMI_TEST_MDNS=1`, asks the macOS Local Network question once | Not tested |
 | Discovery between real devices on a LAN | none | Not tested |
 
@@ -322,6 +361,8 @@ non-ignored tests passed; CI has not run yet.
 | 2026-10-14 | Default names always contain a 0, 1, 8 or 9 (§4.1) and are never classified as fingerprint prefixes; the default-name note in the target rules updated; test status updated to the final local runs. |
 | 2026-10-14 | Milestone 2: native adapters through `dropumi-ffi` (self-filtering, raw TXT bytes, Android's map, bounded browsing while a list is visible, sending to a listed device), the open question about the host name native adapters publish, platform caveats for the apps. |
 | 2026-10-15 | Milestone 2 (Apple apps): the Bonjour adapter's proxy registration with a random SRV host, registration without waiting for DNS-SD's answer, the iOS 27.0 simulator observation, the app's interop tests. |
+| 2026-10-16 | Milestone 2c (Android app): the NSD adapter (§7: the R21 gate, empty, so the app is browse-only; the rename rule; resolve bounds; threading); §12 host-label findings (none observed) and the in-guest emulator run; §13 the Android tests. §3 is unchanged. |
+| 2026-10-26 | Android: a paired device stores no address, so other devices reach the browse-only phone only through a typed address (§7); the `android_nsd_*` results on a real phone (§13). No rule changed. |
 
 [RFC 6762]: https://www.rfc-editor.org/rfc/rfc6762
 [RFC 6763]: https://www.rfc-editor.org/rfc/rfc6763

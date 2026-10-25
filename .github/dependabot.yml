@@ -42,6 +42,21 @@ updates:
     cooldown: { default-days: 7, semver-major-days: 14 }
     open-pull-requests-limit: 5
     commit-message: { prefix: chore, include: scope }
+    ignore:
+      # The Compose compiler plugin must equal the Kotlin version AGP bundles;
+      # it is bumped by hand together with AGP. See docs/dependencies.md.
+      - dependency-name: org.jetbrains.kotlin.plugin.compose
+      - dependency-name: org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin
+      # The app compiles against API 36 (ADR-0013 D2). These versions declare
+      # minCompileSdk 37 in their AAR metadata, so the ffi (android) job would
+      # fail and block the whole minor-and-patch group. Drop these entries in
+      # the change that moves compileSdk to 37. See docs/dependencies.md.
+      - dependency-name: androidx.compose:compose-bom
+        versions: ["[2026.08.00,)"]
+      - dependency-name: "androidx.lifecycle:*"
+        versions: ["[2.11.0,)"]
+      - dependency-name: androidx.core:core-ktx
+        versions: ["[1.19.0,)"]
     groups:
       gradle-minor-and-patch:
         applies-to: version-updates

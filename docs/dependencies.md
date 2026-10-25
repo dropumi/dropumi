@@ -101,21 +101,41 @@ without it). `scripts/ci/check-architecture.sh` also fails if `ring` appears in 
 
 ## App-side dependencies
 
-Not part of the Cargo graph, so `cargo deny` does not see them. Each is pinned and listed here; Dependabot watches
-`apps/android` (Gradle).
+Not part of the Cargo graph, so `cargo deny` does not see them. Each is pinned in
+`apps/android/gradle/libs.versions.toml` and listed here; Dependabot watches `apps/android` (Gradle). Licences were
+checked against each artifact's POM. Not used on Android: navigation-compose, Hilt or Dagger, Room or DataStore,
+core-splashscreen, Accompanist, Coil, Material icons, Firebase, Play Services, and any analytics or crash SDK.
 
 | Dependency | Version | License | Where | Purpose and justification |
 |---|---|---|---|---|
 | JNA (`net.java.dev.jna:jna`, AAR for Android, JAR for host tests) | 5.19.1 | Apache-2.0 OR LGPL-2.1-or-later (taken under Apache-2.0) | `apps/android/core-bindings` | The UniFFI Kotlin bindings call the Rust library through JNA. 5.17.0 and later build `libjnidispatch.so` for 16 KB pages; `scripts/ffi/check-16k.sh` passed on every ABI of the 5.19.1 AAR. `libjnidispatch.so` (arm64-v8a) is 176,520 bytes. |
-| Android Gradle Plugin (`com.android.library`) | 9.4.1 | Apache-2.0 | `apps/android` (build time) | Builds the Android library; its built-in Kotlin compiles the bindings. |
+| Android Gradle Plugin (`com.android.application`, `com.android.library`) | 9.4.1 | Apache-2.0 | `apps/android` (build time) | Builds the app and the Android libraries; its built-in Kotlin (Kotlin Gradle plugin 2.2.10, read with `./gradlew -p apps/android buildEnvironment`) compiles all Kotlin code. |
+| Compose compiler Gradle plugin (`org.jetbrains.kotlin.plugin.compose`) | 2.2.10 | Apache-2.0 | `apps/android/app` (build time) | Compiles `@Composable` code. **Coupled to AGP:** its version must equal the Kotlin version AGP bundles, so Dependabot ignores it (`.github/dependabot.yml`) and it is bumped by hand in the same change as AGP, after checking `buildEnvironment`. |
+| Jetpack Compose (`androidx.compose:compose-bom`: `ui`, `foundation`, `material3`, `ui-tooling-preview`) | BOM 2026.06.01 (Compose 1.11.4, Material 3 1.4.0) | Apache-2.0 | `apps/android/app` | The UI toolkit (ADR-0013 D1). Material 3 is used for its components only; dynamic colour is off and the design.md tokens are mapped onto it. `ui-tooling-preview` holds only the `@Preview` annotations (no `ui-tooling`, whose debug activity would be exported). Compose brings `androidx.graphics:graphics-path` 1.0.1 (Apache-2.0), which ships a native library, `libandroidx.graphics.path.so`, for both ABIs. BOM 2026.08.00 and later (Compose 1.12; `ui-android` 1.12.0 declares `minCompileSdk=37`) need compileSdk 37; the app compiles against 36 (ADR-0013 D2), so Dependabot ignores those BOMs (`.github/dependabot.yml`). |
+| `androidx.activity:activity-compose` | 1.13.0 | Apache-2.0 | `apps/android/app` | `setContent`, `BackHandler` and predictive back, the activity-result APIs, `enableEdgeToEdge`. |
+| `androidx.lifecycle:lifecycle-runtime-compose`, `lifecycle-process` | 2.10.0 | Apache-2.0 | `apps/android/app` | `collectAsStateWithLifecycle`; `ProcessLifecycleOwner`, so leaving the app stops accepting without reacting to configuration changes. 2.11.0 needs compileSdk 37 (`lifecycle-runtime-compose-android` 2.11.0 declares `minCompileSdk=37`), so Dependabot ignores `androidx.lifecycle` 2.11.0 and later. |
+| `androidx.core:core-ktx` | 1.18.0 | Apache-2.0 | `apps/android/app`, `apps/android/overlayhelper` | `NotificationCompat`, `ServiceCompat`, `IntentCompat`, `ContextCompat`. It declares the signature-level `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` in the merged manifest. 1.19 needs compileSdk 37 (`core` 1.19.0 declares `minCompileSdk=37`), so Dependabot ignores 1.19.0 and later. |
+| `org.jetbrains.kotlinx:kotlinx-coroutines-android` | 1.11.0 | Apache-2.0 | `apps/android/core` (API), `apps/android/app` | Coroutines, `StateFlow` and the main dispatcher (it was already transitive through Compose; now declared). The Kotlin standard library (Apache-2.0) resolves to 2.2.20. |
+| `org.jetbrains.kotlinx:kotlinx-coroutines-test` | 1.11.0 | Apache-2.0 | `apps/android/{core,appstate,testsupport,app}` (tests only) | Virtual time for the JVM tests. Not in any app. |
+| AndroidX Test (`androidx.test:runner` 1.7.0, `androidx.test:rules` 1.7.0, `androidx.test.ext:junit` 1.3.0, `androidx.test.uiautomator:uiautomator` 2.4.0, `androidx.test.espresso:espresso-core` 3.7.0) and `androidx.compose.ui:ui-test-junit4` (from the BOM) | see the name | Apache-2.0 | `apps/android/app` (instrumented tests only) | The instrumented tests, the custom runner, key injection and the overlay-helper tests. Only in the test APK. `ui-test-junit4` brings `espresso-core` 3.5.0, which calls `InputManager.getInstance()`, removed on API 36, so every Compose test failed there. 3.7.0 is a new pinned version (test APK only, Apache-2.0): declaring it directly makes Gradle's conflict resolution pick it over the 3.5.0 that `ui-test-android` asks for (`./gradlew :app:dependencyInsight --configuration debugAndroidTestRuntimeClasspath --dependency androidx.test.espresso:espresso-core`: "By conflict resolution: between versions 3.7.0 and 3.5.0"). `ui-test-manifest` is deliberately not used: as a `debugImplementation` it would add an exported activity to debug APKs. |
+| Compose accessibility checks (`androidx.compose.ui:ui-test-junit4-accessibility`, from the BOM) and the Accessibility Test Framework it brings (`com.google.android.apps.common.testing.accessibility.framework:accessibility-test-framework`) | 1.11.4; ATF 4.1.1 | Apache-2.0 | `apps/android/app` (instrumented tests only) | `enableAccessibilityChecks()` for the UI state tests (touch targets, contrast, labels on Nearby, the unverified offer, the code screen and Transfers). Only in the test APK; the app shows nothing from it. ATF brings, also only into the test APK: Guava 31.0.1-android with `failureaccess` 1.0.1, `jsr305` 3.0.2 and `j2objc-annotations` 1.3 (Apache-2.0), `protobuf-javalite` 3.19.1 (BSD-3-Clause), jsoup 1.15.1 (MIT), Hamcrest 1.3 (BSD-3-Clause), Material Components 1.2.0-rc01 and older AndroidX view libraries such as `appcompat` 1.1.0 (Apache-2.0), and Guava's `checker-compat-qual` 2.5.5 annotations: its POM lists two licences, GPL-2.0 with the Classpath Exception and MIT, and the Checker Framework's `LICENSE.txt` (tag `checker-framework-2.5.5`) puts its annotations under MIT; the JAR holds only 10 annotation classes (`org.checkerframework.checker.nullness.compatqual`), so it is taken under MIT. Licences read from each POM or its parent POM. |
 | Gradle wrapper | 9.8.1 | Apache-2.0 | `apps/android/gradlew`, `gradlew.bat`, `gradle/wrapper/` (committed, generated by Gradle) | Reproducible Gradle version; `distributionSha256Sum` pins the download, and CI validates the wrapper JAR (`gradle/actions/setup-gradle`). |
-| JUnit | 4.13.2 | EPL-1.0 | `apps/android/core-bindings` (tests only) | The Kotlin binding tests on the host JVM. Not in any app. |
+| JUnit | 4.13.2 | EPL-1.0 | `apps/android/{core-bindings,core,appstate,testsupport,app}` (tests only) | The Kotlin JVM tests and the instrumented tests. Not in any app. |
 | Swift packages | none | — | `apps/apple/DropumiKit`, `apps/apple` | The Swift side has no third-party code dependencies. |
-| Plus Jakarta Sans (variable font, `PlusJakartaSans-Variable.ttf`) | from `google/fonts` (`ofl/plusjakartasans`), SHA-256 `89b3fb38aa0d275d7a731d0d817a4f1622b316b4d7fbdedcf02ee9099ff68bc8` | OFL-1.1 | `apps/apple/DropumiKit/Sources/DropumiDesign/Resources/Fonts/` (with `OFL.txt`), bundled in the apps and the Share Extension | The typeface design.md specifies. Bundled so the apps never download a font. The OFL allows bundling with software; the font is not sold on its own and keeps its name. |
+| cargo-about | 0.9.2 | MIT OR Apache-2.0 | developer machines (build time; `cargo install --locked cargo-about --features cli`) | Generates the Rust crate notices the Android app bundles (`scripts/android/rust-notices.sh` → `apps/android/app/src/main/assets/licenses/rust-crates.txt`), offline from the local Cargo registry. A build tool, not a crate dependency; never part of an app. |
+| Plus Jakarta Sans (variable font, `PlusJakartaSans-Variable.ttf`) | from `google/fonts` (`ofl/plusjakartasans`), SHA-256 `89b3fb38aa0d275d7a731d0d817a4f1622b316b4d7fbdedcf02ee9099ff68bc8` | OFL-1.1 | `apps/apple/DropumiKit/Sources/DropumiDesign/Resources/Fonts/` (with `OFL.txt`), bundled in the apps and the Share Extension; the same file in `apps/android/app/src/main/res/font/plus_jakarta_sans.ttf` (Android resource names must be lower-case), with `OFL.txt` in `apps/android/app/src/main/assets/licenses/` | The typeface design.md specifies. Bundled so the apps never download a font. The OFL allows bundling with software; the font is not sold on its own and keeps its name. On Android each weight sets the font's `wght` axis. |
+| Lucide icons (33 icons converted to vector drawables) | `lucide-static` 1.57.0 (npm tarball SHA-256 `afc8602c5231ce64ee227286f93772d0438eddd3b947b645bc14bfd1e49da518`) | ISC; 14 of them (`smartphone`, `monitor`, `upload`, `info`, `link`, `plus`, `x`, `music`, `circle-x`, `circle-alert`, `triangle-alert`, `arrow-left`, `chevron-right`, `ellipsis-vertical`) derive from Feather and are also MIT | `apps/android/app/src/main/res/drawable/lucide_*.xml`, licence in `apps/android/app/src/main/assets/licenses/LUCIDE-ISC.txt` (Lucide's `LICENSE`, verbatim, with the Feather MIT notice) | The icon set design.md specifies. Each file carries its SPDX identifier (`ISC`, or `ISC AND MIT` for the Feather-derived ones) and the icon's name and version. Circles, rectangles and lines were converted to path data; the stroke style is unchanged (2 px, round caps and joins); `arrow-left` and `chevron-right` are mirrored in right-to-left layouts. No icon font and no Material icons. |
 | xcodegen | 2.46.0 | MIT | developer machines and the `apple (app)` CI job (build time) | Generates the Xcode project from `apps/apple/project.yml`, so the project file is reviewable YAML instead of a generated `.pbxproj`. CI downloads the release and checks its SHA-256. Never part of an app. |
 
 The UniFFI configuration (`crates/ffi/uniffi.toml`) uses JNA's cleaner instead of Android's `SystemCleaner`, so one
 generated Kotlin file serves Android and the host JVM.
+
+**compileSdk 36 coupling.** The app compiles against API 36, and an AAR that declares a higher `minCompileSdk` fails
+the build. Compose BOM 2026.08.00 and later (through its Compose 1.12 artifacts), `androidx.lifecycle` 2.11.0 and
+later, and `androidx.core:core-ktx` 1.19.0 and later declare `minCompileSdk=37` (read from each AAR's
+`aar-metadata.properties`, 2026-10-15). Dependabot ignores those ranges (`.github/dependabot.yml`), so they do not
+block the grouped Gradle update; the change that moves compileSdk to 37 removes those entries and takes the updates
+together.
 
 ## Third-party notices
 
@@ -126,13 +146,25 @@ There are no binary releases yet. Before the first one:
   any `NOTICE` files), BlueOak-1.0.0 (`minicbor`: the license text or its link must reach every recipient) and
   MPL-2.0 (`option-ext`: recipients must be told where its source code is available).
 - The plan is to generate the notices file with `cargo-about` in the release workflow and ship it next to each binary.
-  Whether `cargo-about` picks up Apache `NOTICE` files on its own is UNVERIFIED.
+  The Android app already bundles one for `libdropumi_ffi.so` (`scripts/android/rust-notices.sh`, cargo-about 0.9.2).
+  Its template prints each licence text and the crates that use it; it does not collect Apache `NOTICE` files. None of
+  the 89 third-party crates in the Android graph of `dropumi-ffi` ships a file whose name contains "notice" (checked by
+  file name in the local registry sources, 2026-10-15), so nothing is missing today; a new dependency needs the same
+  check.
 - CC0-1.0, MIT-0 and Unlicense options need no notice; crates with an OR expression may be credited under any one of
   their licenses.
 - App builds add JNA (Apache-2.0, including its `NOTICE` if any) on Android, and the MPL-2.0 `uniffi` runtime crates
-  in every app (recipients must be told where their source code is available).
+  in every app (recipients must be told where their source code is available). The Android app's Rust notices list each
+  crate's repository for that reason.
+- The Android app adds AndroidX, Compose, Kotlin, kotlinx, JNA and the other Apache-2.0 libraries of its runtime
+  classpath (JetBrains annotations, JSpecify, Guava ListenableFuture); `assets/licenses/android-libraries.txt` lists
+  them with the Apache License 2.0 text.
 - The Apple apps bundle Plus Jakarta Sans with its `OFL.txt` (the OFL requires the license to travel with the font).
-  An in-app licenses screen is not built yet; until then the license text is inside the app bundle only.
+  The Android app bundles the font with `OFL.txt` and the Lucide icons with their licence (ISC, plus MIT for the
+  Feather-derived icons) in `assets/licenses/`.
+  The Android app shows these notices, the Rust crate notices and Dropumi's own MPL-2.0 notice (with the source
+  location) under Settings › Licences. The Apple apps have no in-app licenses screen yet; there the license text is
+  inside the app bundle only.
 
 ## Adding a dependency
 

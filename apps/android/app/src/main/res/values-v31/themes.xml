@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<resources>
+    <!-- API 31+: the system splash screen, navy behind the app icon
+         (branding/mobile/README.md). No core-splashscreen library. -->
+    <style name="Theme.Dropumi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/navy</item>
+    </style>
+</resources>

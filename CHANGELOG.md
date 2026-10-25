@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. Milestone 2b adds the Apple app for iPhone, iPad and Mac. The Android app is in progress. Pre-alpha, unaudited.
+Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core changes it needed. Milestone 2b adds the Apple app for iPhone, iPad and Mac. Milestone 2c-1 adds the Android app for phones and tablets, which receives while it is open; background receiving (2c-2) is not implemented. Pre-alpha, unaudited.
 
 #### Apple app (iPhone, iPad, Mac; milestone 2b)
 
@@ -53,6 +53,30 @@ Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core ch
   - Opt-in interop tests that run the app's real core against the CLI on the iOS simulator, on macOS, and on a real iPhone or iPad over Wi-Fi (`scripts/apple/interop.sh`), including the CLI pairing with an app that waits on its pairing screen.
 - **CI.** `apple (app)` (not required; needs Xcode 27).
 - **Build.** The Xcode project is generated with xcodegen. The app build refuses a Rust core older than its sources.
+
+#### Android app (phones and tablets; milestone 2c-1)
+
+- **The app.** Kotlin and Jetpack Compose, minSdk 26 (Android 8.0), targetSdk 36, arm64-v8a and x86_64, over `dropumi-ffi` ([ADR-0013](docs/adr/0013-android-app.md), proposed). Screens as on Apple: onboarding, Nearby, Send (the document picker, the share sheet, or an address), the full-screen offer prompt and code comparison, Transfers and history, Settings, Pair a device, paired devices, this device, connect by address. A navigation bar on phones and a navigation rail on tablets.
+- **Pairing, as on Apple: one screen on both devices.** Open Pair a device on both devices, tap Pair next to the other device on one of them, and check that both show the same code before tapping Codes match on both.
+  - The screen makes the phone ready to pair for 5 minutes, with a countdown, the name others see, its addresses, and Stop. Receiving is paused until you leave the screen.
+  - Pair by address is for devices that don't list this phone: type the address the other device's Pair a device screen shows.
+  - Each outcome has its own note above the list or result card, for example "isn't waiting to pair", "You said the codes don't match" or "Time's up".
+  - The notice for a refused device offers Pair a device.
+- **Prompt safety.** No prompt is answered without a tap; there is no default action; Back and Escape decline; Accept is armed 600 ms after the prompt shows and again after the app resumes or regains focus, and `AppModel` ignores an earlier Accept. A tap that passed through another app's overlay is dropped on prompts and trust or policy confirmations and ignored on Send; on API 31+ overlays are hidden while a prompt shows (weaker on API 26-30, disclosed). Nothing shows on the lock screen. A nearby device is never labelled "Paired" before its key is checked.
+- **Sharing into Dropumi.** `ShareActivity` takes files from the share sheet; `UriGuard` refuses `file://` URIs, Dropumi's own providers and any document whose descriptor is one of Dropumi's configuration or history files, before any read. Documents of unknown size are staged in app-private storage under a sanitized name.
+- **Received files stay private.** They are kept in app-private storage (0700, files 0600, never overwritten) until you Save (to Downloads on API 29+, to a folder you pick on API 26-28; never overwrites), Share or Open them. No storage permission.
+- **Discovery.** An NSD adapter, browse-only for now: Android cannot choose the advertised host name, and the app advertises only on Android and module versions observed to publish a random one. None has been observed, so other devices reach an Android device only through an address typed by hand. A paired device stores no address, so pairing does not change this; it only removes the code check.
+- **Transfers keep running after you leave the app** (a `dataSync` foreground service with a private progress notification). Leaving the app stops accepting new connections.
+- **Storage and privacy.** The identity in `noBackupFilesDir`, excluded from cloud backup and device transfer (ADR-0014). Nothing is written to logcat. No traffic beyond the LAN peer and mDNS; the EmojiCompat initializer and the profile-installer receiver are removed.
+- **Licences.** OFL (Plus Jakarta Sans), ISC and MIT (Lucide icons), the Apache notices of AndroidX, Compose, Kotlin, kotlinx and JNA, and the notices of the Rust crates in the core, under Settings › Licences.
+- **Tests.** JVM tests for the core client, NSD adapter, `UriGuard` policy, staging, export rules and `AppModel` (on a fake core); instrumented UI state tests (fake core), an overlay test with a real overlay window from a test-only helper APK, and real-core tests (`scripts/android/ui-tests.sh`); an opt-in harness that runs the app's core in the minified `qa` build against the CLI (`scripts/android/interop.sh`, `DROPUMI_TEST_ANDROID=1`); an opt-in device-to-device test in which the app pairs with the Mac app or the iPhone app and sends files both ways over Wi-Fi (`scripts/devices/interop.sh`, `DROPUMI_TEST_DEVICES=1`). Results per emulator image and device are in [`docs/testing.md`](docs/testing.md). Real device: one phone (Android 16, arm64-v8a), automated tests only, in runs [2026-10-25-01](docs/device-tests/runs/2026-10-25-01.md) and [2026-10-26-01](docs/device-tests/runs/2026-10-26-01.md); the manual device matrix: Not tested.
+- **CI.** `ffi (android)` (not required) runs the JVM tests, builds the debug, release and `qa` APKs, release lint, and audits the merged manifests, logging, the APK's native libraries, 16 KB alignment, and that the fake core is in no app APK. SPDX checks for `.pro`, Java and Android XML files. No emulator job.
+- **Build.** `scripts/ffi/build-android.sh` stamps the core; the app build refuses a stale one and never runs cargo.
+
+#### Changed (milestone 2c-1)
+
+- Threat model: goals G39 to G45; R21, R23, R24, TB7 and ADV7 updated for Android. `discovery.md`: the NSD adapter, the advertising gate (empty, so browse-only), and the Android tests.
+- ADR-0014's Android row: the backup rules for API 26-30 and the test status per emulator image.
 
 #### Changed (milestone 2b)
 

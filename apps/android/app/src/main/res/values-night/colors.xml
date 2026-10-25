@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<resources>
+    <!-- design.md `bg` (dark). -->
+    <color name="window_background">#07121F</color>
+</resources>

@@ -17,3 +17,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "dropumi"
 include(":core-bindings")
+include(":core")
+include(":appstate")
+include(":testsupport")
+include(":app")
+// Test only: draws an overlay window for the R23 tests. Never shipped.
+include(":overlayhelper")

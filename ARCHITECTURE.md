@@ -249,6 +249,16 @@ Default timeouts (`crates/application/src/config.rs`):
 | `DropumiShare` | The App Group inbox shared with the Share Extension. No core. |
 | App targets | SwiftUI screens that render `AppModel`, the prompt presenter, platform hooks: background completion on iOS; the menu bar, notifications and login item on the Mac. |
 
+### The Android app (`apps/android`, [ADR-0013](docs/adr/0013-android-app.md), proposed)
+
+| Module | What it does |
+|---|---|
+| `:core` | `LiveCoreClient` wraps `DropumiNode`; an `EventBridge` hands the facade's listener calls to coroutines without blocking. `NsdDiscovery` implements `PlatformDiscovery` with `NsdManager` on one `dropumi-nsd` thread, behind the R21 gate (closed everywhere today, so the app is browse-only). `ContentUriFile` implements `ForeignFile` for `content://` URIs behind `UriGuard`; `AppPaths` chooses the app-private folders; `ReceivedExport` saves received files to Downloads or a picked folder. |
+| `:appstate` | `AppModel` (`StateFlow<AppState>`) holds every piece of UI state and reduces the core's events, with prompt arming, settings, history and the error catalog. No Android framework calls in its main code, so its tests run on the host JVM. |
+| `:app` | The application, `MainActivity` (every screen and the prompt, in one window), `ShareActivity` (the share target, no UI), the `dataSync` `TransferService`, notifications, and the design system. |
+| `:testsupport` | The fake core and fixtures, used only by tests; no app APK contains it. |
+| `:overlayhelper` | A test-only APK that draws an overlay window for the overlay tests; never shipped. |
+
 ## 7. Memory
 
 **Design estimate, not measured.** Per authenticated session, `channel/io.rs` allocates its record buffers once,
@@ -305,7 +315,7 @@ Planned extension points:
 | Wi-Fi Direct, Wi-Fi Aware, hotspot transports | New `Connector`/`Listener` adapters | The secure channel runs over any `AsyncRead + AsyncWrite` stream. |
 | Keychain, Android Keystore, Windows credential storage | New `IdentityStore` adapters | Today the key is a 0600 file; on the app platforms it stays in app-private storage excluded from backups until then ([ADR-0014](docs/adr/0014-interim-key-storage-on-app-platforms.md)). |
 | Notifications, share sheets, permission prompts | New `Interaction` adapters and future platform ports | The CLI has no OS permission prompts. |
-| Desktop and mobile apps | `apps/apple` (iPhone, iPad, Mac: [ADR-0012](docs/adr/0012-apple-apps.md)), `apps/android` (milestone 2, in progress) | Platform code stays in the apps, behind the facade's callback interfaces. Windows and Linux UIs are undecided. |
+| Desktop and mobile apps | `apps/apple` (iPhone, iPad, Mac: [ADR-0012](docs/adr/0012-apple-apps.md)), `apps/android` (phones and tablets: [ADR-0013](docs/adr/0013-android-app.md), proposed; milestone 2c-1, the foreground app, Automated test passed on arm64-v8a emulators API 26, 28 and 36.1 and on one Android 16 arm64-v8a phone (automated tests only, runs [2026-10-25-01](docs/device-tests/runs/2026-10-25-01.md) and [2026-10-26-01](docs/device-tests/runs/2026-10-26-01.md)), see [`docs/testing.md`](docs/testing.md); background receiving, 2c-2, not implemented) | Platform code stays in the apps, behind the facade's callback interfaces. Windows and Linux UIs are undecided. |
 | Language bindings | `dropumi-ffi` ([ADR-0009](docs/adr/0009-ffi-bindings-strategy.md), Accepted) | Exposes use cases, not ports; Swift and Kotlin are generated. |
 
 The spec's separate `discovery`, `transport`, `security`, `platform` and `testing` crates are deferred. Until then,

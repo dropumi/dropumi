@@ -15,8 +15,8 @@ Copy this file to `docs/device-tests/runs/<YYYY-MM-DD>-<nn>.md`, fill it in duri
 | Item | Value |
 |---|---|
 | Commit tested | `<git rev-parse --short HEAD>` |
-| Build | Debug or Release; Rust core profile from `apps/apple/DropumiKit/Artifacts/core-stamp.txt` |
-| Devices | for example: iPhone 15, iOS 27.0.1 (build …); iPad Air (5th generation), iPadOS 27.0.1; Mac arm64, macOS 27.0.1; Android phone model, Android version |
+| Build | Debug or Release; Rust core profile from `apps/apple/DropumiKit/Artifacts/core-stamp.txt`. Android: debug, `qa` or a locally signed release APK, installed with `adb install`; core profile from `apps/android/core-bindings/build/rust/core-stamp.txt` |
+| Devices | for example: iPhone 15, iOS 27.0.1 (build …); iPad Air (5th generation), iPadOS 27.0.1; Mac arm64, macOS 27.0.1; Android phone model, Android version, API level, ABI, security patch, and the Connectivity module version (`adb shell pm list packages --apex-only --show-versioncode \| grep -i tethering`, API 33+) |
 | Network | for example: home Wi-Fi, 5 GHz, no client isolation; both devices on the same network |
 | Test files | `bash scripts/device-tests/make-test-files.sh <dir> [MiB]`; checked with `shasum -a 256 -c SHA256SUMS` on the receiver (copy the received files to a Mac if needed) |
 
@@ -54,7 +54,7 @@ The core set (DISC-1, PAIR-1, TX-1, TX-3, CAN-1) runs on every pair. For each pa
 | NET-2 | The receiver's Wi-Fi goes off during a transfer | | | |
 | NET-3 | The access point reboots | | | |
 | NET-4 | Client isolation: Connect by address works | | | |
-| NET-5 | Android on Wi-Fi without internet while mobile data is on | | | |
+| NET-5 | Android on Wi-Fi without internet while mobile data is on. Record separately: the address This device shows (Wi-Fi or not), the app sending to the CLI on the Mac, and the CLI sending to the app | | | |
 | BG-1 | iOS: go to the Home Screen during a transfer (background completion) | | | |
 | BG-2 | iOS idle in the background is not listed by other devices | | | |
 | BG-3 | Mac with the window closed: the menu bar receives and notifies; Quit stops advertising | | | |
@@ -71,6 +71,11 @@ The core set (DISC-1, PAIR-1, TX-1, TX-3, CAN-1) runs on every pair. For each pa
 | UI-1 | VoiceOver or TalkBack, the largest text size, keyboard only | | | |
 | UI-2 | iPad: layout, drag from Files | | | |
 | UI-3 | Android rotation and tablet layout | | | |
+| BAK-1 | Android: a device-to-device transfer (the setup wizard's copy from an old phone, through Google's transport) leaves out Dropumi's identity, trust store and history: the new phone shows a new fingerprint. Use a test account and throwaway devices only | | | |
+| OVL-1 | Android: another app's overlay over the offer prompt, the Everyone confirmation and Send. Run `bash scripts/android/ui-tests.sh --class io.github.dropumi.prompt.OverlayWindowTest` against the device: it installs the test-only overlay helper with a per-run token, and its exit trap resets the helper's overlay permission and uninstalls it, so the helper never stays on the device. Record the `overlay:` lines it prints | | | |
+| NSD-1 | Android: the SRV host name NSD publishes for the app (`dns-sd -B _dropumi._tcp`, then `dns-sd -L <instance> _dropumi._tcp local.` on the Mac), with the API level and Connectivity module version. Today the app does not advertise on any version (the R21 gate is closed), so also check that it is not listed | | | |
+| EXP-1 | Android: Save to Downloads (API 29+) or Save to a folder you pick (API 26-28) for one and for several files; a second save of the same name gets a new name and the first is unchanged; the files open in another app | | | |
+| INST-1 | Android: install with `adb install`; note any Play Protect or developer-verification warning, and what it said | | | |
 | UI-4 | Mac: open at login; a chosen receive folder survives a relaunch | | | |
 | MAC-UI | Mac UI state tests (`xcodebuild test -scheme Dropumi-macOS`), after approving UI automation | | | |
 | MAC-BONJOUR | `DROPUMI_TEST_MDNS=1 bash scripts/apple/interop.sh apple_macos_bonjour`, answering the Local Network question | | | |

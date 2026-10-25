@@ -53,7 +53,7 @@ jobs:
             printf '%s' "$bad"
             exit 1
           fi
-      - name: Check MPL-2.0 SPDX headers (TOML, YAML and shell files)
+      - name: Check MPL-2.0 SPDX headers (TOML, YAML, shell and R8 .pro files)
         run: |
           bad=""
           while IFS= read -r -d '' f; do
@@ -64,7 +64,7 @@ jobs:
             if [ "$first" != "# SPDX-License-Identifier: MPL-2.0" ]; then
               bad="${bad}${f}"$'\n'
             fi
-          done < <(git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' ':!*pnpm-lock.yaml')
+          done < <(git ls-files -z -- '*.toml' '*.yml' '*.yaml' '*.sh' '*.pro' ':!*pnpm-lock.yaml')
           if [ -n "$bad" ]; then
             echo "::error::First line (after any #! line) must be '# SPDX-License-Identifier: MPL-2.0' in:"
             printf '%s' "$bad"
@@ -72,7 +72,7 @@ jobs:
           fi
       # Generated bindings are exempt; Package.swift must start with its
       # swift-tools-version line, so its header is on line 2.
-      - name: Check MPL-2.0 SPDX headers (Swift and Kotlin files)
+      - name: Check MPL-2.0 SPDX headers (Swift, Kotlin and Java files)
         run: |
           bad=""
           while IFS= read -r -d '' f; do
@@ -83,7 +83,7 @@ jobs:
             if [ "$first" != "// SPDX-License-Identifier: MPL-2.0" ]; then
               bad="${bad}${f}"$'\n'
             fi
-          done < <(git ls-files -z -- '*.swift' '*.kt' '*.kts' \
+          done < <(git ls-files -z -- '*.swift' '*.kt' '*.kts' '*.java' \
             ':!apps/apple/DropumiKit/Sources/DropumiBindings/DropumiBindings.swift' \
             ':!apps/android/core-bindings/src/main/kotlin/io/github/dropumi/ffi/dropumi_ffi.kt')
           if [ -n "$bad" ]; then
@@ -91,6 +91,48 @@ jobs:
             printf '%s' "$bad"
             exit 1
           fi
+      # The header is on line 1, or on line 2 after an <?xml ...?> declaration.
+      # The Lucide icons (res/drawable/lucide_*.xml) are ISC, or "ISC AND MIT"
+      # where Lucide derives the icon from Feather, and carry a "Derived from
+      # Lucide" line after the header; every other file is MPL-2.0.
+      - name: Check SPDX headers (Android XML files)
+        run: |
+          bad=""
+          count=0
+          while IFS= read -r -d '' f; do
+            count=$((count + 1))
+            n=1
+            case "$(head -n 1 "$f")" in
+              '<?xml'*) n=2 ;;
+            esac
+            first="$(sed -n "${n}p" "$f")"
+            case "$f" in
+              */res/drawable/lucide_*.xml)
+                next="$(sed -n "$((n + 1))p" "$f")"
+                case "$first" in
+                  '<!-- SPDX-License-Identifier: ISC -->' | '<!-- SPDX-License-Identifier: ISC AND MIT -->')
+                    case "$next" in
+                      '<!-- Derived from Lucide (https://lucide.dev, ISC)'*) ;;
+                      *) bad="${bad}${f} (no \"Derived from Lucide\" line)"$'\n' ;;
+                    esac ;;
+                  *) bad="${bad}${f} (expected ISC or ISC AND MIT)"$'\n' ;;
+                esac ;;
+              *)
+                if [ "$first" != "<!-- SPDX-License-Identifier: MPL-2.0 -->" ]; then
+                  bad="${bad}${f}"$'\n'
+                fi ;;
+            esac
+          done < <(git ls-files -z -- 'apps/android/*.xml')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no Android XML files found; the check would pass on nothing"
+            exit 1
+          fi
+          if [ -n "$bad" ]; then
+            echo "::error::Line 1 (line 2 after an <?xml declaration) must be '<!-- SPDX-License-Identifier: MPL-2.0 -->' in:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+          echo "${count} Android XML files have their SPDX header"
 
   clippy:
     name: clippy
@@ -296,14 +338,20 @@ jobs:
             -destination "platform=macOS,arch=arm64" -derivedDataPath apps/apple/build \
             CODE_SIGNING_ALLOWED=NO
 
-  # The FFI for the Android app: the library builds for arm64-v8a and x86_64 with
-  # 16 KB pages, and the Kotlin binding tests pass on the host JVM. Not a required
-  # check. Labels: Android ABIs "Build verified only"; the host JVM tests "Automated
+  # The Android app and its FFI (ADR-0009, ADR-0013): the committed bindings match
+  # the library; the library builds for arm64-v8a and x86_64 with 16 KB pages and
+  # matches its stamp; the JVM unit tests pass; the debug, release and qa APKs, the
+  # instrumented-test APK and the test-only overlay helper build; release lint
+  # passes; and the release checks run on what was built (merged-manifest audit,
+  # the logcat rule, the native library list, 16 KB alignment of the release APK,
+  # and the fake core in no app APK). Nothing runs on an emulator or a device here:
+  # there is no emulator job (spike S-AN4 was not run). Not a required check.
+  # Labels: Android ABIs and APKs "Build verified only"; the JVM tests "Automated
   # test passed (Linux x86_64 host JVM)".
   ffi-android:
     name: ffi (android)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
@@ -313,6 +361,11 @@ jobs:
           rustup default stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with: { key: ffi-android, save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      # Both generators (Swift and Kotlin) are the Rust binaries of
+      # crates/ffi-bindgen; neither needs a Swift toolchain, so the full check
+      # runs here too.
+      - name: Bindings are up to date
+        run: bash scripts/ffi/bindings.sh --check
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with: { distribution: temurin, java-version: "21" }
       # Also validates the Gradle wrapper JAR checksum.
@@ -323,11 +376,13 @@ jobs:
         # failed the step even though the install succeeded.
         run: |
           (yes || true) | "${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager" --install \
-            "ndk;27.1.12297006" "platforms;android-36" > /dev/null
+            "ndk;27.1.12297006" "platforms;android-36" "build-tools;36.0.0" > /dev/null
       - name: Build libdropumi_ffi.so (arm64-v8a, x86_64)
         run: |
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/27.1.12297006"
           bash scripts/ffi/build-android.sh --abis arm64-v8a,x86_64 --profile release
+      - name: The Rust core matches the sources and its stamp
+        run: bash scripts/android/check-core-artifacts.sh --abis arm64-v8a,x86_64 --build-type release
       - name: 16 KB page alignment
         run: bash scripts/ffi/check-16k.sh apps/android/core-bindings/build/rust/jniLibs
       # Negative check: a directory without libraries must fail with the
@@ -346,10 +401,132 @@ jobs:
             echo "::error::check-16k.sh failed without reporting the missing .so files"
             exit 1
           fi
-      - name: Kotlin binding tests (host JVM)
+      - name: JVM unit tests (bindings, core, appstate, testsupport, app)
         run: |
           cargo build --locked -p dropumi-ffi --lib
-          ./apps/android/gradlew -p apps/android --no-daemon --console=plain :core-bindings:testDebugUnitTest
+          ./apps/android/gradlew -p apps/android --no-daemon --console=plain \
+            :core-bindings:testDebugUnitTest :core:testDebugUnitTest :appstate:testDebugUnitTest \
+            :testsupport:testDebugUnitTest :app:testDebugUnitTest
+      # Release is unsigned and qa uses the debug key, so no secret is needed.
+      # qa is built for its R8 mapping and configuration (checked below), the
+      # instrumented-test APK so that its code compiles here and as the fake-core
+      # check's positive control. The lint errors are listed in
+      # apps/android/lint.xml.
+      - name: Build the APKs and run release lint
+        run: |
+          ./apps/android/gradlew -p apps/android --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleRelease :app:assembleQa :app:assembleDebugAndroidTest \
+            :overlayhelper:assembleDebug :app:lintRelease
+      - name: Merged-manifest audit (release, qa, debug)
+        run: bash scripts/android/check-manifest.sh release qa debug
+      - name: Nothing in the app writes to logcat
+        run: |
+          bash scripts/android/check-logging.sh \
+            --r8-config apps/android/app/build/outputs/mapping/release/configuration.txt \
+            --r8-config apps/android/app/build/outputs/mapping/qa/configuration.txt
+      # Exactly this list, so that a dependency update that adds a native
+      # library or an ABI (JNA ships 32-bit libjnidispatch) fails here until it
+      # is reviewed. libandroidx.graphics.path.so comes with Compose.
+      - name: APK native libraries (arm64-v8a and x86_64 only)
+        run: |
+          expected=""
+          for abi in arm64-v8a x86_64; do
+            for lib in libandroidx.graphics.path.so libdropumi_ffi.so libjnidispatch.so; do
+              expected="${expected}lib/${abi}/${lib}"$'\n'
+            done
+          done
+          status=0
+          for apk in release/app-release-unsigned.apk qa/app-qa.apk debug/app-debug.apk; do
+            actual="$(unzip -Z1 "apps/android/app/build/outputs/apk/${apk}" 'lib/*' | LC_ALL=C sort)" || actual=""
+            if [ "${actual}"$'\n' = "${expected}" ]; then
+              echo "ok   ${apk}: lib/arm64-v8a and lib/x86_64 only, each with the three expected libraries"
+            else
+              echo "::error::${apk}: the native libraries differ from the reviewed list"
+              diff <(printf '%s' "${expected}") <(printf '%s\n' "${actual}") || true
+              status=1
+            fi
+          done
+          exit "${status}"
+      - name: 16 KB page alignment (release APK)
+        run: bash scripts/ffi/check-16k.sh apps/android/app/build/outputs/apk/release/app-release-unsigned.apk
+      # The fake core lives only in the test APKs (ADR-0013 D9). Each search
+      # has a positive control, so a search that finds nothing because it looks
+      # in the wrong place fails instead of passing.
+      - name: The fake core is in no app APK (classpaths, R8 mappings, debug dex)
+        run: |
+          status=0
+          apk_dir="apps/android/app/build/outputs/apk"
+          # 1. No :testsupport on an app runtime classpath; the unit-test
+          #    classpath must show it.
+          deps="${RUNNER_TEMP}/app-dependencies.txt"
+          ./apps/android/gradlew -p apps/android --no-daemon --console=plain --quiet :app:dependencies > "${deps}"
+          section() { awk -v c="$1" '$0 ~ "^" c " - " { on = 1; next } on && /^$/ { exit } on' "${deps}"; }
+          for conf in releaseRuntimeClasspath qaRuntimeClasspath debugRuntimeClasspath debugUnitTestRuntimeClasspath; do
+            tree="$(section "${conf}")"
+            if ! grep -qF "project ':appstate'" <<< "${tree}"; then
+              echo "::error::${conf}: missing, or without project ':appstate'"
+              status=1
+            elif [ "${conf}" = debugUnitTestRuntimeClasspath ]; then
+              if grep -qF "project ':testsupport'" <<< "${tree}"; then
+                echo "ok   ${conf} (control): has project ':testsupport'"
+              else
+                echo "::error::${conf} does not show project ':testsupport'; the search does not work"
+                status=1
+              fi
+            elif grep -qF "project ':testsupport'" <<< "${tree}"; then
+              echo "::error::${conf} contains project ':testsupport' (the fake core)"
+              status=1
+            else
+              echo "ok   ${conf}: no project ':testsupport'"
+            fi
+          done
+          # 2. No io.github.dropumi.testsupport class in the release and qa R8
+          #    mappings.
+          for v in release qa; do
+            mapping="apps/android/app/build/outputs/mapping/${v}/mapping.txt"
+            if ! grep -q '^io\.github\.dropumi\.MainActivity -> ' "${mapping}"; then
+              echo "::error::${mapping}: missing, or without io.github.dropumi.MainActivity"
+              status=1
+            elif grep -qF 'io.github.dropumi.testsupport.' "${mapping}"; then
+              echo "::error::${mapping} contains io.github.dropumi.testsupport. (the fake core)"
+              status=1
+            else
+              echo "ok   ${v} mapping.txt: no io.github.dropumi.testsupport."
+            fi
+          done
+          # 3. Nothing from io/github/dropumi/testsupport/ and no FakeCoreClient
+          #    in any dex file of the debug APK; the instrumented-test APK must
+          #    show them.
+          dexdump="${ANDROID_HOME:?}/build-tools/36.0.0/dexdump"
+          for apk in debug/app-debug.apk androidTest/debug/app-debug-androidTest.apk; do
+            dump="${RUNNER_TEMP}/dexdump.txt"
+            "${dexdump}" "${apk_dir}/${apk}" > "${dump}"
+            dexes="$(unzip -Z1 "${apk_dir}/${apk}" 'classes*.dex' | grep -c .)"
+            opened="$(grep -c "^Opened '" "${dump}" || true)"
+            hits="$(grep -cE 'io/github/dropumi/testsupport/|FakeCoreClient' "${dump}" || true)"
+            if [ "${opened}" -ne "${dexes}" ]; then
+              echo "::error::${apk}: dexdump read ${opened} of ${dexes} dex files"
+              status=1
+            elif [ "${apk}" != debug/app-debug.apk ]; then
+              if [ "${hits}" -gt 0 ]; then
+                echo "ok   ${apk} (control): ${hits} fake-core lines in ${dexes} dex files"
+              else
+                echo "::error::${apk} shows no fake core; the search does not work"
+                status=1
+              fi
+            elif ! grep -qF "Class descriptor  : 'Lio/github/dropumi/MainActivity;'" "${dump}"; then
+              echo "::error::${apk}: no io.github.dropumi.MainActivity in its dex files"
+              status=1
+            elif [ "${hits}" -gt 0 ]; then
+              echo "::error::${apk}: ${hits} dex lines name the fake core (io/github/dropumi/testsupport/ or FakeCoreClient)"
+              grep -m 20 -E 'io/github/dropumi/testsupport/|FakeCoreClient' "${dump}" || true
+              status=1
+            else
+              echo "ok   ${apk}: no fake core in ${dexes} dex files"
+            fi
+            rm -f "${dump}"
+          done
+          exit "${status}"
 
   deny:
     name: cargo-deny (${{ matrix.checks }})

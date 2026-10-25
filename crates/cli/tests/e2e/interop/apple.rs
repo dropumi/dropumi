@@ -43,10 +43,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::srv_target;
 use crate::support::*;
 
 #[derive(Clone, Copy, Debug)]
-enum Platform {
+pub(super) enum Platform {
     MacOs,
     IosSimulator,
     /// A real iPhone or iPad over Wi-Fi.
@@ -141,49 +142,20 @@ fn mdns_enabled() -> bool {
     false
 }
 
-/// The host name the app's advertisement points at (its SRV target), read
-/// with `dns-sd -L`, which prints "… can be reached at HOST:PORT …".
-fn srv_target(instance: &str) -> (String, u16) {
-    let mut child = Command::new("dns-sd")
-        .args(["-L", instance, "_dropumi._tcp", "local."])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("run dns-sd");
-    let out = child.stdout.take().expect("stdout");
-    let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(out).lines() {
-            let Ok(line) = line else { break };
-            if let Some(at) = line.find("can be reached at ") {
-                let rest = &line[at + 18..];
-                let target = rest.split_whitespace().next().unwrap_or("").to_owned();
-                let _ = tx.send(target);
-                break;
-            }
-        }
-    });
-    let target = rx.recv_timeout(STEP);
-    let _ = child.kill();
-    let _ = child.wait();
-    let target = target.expect("dns-sd resolved the advertisement");
-    let (host, port) = target.rsplit_once(':').expect("HOST:PORT");
-    (host.to_owned(), port.parse().expect("port"))
-}
-
 fn apple_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/apple")
 }
 
-/// One run of the app-hosted interop XCTest.
-struct AppTest {
+/// One run of the app-hosted interop XCTest (also the device-to-device
+/// agent of `super::devices`).
+pub(super) struct AppTest {
     child: Child,
     statuses: Receiver<Value>,
     log: Arc<Mutex<Vec<String>>>,
 }
 
 impl AppTest {
-    fn start(platform: Platform, scenario: &str, env: &[(&str, &str)]) -> Self {
+    pub(super) fn start(platform: Platform, scenario: &str, env: &[(&str, &str)]) -> Self {
         let dir = apple_dir();
         assert!(
             dir.join("Dropumi.xcodeproj").exists(),
@@ -234,7 +206,7 @@ impl AppTest {
         }
     }
 
-    fn tail(&self) -> String {
+    pub(super) fn tail(&self) -> String {
         let log = self.log.lock().unwrap();
         log[log.len().saturating_sub(40)..].join("\n")
     }
@@ -257,7 +229,7 @@ impl AppTest {
     }
 
     /// Waits for xcodebuild to exit; the XCTest's own assertions must pass.
-    fn finish(mut self) {
+    pub(super) fn finish(mut self) {
         let deadline = Instant::now() + EXIT;
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The core's listener and connections (LAN only, ADR-0013 D1). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- This device's Wi-Fi and Ethernet addresses (LocalAddresses, ADR-0013 D5). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- API 31+: other apps' overlay windows are hidden while a prompt or a
+         trust/policy confirmation shows (ADR-0013 D8, R23). A normal permission. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- Running transfers finish after the user leaves (ADR-0013 D7): the
+         dataSync transfer service, and a partial wake lock held only while
+         it runs. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- API 33+: the transfer progress notification. Asked for in context, from
+         a card on Transfers after a transfer starts, never over a prompt. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Nothing is backed up or moved to a new device (ADR-0013 D3). -->
+    <application
+        android:name=".DropumiApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Dropumi"
+        tools:targetApi="31">
+
+        <!-- Never shown over the lock screen (no showWhenLocked or turnScreenOn):
+             prompts appear only in the unlocked app (ADR-0013 D8). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The share target (ADR-0013 D6): no UI; it hands the shared items to
+             MainActivity in-process and finishes. -->
+        <activity
+            android:name=".ShareActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- Lets running transfers finish after the user leaves (ADR-0013 D7).
+             Not exported: only the app's own model starts it, while visible. -->
+        <service
+            android:name=".TransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Open and Share of received files (ADR-0013 D4): not exported; it
+             grants read access to one received file per explicit action. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- The merged manifest stays network-silent (ADR-0013 D1). EmojiCompat's
+             initializer could ask the Play Services font provider to download a
+             font; it is removed, so emoji use the system font. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
+
+        <!-- profileinstaller's receiver is exported (DUMP-guarded) for ADB-side
+             profile installs, which a sideloaded app does not need; no exported
+             receiver is wanted. The class is a runtime-only dependency, so lint
+             cannot see it from this removal entry (MissingClass). -->
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:ignore="MissingClass"
+            tools:node="remove" />
+    </application>
+</manifest>

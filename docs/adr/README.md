@@ -20,9 +20,10 @@ This directory records the significant architecture, security, protocol and gove
 | [0010](0010-dependency-license-and-ci-supply-chain-policy.md) | Dependency, license and CI supply-chain policy | Accepted | `deny.toml`, `.github/workflows/`, `.github/dependabot.yml` |
 | [0011](0011-browser-companion.md) | Browser companion | Proposed | `poc/web/` (research prototype, part 1) |
 | [0012](0012-apple-apps.md) | Apple apps (iPhone, iPad, Mac) in SwiftUI | Accepted | `apps/apple/`, `scripts/apple/`, `crates/cli/tests/e2e/interop/apple.rs` |
+| [0013](0013-android-app.md) | Android app (phone and tablet) in Kotlin and Jetpack Compose | Proposed | `apps/android/`, `scripts/android/`, `crates/cli/tests/e2e/interop/android.rs` (milestone 2c-1, the foreground app; receiver mode, 2c-2, not implemented) |
 | [0014](0014-interim-key-storage-on-app-platforms.md) | Interim key storage on the app platforms | Accepted | `crates/ffi/src/node.rs` (configuration directory from the app); platform settings in the apps |
 
-ADR-0001 to ADR-0010 are dated 2026-10-13; ADR-0009 was accepted, and ADR-0011 and ADR-0014 were written, on 2026-10-14 (milestone 2). ADR-0012 (Apple apps) was written on 2026-10-15 and supersedes ADR-0008. Number 0013 (Android app) is reserved for milestone 2's Android record.
+ADR-0001 to ADR-0010 are dated 2026-10-13; ADR-0009 was accepted, and ADR-0011 and ADR-0014 were written, on 2026-10-14 (milestone 2). ADR-0012 (Apple apps) was written on 2026-10-15 and supersedes ADR-0008. ADR-0013 (Android app) was proposed on 2026-10-15 for milestone 2c and updated on 2026-10-16 with the 2c-1 implementation and the spike results; it stays Proposed until the maintainers review it.
 
 Related normative and supporting documents:
 
