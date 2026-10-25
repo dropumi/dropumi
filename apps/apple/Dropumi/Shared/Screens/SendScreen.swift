@@ -178,7 +178,29 @@ struct SendScreen: View {
                      : "This device isn't paired. You'll both see a code to compare before anything is sent.")
                     .font(DSFont.meta)
                     .foregroundStyle(DS.textSecondary)
+                if peer.hintAlias == nil {
+                    pairHint
+                }
             }
+        }
+    }
+
+    /// Pairing opens above this screen, so the chosen files stay.
+    private var pairHint: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Pair it once to skip the code next time.")
+                .font(DSFont.meta)
+                .foregroundStyle(DS.textSecondary)
+            Button {
+                router.openPairing()
+            } label: {
+                Label("Pair a device", systemImage: Icons.pair)
+            }
+            .buttonStyle(.plain)
+            .font(DSFont.smallButton)
+            .foregroundStyle(DS.accentText)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("send.pair")
         }
     }
 

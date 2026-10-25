@@ -24,8 +24,11 @@ struct SettingsScreen: View {
                         subtitle: Text("^[\(model.trusted.count) device](inflect: true)"))
                 }
                 .accessibilityIdentifier("settings.paired")
-                NavigationLink(value: SettingsRoute.pairing) {
-                    SettingsRow(symbol: Icons.pair, title: "Pair a device", subtitle: Text("Compare a code once; then send without checks"))
+                // Through the router: only one pairing screen is ever alive.
+                Button {
+                    router.openPairing()
+                } label: {
+                    SettingsRow(symbol: Icons.pair, title: "Pair a device", subtitle: Text("Compare a code once. Then send without a code."))
                 }
                 .accessibilityIdentifier("settings.pair")
                 NavigationLink(value: SettingsRoute.connectByAddress) {

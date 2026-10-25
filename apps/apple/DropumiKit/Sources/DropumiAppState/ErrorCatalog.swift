@@ -37,8 +37,9 @@ public enum ErrorCatalog {
                              message: String(localized: "The other device only accepts files from devices it has paired with."),
                              isSecurity: false)
         case .pairingRejected:
-            return ErrorText(title: String(localized: "Pairing declined"),
-                             message: String(localized: "The other device did not confirm the code. Nothing was saved."),
+            // Both devices get this code, whoever said no, so it blames no one.
+            return ErrorText(title: String(localized: "Pairing not confirmed"),
+                             message: String(localized: "The code was not confirmed on both devices. Nothing was saved."),
                              isSecurity: false)
         case .sasRejected:
             return ErrorText(title: String(localized: "Codes did not match"),

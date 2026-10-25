@@ -39,6 +39,7 @@ final class AppLoader {
         if let scenario = UITestScenario.fromLaunchArguments() {
             let model = scenario.makeModel()
             router.tab = scenario.initialTab
+            router.settingsPath = scenario.initialSettingsPath
             await begin(model)
             scenario.afterStart(model)
             return

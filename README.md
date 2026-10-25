@@ -32,13 +32,14 @@ Milestone 2 is in progress: `dropumi-ffi`, the bridge the native apps use (Swift
 | Windows x86_64 (`x86_64-pc-windows-gnu`, cross-compiled and linked in the Linux container) | Build verified only (not run) |
 | Android aarch64 | Build verified only (core library crates; no app, not run) |
 | iOS aarch64 | Build verified only (core library crates; no app, not run) |
-| Real multi-device LAN | Not tested |
+| Real multi-device Wi-Fi (an iPhone 15's app core and the CLI on a Mac) | Automated test passed (opt-in interop tests, local run); manual device tests Not tested |
 | mDNS discovery, macOS 27 arm64 | Automated test passed (opt-in, loopback, local run on macOS 27) |
 | mDNS discovery, Ubuntu 24.04 x64 (GitHub runner) | Not tested (pending CI, experimental job) |
 | App bridge (`dropumi-ffi`), Swift and Kotlin bindings, macOS 27 arm64 host | Automated test passed (bindings on the host, loopback, local run) |
 | App bridge for iOS devices, the iOS simulator and Android arm64-v8a | Build verified only (library; no app, not run) |
 | Apple app, iOS 27.0 simulator and macOS 27 arm64 | Automated test passed (app tests and the app's core against the CLI on loopback, local run); UI state tests on a fake core |
-| Apple app on iPhone, iPad and on a LAN (Bonjour) | Not tested |
+| Apple app on an iPhone 15 (iOS 27.0.1) and a Mac (macOS 27.0.1 arm64) | Automated test passed (app tests and UI state tests on each device, the app's core against the CLI over Wi-Fi and Bonjour both ways, local run); the manual device matrix is Not tested |
+| Apple app on iPad | Not tested |
 | Android app | In progress (milestone 2); Not tested |
 
 - "Loopback" means both devices were two `dropumi` processes on one machine, talking over `127.0.0.1`.

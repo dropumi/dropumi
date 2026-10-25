@@ -36,6 +36,12 @@ nonisolated enum Interop {
         return value
     }
 
+    /// This device's IPv4 addresses on Wi-Fi or Ethernet (comma-separated),
+    /// so the harness can reach a real device over the LAN.
+    static func wifiAddresses() -> String {
+        LocalAddresses.ipv4().filter { $0.interface.hasPrefix("en") }.map(\.text).joined(separator: ",")
+    }
+
     /// One status line for the harness.
     static func status(_ event: String, _ fields: [String: String] = [:]) {
         var object = fields
@@ -77,6 +83,7 @@ struct AppleInteropTests {
         case "app-sends": try await appSends(model)
         case "app-receives": try await appReceives(model)
         case "app-pairs": try await appPairs(model)
+        case "app-waits": try await appWaits(model)
         case "bonjour-advertise": try await bonjourAdvertise(model)
         case "bonjour-browse-and-send": try await bonjourBrowseAndSend(model)
         default: throw InteropFailure(message: "unknown scenario")
@@ -117,7 +124,7 @@ struct AppleInteropTests {
         let cliFingerprint = try Interop.value("DROPUMI_CLI_FP")
         await model.finishOnboarding(visibility: .everyone)
         let port = try await until("receiving") { model.receiver?.port }
-        Interop.status("listening", ["port": String(port)])
+        Interop.status("listening", ["port": String(port), "addresses": Interop.wifiAddresses()])
         let prompt = try await waitForPrompt(model)
         guard case let .offer(_, _, peer, code, files, _, _, _) = prompt else {
             throw InteropFailure(message: "expected an offer")
@@ -166,13 +173,57 @@ struct AppleInteropTests {
         #expect(model.trusted.map(\.fingerprint) == [cliFingerprint])
     }
 
+    /// The app waits on the pairing screen and the CLI pairs with it. The
+    /// app receives from paired devices, so the screen's window pauses the
+    /// receiver, and the receiver is back once the screen is left.
+    private func appWaits(_ model: AppModel) async throws {
+        let cliFingerprint = try Interop.value("DROPUMI_CLI_FP")
+        await model.finishOnboarding(visibility: .pairedOnly)
+        _ = try await until("receiving", model) { model.receiver?.port }
+        model.enterPairingScreen()
+        let port = try await until("ready to pair", model) { () -> UInt16? in
+            guard case .waiting = model.pairingFlow.phase, let session = model.pairing,
+                  case .window = session.role else { return nil }
+            return session.port
+        }
+        Interop.status("waiting", ["port": String(port), "addresses": Interop.wifiAddresses()])
+        let prompt = try await waitForPrompt(model)
+        guard case let .code(_, _, peer, code, purpose, _) = prompt else {
+            throw InteropFailure(message: "expected a code prompt")
+        }
+        let matches = peer.fingerprint == cliFingerprint && purpose == .pairing
+        Interop.status("code", ["code": code, "matches": String(matches)])
+        await model.answer(prompt, yes: matches)
+        let result = try await until("pairing to end", model) { model.pairing?.result }
+        await model.refreshTrusted()
+        let paired: Bool
+        if case .paired = result { paired = true } else { paired = false }
+        let shown: Bool
+        if case .finished(.paired) = model.pairingFlow.phase { shown = true } else { shown = false }
+        Interop.status("paired", [
+            "paired": String(paired), "shown": String(shown),
+            "trusted": model.trusted.map(\.fingerprint).joined(separator: ","),
+        ])
+        // Done.
+        model.dismissPairing()
+        model.leavePairingScreen()
+        _ = try await until("receiving again", model) { model.receivingPausedForPairing ? nil : model.receiver }
+        Interop.status("receiving", ["banner": model.banner?.title ?? ""])
+        #expect(paired)
+        #expect(shown, "the screen shows the pairing")
+        #expect(model.trusted.map(\.fingerprint) == [cliFingerprint])
+        #expect(model.banner == nil, "the window's pause is not a receiving problem")
+    }
+
     /// The app advertises (Paired only). The harness finds it with the CLI,
     /// checks the advertised host name, then tries to send without being
     /// paired, which must be refused.
     private func bonjourAdvertise(_ model: AppModel) async throws {
         await model.finishOnboarding(visibility: .pairedOnly)
         let receiver = try await until("advertising", model) { model.receiver?.instance != nil ? model.receiver : nil }
-        Interop.status("advertising", ["instance": receiver.instance ?? "", "port": String(receiver.port)])
+        Interop.status("advertising", [
+            "instance": receiver.instance ?? "", "port": String(receiver.port), "addresses": Interop.wifiAddresses(),
+        ])
         let banner = try await until("the refused sender") { model.banner }
         Interop.status("refused", ["title": banner.title])
         #expect(model.prompts.isEmpty, "a sender that isn't paired never reaches a prompt")
@@ -232,7 +283,7 @@ struct AppleInteropTests {
     }
 
     /// Waits, bounded, until `value` returns something. On timeout it
-    /// reports what the model knows about discovery and receiving.
+    /// reports what the model knows about discovery, receiving and pairing.
     private func until<T>(_ what: String, _ model: AppModel? = nil, _ value: () -> T?) async throws -> T {
         let deadline = ContinuousClock.now + .seconds(25)
         while ContinuousClock.now < deadline {
@@ -245,6 +296,7 @@ struct AppleInteropTests {
             "receiving": String(model?.receiver != nil),
             "nearby": String(model?.nearby.count ?? 0),
             "banner": model?.banner?.message ?? "",
+            "pairing": model.map { String(describing: $0.pairingFlow.phase) } ?? "",
         ])
         throw InteropFailure(message: "timed out waiting for \(what)")
     }

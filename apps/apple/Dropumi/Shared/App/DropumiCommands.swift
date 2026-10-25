@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //
 // Keyboard shortcuts (Mac menus, iPad hardware keyboards): ⌘1/⌘2/⌘3 for
-// the tabs, ⌘O to choose files, ⌘, for Settings.
+// the tabs, ⌘O to choose files, ⇧⌘P to pair a device, ⌘, for Settings.
 
 import SwiftUI
 
@@ -15,7 +15,11 @@ struct DropumiCommands: Commands {
                 router.requestFilePicker = true
             }
             .keyboardShortcut("o")
+            Button("Pair a Device…") { router.openPairing() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
         }
+        // Nothing to print, and ⇧⌘P is Pair a Device….
+        CommandGroup(replacing: .printItem) {}
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { router.tab = .settings }
                 .keyboardShortcut(",")

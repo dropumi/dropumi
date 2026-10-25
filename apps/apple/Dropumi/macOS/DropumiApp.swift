@@ -23,7 +23,7 @@ struct DropumiMacApp: App {
         Window("Dropumi", id: MainWindow.id) {
             RootView(loader: appDelegate.loader)
                 .frame(minWidth: 860, minHeight: 600)
-                .modifier(MainWindowLifecycle())
+                .modifier(MainWindowLifecycle(router: appDelegate.loader.router))
         }
         .defaultSize(width: 1120, height: 720)
         .commands { DropumiCommands(router: appDelegate.loader.router) }
@@ -51,7 +51,10 @@ enum MainWindow {
 }
 
 /// Dock icon while the window is open; menu bar only while it is closed.
+/// Closing the window leaves Pair a device: opened again from the menu bar,
+/// the window must not make this device ready to pair by itself.
 private struct MainWindowLifecycle: ViewModifier {
+    let router: Router
     @AppStorage("explainedMenuBar") private var explained = false
 
     func body(content: Content) -> some View {
@@ -59,6 +62,7 @@ private struct MainWindowLifecycle: ViewModifier {
             .onAppear { NSApp.setActivationPolicy(.regular) }
             .onDisappear {
                 NSApp.setActivationPolicy(.accessory)
+                router.closePairing()
                 if !explained {
                     explained = true
                     Notifier.shared.explainMenuBar()
@@ -96,6 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if TestHost.isActive { TestWindowPlacement.keepOnBuiltInDisplay() }
+        #endif
         UNUserNotificationCenter.current().delegate = Notifier.shared
         let loader = loader
         notifications.follow { loader.model }

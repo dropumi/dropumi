@@ -1,7 +1,7 @@
 # ADR-0012: Apple apps (iPhone, iPad, Mac) in SwiftUI
 
 - **Status:** Accepted
-- **Date:** 2026-10-15
+- **Date:** 2026-10-15 (pairing screen revised on 2026-10-21)
 - **Supersedes:** [ADR-0008](0008-ui-framework-strategy.md)
 - **Related:** ADR-0003, ADR-0004, ADR-0007, ADR-0009, ADR-0014, [`../protocol/discovery.md`](../protocol/discovery.md), [`../protocol/threat-model.md`](../protocol/threat-model.md)
 
@@ -36,6 +36,15 @@
   - **No auto-trust.** Accepting an offer never trusts the sender.
   - **Labels.** A nearby device whose hint matches a paired one reads "Looks like ‹alias›", never "Paired". An unverified peer is "Unverified device" with the name it claims.
   - **Literal peer strings.** Peer strings are rendered literally (`Text(verbatim:)`).
+- **Pairing: one screen on both devices (revised 2026-10-21).** Both people open "Pair a device", and one taps the other device. This replaced a screen with two buttons ("Wait for a device" and "Pair"), where nobody knew who should do what.
+  - **Opening the screen is the explicit act.** Showing it opens the core's pairing window (5 minutes) and browses. Stop, leaving the screen and the background close the window; a code comparison under way is kept, since the iOS code prompt covers the screen.
+  - **Always visible.** While the device is ready, the screen shows "Ready to pair" with a countdown, the name other devices see, and Stop. The status pill and the Mac sidebar read "Ready to pair".
+  - **Asking.** When someone taps Pair, that device first closes its own window and waits for it to end, then asks the other device. Both people compare the code in the unchanged code prompt, and both tap Codes match. Trust is stored only on `PairingFinished(.paired)`; the app never answers a code or trusts a device by itself.
+  - **One-shot.** A window ends after one attempt. When its 5 minutes run out, or a device connects without pairing, the screen says so and needs Start again. It never reopens by itself after another device used it. Without a tap it opens again only when this device's own request ended before a code, or when the app returns to the front with the screen still shown. An attempt that reached a code never makes the device ready again without a tap.
+  - **Plain outcomes.** Each outcome has its own text, with no "window", "SAS" or "fingerprint". The app records this device's answer before it sends it, so "You said the codes don't match" is told apart from "“…” didn't confirm the code". A window never names the device that connected to it.
+  - **Receiving hold.** While the window is open, and until the core resumes the receiver it paused, the app never starts or changes the receiver. Choices made meanwhile apply afterwards. Before this, every pairing window showed "Receiving could not start".
+  - **Entry points.** Nearby, Settings, Paired devices (toolbar and empty state), Send for an unpaired device, the refused-device notice ("Pair a device") and, on the Mac, Pair a Device… (⇧⌘P). The screen opens on the current tab, so Done goes back to where it was opened. Closing the Mac window leaves the screen, so reopening the window never makes the device ready by itself.
+  - **App layer only.** No core, FFI, protocol, discovery or trust change. Threat-model G4 is unchanged: PAIR is accepted only inside an explicit, one-shot, 5-minute window.
 - **Share Extension (D1).**
   - It copies shared items into `inbox/.staging-<id>/` in the App Group `group.io.github.dropumi`, writes a manifest of names and sizes, and renames the folder into place in one step.
   - The app checks every batch against its manifest and opens Send with the files.
@@ -65,7 +74,7 @@
 | ID | Question | Result |
 |---|---|---|
 | S-A1 | Can a harness drive an app-hosted XCTest and read its status live? | **Yes**, on the iOS 27.0 simulator and on macOS. `xcodebuild test-without-building` with `TEST_RUNNER_DROPUMI_*` variables; the test's `DROPUMI_STATUS {json}` lines stream on xcodebuild's output while the test runs. |
-| S-A2 | Bonjour: random SRV host, both directions | **Partial.** Proxy registration works from an unsandboxed process on the Mac and from a test process in the simulator (probe registered `dropumi-probe001`); `dns-sd -P` showed a plain registration publishes `LocalHostName`. **Inside the app's process on the iOS 27.0 simulator, DNS-SD requests are accepted but never answered** (registration, browse; no prompt shown). The sandboxed Mac app and real devices: not tested. |
+| S-A2 | Bonjour: random SRV host, both directions | **Partial.** Proxy registration works from an unsandboxed process on the Mac and from a test process in the simulator (probe registered `dropumi-probe001`); `dns-sd -P` showed a plain registration publishes `LocalHostName`. **Inside the app's process on the iOS 27.0 simulator, DNS-SD requests are accepted but never answered** (registration, browse; no prompt shown). On 2026-10-18, the sandboxed Mac app (macOS 27.0.1) and an iPhone 15 (iOS 27.0.1) passed the Bonjour interop tests both ways against the CLI: the CLI found the app at its random host name, and the app found the CLI and sent to it. |
 | S-A3 | `BGContinuedProcessingTask` with a live transfer | Not tested (needs a device). |
 | S-A5 | Does the sandboxed Mac app need Local Network approval for loopback? | **No** for loopback: the interop tests (transfers both ways and pairing on 127.0.0.1) ran without a prompt. |
 
@@ -85,14 +94,22 @@
   - fixed-size code digits;
   - small hit areas;
   - text clipped at large sizes.
-- Interop (opt-in): `e2e interop::apple::apple_{ios_sim,macos}_{app_sends_to_cli_after_code,cli_sends_to_app_after_code,pairing_codes_match}`, plus `apple_macos_bonjour_*`.
+- Interop (opt-in): `e2e interop::apple::apple_{ios_sim,macos}_{app_sends_to_cli_after_code,cli_sends_to_app_after_code,pairing_codes_match}`, plus `apple_macos_bonjour_*`, and on a real iPhone or iPad over Wi-Fi the same three plus `apple_ios_device_bonjour_*` (`DROPUMI_TEST_APPLE_DEVICE`).
+- On real devices (2026-10-18, [run 2026-10-18-01](../device-tests/runs/2026-10-18-01.md)): `TestHostTests` (6) and `UIStateTests` (15) on an iPhone 15; `DropumiMacTests` (7) and `MacUIStateTests` (15) on the Mac. These runs found and we fixed: no notice when the core refused a device it could not name; the Mac's "…" menus offered VoiceOver no Open Menu action.
+- Pairing screen (2026-10-21):
+  - package tests on a fake core that pairs like the real one, with no sleeps: `PairingClassifierTests` and `PairingFlowTests`;
+  - UI state tests (fake core) for the pairing screen and its entry points in `UIStateTests` and `MacUIStateTests`;
+  - interop (opt-in): `apple_{macos,ios_sim,ios_device}_cli_pairs_with_waiting_app`, where the app waits on its pairing screen and the CLI pairs with the address it shows;
+  - by hand: PAIR-1 to PAIR-5 in [`TEMPLATE.md`](../device-tests/TEMPLATE.md).
+  - results: recorded in `docs/testing.md` and the device-test runs once they have run; none are claimed here.
 
 **Status**
 - Package, app-hosted and iOS UI state tests: Automated test passed (iOS 27.0 simulator and macOS 27.0.1 arm64, local run).
 - Interop with the CLI over loopback: Automated test passed (6 tests: iOS 27.0 simulator and macOS 27, loopback, local run).
-- macOS UI state tests: Not tested (UI automation needs the user's approval on the machine).
-- Bonjour interop: Not tested.
-- Devices (iPhone 15, iPad Air 5, the Mac on a LAN): Not tested (device matrix pending).
+- iPhone 15 (iOS 27.0.1): hosted and UI state tests, and the app's core against the CLI over Wi-Fi (5 tests): Automated test passed (real device, local run, 2026-10-18).
+- macOS UI state tests (15): Automated test passed (macOS 27.0.1 arm64, local run, 2026-10-18).
+- Bonjour interop: Automated test passed (the sandboxed Mac app and an iPhone 15, each against the CLI, local run, 2026-10-18).
+- Device matrix (iPhone 15, iPad Air 5, the Mac on a LAN, by hand): Not tested.
 - CI job `apple (app)`: Not tested (pending CI; fails loudly without Xcode 27, gate G5).
 
 **Privacy manifests**
@@ -121,6 +138,12 @@
 - On iPhone and iPad, receiving needs Dropumi to be open.
 - macOS 26 and later may reshape icons that do not follow the new icon format. The Mac icon follows the classic grid and is listed for design review.
 - Developer ID notarization, Keychain storage, and Mac share or Services integrations are not done (later milestones).
+- **Pairing screen:**
+  - A device on the pairing screen receives no files: the window pauses the receiver until the screen is left.
+  - Any connection to the window uses it up, also one that does not pair (R13). Someone must then tap Start again.
+  - The list cannot show which device is ready, because discovery has no such flag. A tap on a device that is not ready gets "“…” isn't waiting to pair".
+  - If both people tap Pair at once, each closes its own window before asking, so both read "isn't waiting to pair" and get ready again. The note asks that only one of them taps.
+  - Android phones are not listed on this screen and are paired by address. The Android app gets the same design in its own milestone.
 
 ## Alternatives considered
 
@@ -129,3 +152,8 @@
 - **Network framework (`NWListener` service, `NWBrowser`) for discovery:** cannot set the SRV host, so it would publish the system host name.
 - **Waiting for the registration result:** blocked the receiver for up to 5 s and dropped the advertisement on first launch.
 - **Running the core in the Share Extension:** memory limits, and a lock held in the shared container can get a suspended process killed; the extension would also need the identity.
+- **Pairing with two buttons ("Wait for a device" on one device, "Pair" on the other):** the first design. People did not know who should do what, and nothing showed which device was waiting.
+- **A "ready to pair" flag in discovery:** the list could show who is ready, but it changes discovery and the TXT record, and a TXT hint is never identity. Out of scope for an app-layer change.
+- **A Bluetooth-style request (one device asks, the other just answers a prompt):** needs a core change, because a receiver refuses PAIR outside an explicit window (G4).
+- **Keeping the window open across screens:** the device would stay ready, and stop receiving, while the person does something else, without the countdown and Stop in view.
+- **Reopening the window by itself after a non-pairing connection, a few times:** a window that opens without a tap is no longer an explicit act (G4), and the person would not see that another device used it. Only Start again opens it.

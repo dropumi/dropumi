@@ -164,6 +164,7 @@ struct BannerHost: View {
         case .retryReceiving: return String(localized: "Try again")
         case .openEveryone: return String(localized: "Let everyone send for 10 minutes")
         case .openSettings: return String(localized: "Open Settings")
+        case .openPairing: return String(localized: "Pair a device")
         case nil: return nil
         }
     }
@@ -177,6 +178,8 @@ struct BannerHost: View {
             Task { await model.setVisibility(.everyone) }
         case .openSettings:
             router.tab = .settings
+        case .openPairing:
+            router.openPairing()
         }
     }
 }
@@ -184,6 +187,10 @@ struct BannerHost: View {
 /// Who may send, as the status pill and the sidebar say it.
 struct VisibilityText {
     static func label(_ model: AppModel, now: Date) -> Text {
+        // The window replaces the receiver while it is open.
+        if readyToPair(model) {
+            return Text("Ready to pair")
+        }
         guard model.receiver != nil else {
             return Text(model.visibility == .off ? "Not receiving" : "Starting…")
         }
@@ -204,6 +211,12 @@ struct VisibilityText {
         guard let until = model.receiver?.everyoneUntil else { return nil }
         return max(0, Int((Double(until) / 1000 - now.timeIntervalSince1970).rounded(.down)))
     }
+
+    /// This device's pairing window is open: it waits for a device to pair.
+    static func readyToPair(_ model: AppModel) -> Bool {
+        guard let pairing = model.pairing, case .window = pairing.role else { return false }
+        return pairing.result == nil
+    }
 }
 
 /// The status pill: who may send to this device right now.
@@ -214,7 +227,7 @@ struct VisibilityPill: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 8) {
                 Circle()
-                    .fill(model.receiver != nil ? DS.success : DS.textSecondary)
+                    .fill(dot)
                     .frame(width: 8, height: 8)
                 VisibilityText.label(model, now: context.date)
                     .font(DSFont.meta)
@@ -227,6 +240,11 @@ struct VisibilityPill: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("visibility.pill")
+    }
+
+    private var dot: Color {
+        if VisibilityText.readyToPair(model) { return DS.accent }
+        return model.receiver != nil ? DS.success : DS.textSecondary
     }
 }
 
@@ -273,4 +291,20 @@ func nearbySubtitle(_ peer: NearbyPeer) -> String {
         return String(localized: "Looks like \(alias)")
     }
     return String(localized: "Not paired")
+}
+
+extension View {
+    /// An icon-only "…" menu. On macOS a Menu with a custom label offers only
+    /// AXPress, not AXShowMenu, so VoiceOver's Open Menu has nothing to call
+    /// (the accessibility audit's "Action is missing"; macOS 27.0.1,
+    /// 2026-10-18). The button menu style with a plain button style offers
+    /// both and draws the label as it is.
+    @ViewBuilder
+    func iconMenu() -> some View {
+        #if os(macOS)
+        menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        #else
+        self
+        #endif
+    }
 }

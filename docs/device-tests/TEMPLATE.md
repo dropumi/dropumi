@@ -27,7 +27,7 @@ Use one label per row:
 - `Failed` (describe what happened);
 - `Not tested`.
 
-The core set (DISC-1, PAIR-1, TX-1, TX-3, CAN-1) runs on every pair. For each pair, write which device sent.
+The core set (DISC-1, PAIR-1, TX-1, TX-3, CAN-1) runs on every pair. For each pair, write which device sent; for PAIR rows, which device tapped Pair.
 
 | ID | Scenario | Pair (sender → receiver) | Result | Notes |
 |---|---|---|---|---|
@@ -35,8 +35,11 @@ The core set (DISC-1, PAIR-1, TX-1, TX-3, CAN-1) runs on every pair. For each pa
 | DISC-2 | A device never lists itself | | | |
 | DISC-3 | Off: the device is not listed and connections are refused | | | |
 | DISC-4 | The advertised host name is `dropumi-…`, not the device's name (`dns-sd -B _dropumi._tcp`, then `dns-sd -L <instance> _dropumi._tcp local.` on the Mac) | | | |
-| PAIR-1 | Codes match on both screens; both devices list each other as paired | | | |
-| PAIR-2 | One side taps "Codes don't match"; nothing is stored on either side | | | |
+| PAIR-1 | Both devices open Pair a device and show "Ready to pair" with a countdown; one taps Pair next to the other; codes match on both screens; both show "Paired with “…”" and list each other as paired | | | |
+| PAIR-2 | One side taps "Codes don't match": that side reads "You said the codes don't match"; the other reads "“…” didn't confirm the code" or "The other device didn't confirm the code"; nothing is stored on either side | | | |
+| PAIR-3 | Not ready: one device taps Pair next to a device that is open but not on Pair a device (receiving on). The first reads "“…” isn't waiting to pair" (never "Only paired devices") and is ready again; the other shows "A device was refused" (at most once a minute), and its "Pair a device" opens the pairing screen | | | |
+| PAIR-4 | An Android phone by address: the phone shows its address on Pair a device (in the current Android app, after Wait for a device); on the Apple device, "Not listed? Pair by address", type it; codes match on both; both list each other as paired | | | |
+| PAIR-5 | Leaving resumes receiving: with receiving on, open Pair a device ("Receiving files is paused…"), then leave by Stop, Back or (Mac) closing the window. The status no longer reads "Ready to pair", a paired device can send again, and "Receiving could not start" never appears | | | |
 | TX-1 | Paired transfer with a prompt; SHA-256 equal | | | |
 | TX-2 | Auto-accept on: no prompt; off: prompt | | | |
 | TX-3 | Everyone for 10 minutes, unverified sender: both show the same code; no pairing is created | | | |

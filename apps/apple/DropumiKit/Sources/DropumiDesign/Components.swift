@@ -335,6 +335,7 @@ public struct BannerView: View {
                         .font(DSFont.smallButton)
                         .foregroundStyle(DS.accentText)
                         .frame(minHeight: 44)
+                        .accessibilityIdentifier("banner.action")
                 }
             }
             Spacer()
@@ -404,6 +405,7 @@ public enum Icons {
     public static let close = "xmark"
     public static let failed = "xmark.circle"
     public static let partial = "exclamationmark.circle"
+    public static let clock = "clock"
 
     /// A symbol for a file name, by its type.
     public static func file(named name: String) -> String {
