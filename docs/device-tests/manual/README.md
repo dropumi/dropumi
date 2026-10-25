@@ -61,7 +61,7 @@ This guide covers the **manual** device tests that the maintainer runs by hand o
   - `scripts/device-tests/`.
 
   Build the CLI once. This guide builds it in `<APPLE worktree>`.
-- `<ANDROID worktree>` has uncommitted doc edits. Its `docs/device-tests/TEMPLATE.md` has 45 rows. It adds BAK-1, OVL-1, NSD-1, EXP-1 and INST-1, and it extends NET-5. The Apple copy has 40 rows. Use the 45-row copy.
+- `docs/device-tests/TEMPLATE.md` in `<ANDROID worktree>` (branch `feat/native-apps-android`) has 46 rows. It adds BAK-1, OVL-1, NSD-1, EXP-1 and INST-1, and it extends NET-5. The Apple copy has 41 rows. Use the 46-row copy.
 - The web pages are research for ADR-0011. They are **not** a Dropumi feature and have no template row.
   - Record their results in ADR-0011, as `poc/web/README.md` says.
   - Copy only the **Result** blocks, `results.jsonl` lines and the `run-matrix.py` summary rows. By design, these hold no addresses. Read any `errors` text first, and redact anything in it that names an address or a path.

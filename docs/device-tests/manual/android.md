@@ -9,7 +9,7 @@ No Android device run has been recorded yet (`docs/device-tests/runs/README.md`:
 Keep these four things in mind for the whole session:
 
 - **The phone only browses.** It lists the Mac app, the iPhone app and `dropumi receive`. None of them lists the phone, on any Android version, because the R21 gate's allowlist is empty (ADR-0013 D5).
-  - Every send or pairing request to the phone needs its address as "ip:port". This applies to C→A, M→A and I→A, paired or not. Read the address under Settings › This device › Address, or on the pairing window screen.
+  - Every send or pairing request to the phone needs its address as "ip:port". This applies to C→A, M→A and I→A, paired or not. Read the address under Settings › This device › Address, or on the phone's Pair a device screen.
   - Pairing only removes the code check. It does not make the phone listed or reachable, because a trust entry stores no address.
   - On the CLI, use `--to <phone address>:<port>`. In the Apple apps, use Connect by address.
 - **It receives only while Dropumi is open and on screen.** About 700 ms after the app leaves the screen (Home, lock, screen timeout), it stops accepting new connections. Transfers already running still finish.
@@ -352,7 +352,7 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
 **Paired-device menu.** Where the common PRE-6 and Clean up steps say "…", the Android app shows ⋮. TalkBack reads it as "Actions for ‹alias›" (`PairedDevicesScreen.kt:96`).
 
 **Mac and iPhone apps as peers.** They never list the phone, paired or not. For M↔A and I↔A:
-- **Pairing.** Either the phone asks from its own list (Pairing › "Pair with a nearby device"), or the phone opens "Wait for a device" and the Apple app uses Connect by address › "Pair with this address" with the address the window shows. PAIR-1 needs both.
+- **Pairing.** Both devices open Pair a device. Either the phone taps "Pair" next to the Apple app in its "Nearby devices" list, or the Apple app uses "Not listed? Pair by address" and types an address the phone's Pair a device screen shows. PAIR-1 needs both.
 - **Sending to the phone.** The Apple app always uses Connect by address with `<phone address>:<port>`, even after pairing.
 
 ### Install
@@ -370,7 +370,7 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
   **Expect:**
   - The Nearby header reads "1 device found · works without internet" (the count follows the devices).
   - The CLI's row is titled with its `Dropumi-XXXX` name. Its subtitle is "Not paired" (or "Looks like ‹alias›" once paired), with a "Send" pill.
-  - Nearby shows the card "Not listed nearby" / "Other devices can't see this phone on this Android version. They can still send to it after pairing, or by address." with "Show my address", which opens This device.
+  - Nearby shows the card "Not listed nearby" / "Other devices can't see this phone on this Android version. They can still send to it by typing its address." with "Show my address", which opens This device.
   - The Settings caption reads "Only paired devices can send. Only while Dropumi is open."
   - `discover` never lists the phone.
   - The Mac and iPhone apps never list the phone.
@@ -395,7 +395,7 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
 
   **After step 4:**
   - The pill reads "Paired devices only".
-  - The "Not receiving" card is replaced by "Not listed nearby" / "Other devices can't see this phone on this Android version. They can still send to it after pairing, or by address."
+  - The "Not receiving" card is replaced by "Not listed nearby" / "Other devices can't see this phone on this Android version. They can still send to it by typing its address."
 
   **Record:** the CLI's message and exit code (`echo $?`), without the address. Only the refused connection counts, because the phone is never listed anyway.
 - [ ] **DISC-4** Advertised host name. **Not applicable on Android today:** the app does not advertise. Use NSD-1. **Record:** `Not tested`, with the note "Not applicable: the app does not advertise (see NSD-1)".
@@ -407,12 +407,12 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
   2) Phone: Dropumi on screen, "Paired only".
   3) Mac: run `dns-sd -B _dropumi._tcp` for about 10 s, then Ctrl-C.
   4) If any instance appears, run `dns-sd -L <instance> _dropumi._tcp local.`
-  5) Phone: Settings › "Pair a device" › "Wait for a device". While "Waiting for a device · m:ss" shows, run `dns-sd -B _dropumi._tcp` again for about 10 s, then Ctrl-C. Then tap "Cancel".
+  5) Phone: Settings › "Pair a device". While "Ready to pair · m:ss" shows, run `dns-sd -B _dropumi._tcp` again for about 10 s, then Ctrl-C. Then tap "Stop".
   6) Afterwards, open the Mac app again and set the iPhone app back to "Paired only".
 
   **Expect:**
   - Steps 2 to 4: no `_dropumi._tcp` instance appears. Nearby shows the "Not listed nearby" card.
-  - Step 5: no instance appears either. In the pairing window the core asks the adapter to advertise, and the adapter must refuse while the gate is closed. The window still shows the "ip:port" address and the caption "Other devices can't see this one nearby. On the other device, choose Connect by address and type:".
+  - Step 5: no instance appears either. While the phone is ready to pair, the core asks the adapter to advertise, and the adapter must refuse while the gate is closed. The ready card still shows the caption "Not listed on the other device? There, choose Pair by address and type:" with the "ip:port" address.
   - If an instance appears in either step, first check that it is not a leftover from the Mac app, the iPhone app or a CLI: its TXT `n=` is that device's name. If it is the phone's, the R21 gate is not closing. Record Failed, with the step and whether the SRV host is `dropumi-…` or the phone's own name.
 
   **Record:** the API level, the Connectivity module version and the result of each step. Do not paste the `dns-sd` output, because it contains names and addresses.
@@ -421,16 +421,17 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
 
 - [ ] **PAIR-1 (A asks, C listens)** Codes match. Steps:
   1) Mac, tab 1: stop the DISC-1 `receive` with Ctrl-C and wait for the prompt. Then run `"$DROP" pair --listen`.
-  2) Phone: Nearby › "More" › "Pair a device" › under "Pair with a nearby device", tap "Pair" next to the CLI.
+  2) Phone: Settings › "Pair a device". Under "Nearby devices", tap "Pair" next to the CLI.
   3) Compare the codes.
   4) Answer `y` on the Mac, and tap "Codes match" on the phone.
 
   **Expect:**
-  - The phone shows "Asking ‹name›…" / "A code appears on both devices. Check that they match."
+  - The screen is headed "Pair a device" / "Open this screen on both devices. Then tap the other device on one of them.", with the ready card ("Ready to pair · m:ss", "Other devices see this one as “‹name›”.") and "How to pair" with three numbered steps.
+  - After the tap, the phone shows "Asking “‹name›”…" / "A code appears on both devices. Check that they match." with "Cancel".
   - Then a full-screen navy prompt "Pair with this device?" appears, with the fingerprint and a code shown as "NNN NNN".
   - The Mac shows `Pair with <peer line>?` / `Does the other device show NNN NNN? [y/N]` with the same code.
   - "Codes match" becomes enabled 600 ms after the prompt appears.
-  - The phone then shows "Paired — ‹title›" / "‹title› can now send to this device, and you can send to it without a code." with "Done".
+  - The phone then shows "Paired with “‹title›”" / "You can now send files to each other without a code. Each time, Dropumi checks that it's the same device." with "Done" and "Pair another device".
   - The Mac prints `Paired: Trusted "<alias>" (claims "<name>") · XXXX-…`.
   - `"$DROP" trust list` shows the device with `(sas)`.
   - Settings › "Paired devices" shows "Paired with a code · XXXX-…".
@@ -438,25 +439,24 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
   **Record:** which side asked; the labels. No fingerprints.
 - [ ] **PAIR-1 (A listens, C asks)** Codes match. Steps:
   1) Remove the earlier pairing on both sides. On the phone: "Paired devices" › ⋮ › "Remove…" › "Remove". On the Mac: `"$DROP" trust remove <FP52>`.
-  2) Phone: Settings › "Pair a device" › "Wait for a device".
-  3) Mac, tab 1, with no `receive` or `pair` running: `"$DROP" pair --to <the address the pairing window shows>`.
+  2) Phone: Settings › "Pair a device".
+  3) Mac, tab 1, with no `receive` or `pair` running: `"$DROP" pair --to <an address the phone's ready card shows>`.
   4) Confirm on both sides.
 
   **Expect:**
-  - Before step 2, the Pairing screen caption reads "For five minutes, a device can ask to pair with this one by typing its address. You both check a code."
-  - The phone shows "Waiting for a device · m:ss" (5 minutes). Then it shows "Other devices can't see this one nearby. On the other device, choose Connect by address and type:" with the "ip:port" address.
+  - The phone shows "Ready to pair · m:ss" (5 minutes), "Receiving files is paused until you leave this screen." (unless receiving is Off), and "Not listed on the other device? There, choose Pair by address and type:" with the "ip:port" addresses.
   - The same codes appear, with the same results as above.
 
   **Record:** as above.
 - [ ] **PAIR-1 (M↔A and I↔A)** Codes match, with each side waiting once. Run TX-3 on this pair first. Do it for the Mac app and for the iPhone app. Steps:
-  1) Round 1, the Apple app waits. On the Apple app: Settings › "Pair a device" › "Wait for a device". On the phone: Settings › "Pair a device" › under "Pair with a nearby device", tap "Pair" next to the Apple app. Compare the codes, then tap "Codes match" on both.
+  1) Round 1, the phone asks. Open Settings › "Pair a device" on both devices. On the phone, under "Nearby devices", tap "Pair" next to the Apple app. Compare the codes, then tap "Codes match" on both.
   2) Remove the pairing on both sides. On the phone: "Paired devices" › ⋮ › "Remove…" › "Remove". On the Apple app: Settings › "Paired devices" › the "…" menu (VoiceOver: "Actions") › "Remove…" › "Remove".
-  3) Round 2, the phone waits. On the phone: Settings › "Pair a device" › "Wait for a device". On the Apple app: Connect by address. Set "Address" to the address the phone's window shows, then tap "Pair with this address". Compare the codes, then tap "Codes match" on both.
+  3) Round 2, the Apple app asks. Open Settings › "Pair a device" on both devices. The Apple app does not list the phone: tap "Not listed? Pair by address", type an address the phone's ready card shows, and tap "Pair". Compare the codes, then tap "Codes match" on both.
 
   **Expect:**
-  - In round 1 the Apple app shows "Waiting for a device · m:ss". In round 2 the phone shows "Waiting for a device · m:ss" with its "ip:port" address.
+  - In both rounds both devices show "Ready to pair · m:ss" before the tap. The phone's ready card shows its "ip:port" addresses.
   - Both screens show the same "NNN NNN" code.
-  - The phone shows "Paired — ‹title›". The Apple app shows "Paired" / "‹title› can now send to this device, and you can send to it without a code."
+  - Both devices show "Paired with “‹title›”" / "You can now send files to each other without a code. Each time, Dropumi checks that it's the same device."
   - Each device lists the other under Settings › "Paired devices". On the phone the row reads "Paired with a code · XXXX-…".
 
   **Record:** both rounds for each pair, and which device asked in each. No fingerprints.
@@ -465,13 +465,14 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
   2) On the phone, tap "Codes don't match".
   3) Repeat, this time answering `n` on the Mac.
 
-  **Expect, in both rounds:**
-  - The phone shows "Pairing declined" / "The other device did not confirm the code. Nothing was saved." with "Done". The core ends the pairing as rejected, whichever side said no.
-  - The CLI ends with `pairing_rejected`, exit 6.
+  **Expect:**
+  - **Round 1 (the phone said no):** "You said the codes don't match" / "Nothing was saved. If the codes were different, another device may have answered. Pair only when both devices are in front of you." with "Done" and "Try again".
+  - **Round 2 (the Mac said no):** "“‹name›” didn't confirm the code" / "It said the codes don't match, stopped, or didn't answer in time. Nothing was saved." with "Try again" and "Done".
+  - In both rounds the CLI ends with `pairing_rejected`, exit 6.
   - "Paired devices" is unchanged.
   - `"$DROP" trust list` prints `No trusted devices.`
 
-  **Record:** both rounds. Also note a UX finding: in round 1, the text blames the other device although the phone declined.
+  **Record:** both rounds, with the result card's title.
 
 ### Transfers
 
@@ -571,7 +572,7 @@ Record each row as **Manual device test passed**, **Failed** (say what happened)
   - **Step 2:**
     - No prompt appears on the phone.
     - The CLI fails with `not_authorized`, exit 6 (docs/cli.md: "The other device refused this device").
-    - The phone shows the banner "A device was refused" / "A device on this network tried to connect and was turned away. To pair with it, choose Wait for a device under Pair a device first."
+    - The phone shows the banner "A device was refused" / "A device on this network tried to connect and was turned away. If it was trying to pair, open Pair a device on both devices." with a "Pair a device" button, which opens the Pair a device screen.
     - This is the no-peer variant, because the refusal happens during the handshake. The other variant, "A device that isn't paired tried to send" / "Pair with it, or let everyone send for 10 minutes.", is not expected here.
   - **Step 3:**
     - The CLI shows no offer.
