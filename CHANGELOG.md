@@ -37,7 +37,7 @@ Milestone 2a adds `dropumi-ffi`, the bridge the native apps use, and the core ch
   - Entry points: Nearby, Settings, Paired devices (toolbar and empty state), Send for an unpaired device, the refused-device notice and, on the Mac, Pair a Device… (⇧⌘P). Connect by address has a pair mode.
 - **Refused devices.** When the receiver turns a device away, the app says so, at most once a minute: "A device that isn't paired tried to send" (with a shortcut to Everyone) when the device is known, otherwise "A device was refused", with a "Pair a device" button. That one is not shown while the pairing screen is open or this device is ready to pair.
 - **Share Extension.** It hands shared files to the app through an App Group inbox: staged, listed in a manifest, renamed into place. It never loads the core.
-- **Bonjour.** Discovery advertises a random host name (proxy registration), never the system's, and does not hold up the receiver while the Local Network question is open.
+- **Bonjour.** Discovery advertises a random host name (proxy registration), never the system's, and does not hold up the receiver while the Local Network question is open. A device is resolved on every network interface it is seen on, so a Mac with virtual-machine bridges no longer ends up with only an address that refuses connections.
 - **Mac.**
   - A menu-bar receiver keeps working when the window is closed; "Quit Dropumi completely" stops it.
   - Notifications have no Accept action.

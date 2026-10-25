@@ -58,6 +58,7 @@
   - The Bonjour adapter registers a proxy: A records for a random host plus the service on that host. The SRV target is therefore never the system's host name (gate G2, `discovery.md` §3, §7).
   - Registration does not wait for DNS-SD's answer. Until the user answers the Local Network question, DNS-SD does not answer, and waiting held up the receiver and dropped the advertisement.
   - Browsing runs only while a device list is visible.
+  - A device is resolved on every network interface it is seen on, and its addresses are merged; it is lost only when the last interface loses it. Resolving on the first interface alone could leave only an address that refuses connections (a Mac with virtual-machine bridges, 2026-10-25).
 - **Background (D5).**
   - **iPhone and iPad** receive only while Dropumi is open. In the background the receiver stops accepting and running transfers may finish. A transfer the user started asks for `BGContinuedProcessingTask` time; if iOS ends that time, the transfer is cancelled cleanly.
   - **Mac.** Closing the window keeps the menu-bar receiver running (the Dock icon goes away). "Quit Dropumi completely" stops receiving and withdraws the advertisement. "Open at login" uses `SMAppService` and is off by default. Notifications are asked for in context; an offer notification has no Accept action.
